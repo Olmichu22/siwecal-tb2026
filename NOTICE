@@ -1,0 +1,11 @@
+siwecal-tb2026
+Copyright 2026 Olmichu22
+
+Licensed under the Apache License, Version 2.0 (see the LICENSE file).
+
+This product includes software developed as part of the SiWECAL
+testbeam analysis effort within the key4hep ecosystem.
+
+Portions of this project are derived from or interoperate with:
+  - SiWECAL-TB-analysis (CALICE/SiW-ECAL testbeam analysis)
+  - key4hep (https://key4hep.github.io/)
