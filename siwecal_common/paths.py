@@ -39,6 +39,7 @@ _DEFAULTS = {
     "configs_dir": "./configs/data",
     "output_dir": "./validation_output",
     "cache_dir": None,
+    "pid_dir": None,
 }
 
 
@@ -58,7 +59,7 @@ def _load() -> dict:
             document = yaml.safe_load(handle) or {}
     merged = dict(_DEFAULTS)
     merged.update({k: v for k, v in document.items() if v is not None
-                   or k == "cache_dir"})
+                   or k in ("cache_dir", "pid_dir")})
     return merged
 
 
@@ -144,4 +145,11 @@ def cache_dir() -> Optional[str]:
     """Directory for ``*.valcache.root`` files, or ``None`` to keep them next to
     the input (the default behaviour)."""
     value = _get("cache_dir")
+    return resolve(str(value)) if value else None
+
+
+def pid_dir() -> Optional[str]:
+    """Directory for the Gaudi ``ecal_pid_*.root`` (EDM4hep) outputs, or ``None``
+    to keep them next to each input ``ecal_<run>.root`` (the default)."""
+    value = _get("pid_dir")
     return resolve(str(value)) if value else None

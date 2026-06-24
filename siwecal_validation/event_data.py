@@ -278,6 +278,45 @@ class EventData:
                 print(f"WARNING: could not write metrics cache {cache}: {error}")
         return data
 
+    # ----------------------------------------------- loading (EDM4hep) ------
+    #: EventData fields stored as 2-D per-layer profiles (length ``n_layers``).
+    _PER_LAYER_FIELDS = ("hits_per_layer", "energy_per_layer", "weighte_per_layer")
+
+    @classmethod
+    def from_edm4hep(cls, path: str, label: str, config) -> "EventData":
+        """Build an :class:`EventData` from a ``k4SiWEcalReco`` EDM4hep file.
+
+        The per-event discrimination variables are read straight from each
+        ``Cluster``'s ``shapeParameters`` (computed in C++ by
+        ``EcalPidTransformer``); nothing is recomputed here. Events with no hits
+        or non-positive energy are dropped, matching :meth:`from_root`.
+        """
+        from siwecal_common.edm4hep_pid import PidFileReader
+
+        reader = PidFileReader(path)
+        cols = reader.scalar_columns()
+        ids = reader.identifiers()
+        n_layers = config.n_layers
+
+        valid = (ids["nhit_chan"] > 0) & (cols["energy"] > 0)
+
+        scalar_fields = [f.name for f in fields(cls)
+                         if f.name != "label" and f.name not in cls._PER_LAYER_FIELDS]
+        arrays = {}
+        for name in scalar_fields:
+            if name not in cols:
+                raise RuntimeError(
+                    f"Variable '{name}' not found in {path}. Available shape "
+                    f"parameters: {reader.shape_names[:5]}...")
+            values = cols[name][valid]
+            arrays[name] = values.astype(bool) if name == "is_shower" else values.astype(float)
+
+        for name in cls._PER_LAYER_FIELDS:
+            profile = np.stack([cols[f"{name}_{i}"] for i in range(n_layers)], axis=1)
+            arrays[name] = profile[valid].astype(float)
+
+        return cls(label=label, **arrays)
+
     # ----------------------------------------------------------- filtering --
     def select(self, cutset) -> "EventData":
         """Return a new EventData containing only events passing ``cutset``.

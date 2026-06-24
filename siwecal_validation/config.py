@@ -19,7 +19,7 @@ from siwecal_common import paths
 # nothing is hard-coded. BASE_PATH is the primary data root, but inputs are
 # resolved against all data roots via paths.resolve_input (see cli/runner).
 BASE_PATH = paths.data_dir()
-DEFAULT_CONFIG = paths.config_file("data_reference.yml")
+DEFAULT_CONFIG = paths.config_file("data_reference_base_event_data.yml")
 # Plots/results are written here by default, OUTSIDE the event directories.
 DEFAULT_OUTPUT_DIR = paths.output_dir()
 DEFAULT_RUN = "TB2026CERN_run_000013"
