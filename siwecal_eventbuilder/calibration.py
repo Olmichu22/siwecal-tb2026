@@ -32,11 +32,13 @@ class Calibration:
     """Holds pedestal and MIP look-up tables and applies them to channels."""
 
     def __init__(self, config: BuilderConfig, pedestal_map=None,
-                 mip_map=None, default_mip: float = 1.0):
+                 mip_map=None, default_mip: float = 1.0,
+                 masked_channels=None):
         self._config = config
         self._pedestal_map = pedestal_map      # None => raw mode
         self._mip_map = mip_map                # None => raw mode
         self._default_mip = default_mip
+        self._masked_channels = masked_channels or set()
 
     # ----------------------------------------------------------- accessors ---
 
@@ -58,6 +60,10 @@ class Calibration:
             return 1.0
         return self._mip_map.get((slab_id, chip_id, channel), self._default_mip)
 
+    def is_masked(self, slab_id: int, chip_id: int, channel: int) -> bool:
+        """True for channels with mpv=0 in the MIP file (no calibration data)."""
+        return (slab_id, chip_id, channel) in self._masked_channels
+
     # ----------------------------------------------------- constructors -----
 
     @classmethod
@@ -70,8 +76,9 @@ class Calibration:
                    pedestal_path: str, mip_path: str) -> "Calibration":
         """Load pedestals and MIPs from the standard text tables."""
         pedestal_map = cls._read_pedestal_file(config, pedestal_path)
-        mip_map, default_mip = cls._read_mip_file(config, mip_path)
-        return cls(config, pedestal_map, mip_map, default_mip)
+        mip_map, default_mip, masked = cls._read_mip_file(config, mip_path)
+        return cls(config, pedestal_map, mip_map, default_mip,
+                   masked_channels=masked)
 
     @classmethod
     def from_data(cls, config: BuilderConfig, geometry: DetectorGeometry,
@@ -104,8 +111,13 @@ class Calibration:
 
     @staticmethod
     def _read_mip_file(config: BuilderConfig, path: str):
-        """Parse ``layer chip channel mpv ...``; the MPV is the MIP peak."""
+        """Parse ``layer chip channel mpv ...``; the MPV is the MIP peak.
+
+        Channels with mpv=0 are collected as masked: their hits will have
+        energy_mip forced to 0 instead of using the fallback median.
+        """
         mip_map = {}
+        masked = set()
         with open(path) as handle:
             for line in handle:
                 if line.startswith("#") or not line.strip():
@@ -115,11 +127,15 @@ class Calibration:
                 mpv = float(items[3])
                 if mpv > 0:
                     mip_map[(layer, chip, channel)] = mpv
+                else:
+                    masked.add((layer, chip, channel))
         default_mip = float(np.median(list(mip_map.values()))) if mip_map \
             else config.default_mip_fallback
         print(f"[MIP] Loaded {len(mip_map)} entries from {path}")
         print(f"[MIP] Default MIP (median MPV): {default_mip:.1f} ADC counts")
-        return mip_map, default_mip
+        if masked:
+            print(f"[MIP] {len(masked)} masked channels (mpv=0, energy forced to 0)")
+        return mip_map, default_mip, masked
 
     # --------------------------------------------- compute-from-data --------
 

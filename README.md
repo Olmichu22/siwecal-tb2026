@@ -47,6 +47,35 @@ the viewer reuses geometry from the builder and metrics from the validation. All
 three resolve paths through `siwecal_common.paths`, so **no module hard-codes an
 absolute `/eos` path** — change `settings.yml` and everything follows.
 
+### EDM4hep pipeline (Gaudi)
+
+`k4SiWEcalReco` is an optional **Gaudi/k4FWCore** stage that converts the `ecal`
+tree to EDM4hep, computing the particle-ID shower variables in C++ (a
+parity-validated port of `siwecal_validation.metrics`). Output: one `Cluster`
+per event (variables in `shapeParameters`) + `CalorimeterHit` collections.
+`siwecal_validation` and `event_viewer` auto-detect EDM4hep input and read the
+metrics straight from the file (no recomputation).
+
+```bash
+source /cvmfs/sw.hsf.org/key4hep/setup.sh -r 2026-04-08
+cmake -S k4SiWEcalReco -B k4SiWEcalReco/build && cmake --build k4SiWEcalReco/build -j4
+export LD_LIBRARY_PATH=$PWD/k4SiWEcalReco/build:$LD_LIBRARY_PATH
+export PYTHONPATH=$PWD/k4SiWEcalReco/build/genConfDir:$PWD:$PYTHONPATH
+
+# one file -> EDM4hep PID file
+ECAL_FILE=<data>/ecal_<run>.root ECAL_PID_OUT=ecal_pid.root \
+    k4run k4SiWEcalReco/options/run_pid.py
+
+# or batch, same input options as siwecal_validation (--run/--file/--all/--point/--cfg)
+python k4SiWEcalReco/run_pid_batch.py --all   --outdir /tmp/pid
+python k4SiWEcalReco/run_pid_batch.py --run TB2026CERN_run_000007 --outdir /tmp/pid
+
+# validation / viewer then consume the EDM4hep file directly
+python -m siwecal_validation --file ecal_pid.root --run <label>
+```
+
+See [`k4SiWEcalReco/README.md`](k4SiWEcalReco/README.md) for details.
+
 ## The software stack
 
 - **[key4hep](https://key4hep.github.io/)** from CVMFS provides the scientific

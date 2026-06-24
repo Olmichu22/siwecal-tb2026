@@ -79,6 +79,10 @@ class HitCollector:
         mip = self._calibration.mip(slab_id, chip_id, channel)
 
         adc_high_pedsub = adc_high - pedestal
+        if self._calibration.is_masked(slab_id, chip_id, channel):
+            energy_mip = 0.0
+        else:
+            energy_mip = adc_high_pedsub / mip if mip > 0 else 0.0
         # Transverse position from the pad map (keyed by the *geometric* chip
         # index, 0..15); longitudinal position is fixed by the slab.
         if self._pad_map is not None:
@@ -92,7 +96,7 @@ class HitCollector:
             sca=sca,
             adc_high_pedsub=adc_high_pedsub,
             adc_low_pedsub=float(adc_low - pedestal),
-            energy_mip=adc_high_pedsub / mip if mip > 0 else 0.0,
+            energy_mip=energy_mip,
             x=x,
             y=y,
             z=self._geometry.slab_z(slab),

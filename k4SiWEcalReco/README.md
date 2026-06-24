@@ -22,9 +22,15 @@ source sets `EvtMax = GetEntries()` and serves one event per call.
 ## Components
 
 - **`EcalToEDM4hep`** (`src/components/EcalToEDM4hep.cpp`) — reads the (non-podio)
-  `ecal` tree with `TTreeReader` and emits, per event, a `CalorimeterHitCollection`
-  (`energy = hit_energy`, `position = (hit_x, hit_y, hit_z)`, `cellID` encoding
-  `slab/chip/channel/sca`) and an `EventHeaderCollection` (run, event, bcid, spill).
+  `ecal` tree with `TTreeReader` and emits, per event:
+  - `CalorimeterHitCollection ECalHits` — `energy = hit_energy`,
+    `position = (hit_x, hit_y, hit_z)`, `cellID` encoding `slab/chip/channel/sca`,
+    and `type = slab` so the layer is readable natively (no bitfield decode).
+  - `EventHeaderCollection EventHeader` — run, event (+ bcid in `timeStamp`,
+    spill in `weight`).
+  - Parallel `UserDataCollection`s (same order as the hits) for the per-hit
+    quantities `CalorimeterHit` has no native field for:
+    `ECalHitChip/Chan/Sca` (int) and `ECalHitHG/LG` (float).
 - **`EcalPidTransformer`** (`src/components/EcalPidTransformer.cpp`) — one input
   `CalorimeterHitCollection` → one `Cluster`. The physics lives in
   `include/k4SiWEcalReco/EcalShowerVars.h` (a C++ port of

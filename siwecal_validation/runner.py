@@ -97,9 +97,7 @@ class ValidationRunner:
 
         cutset = cutset or CutSet()
         print(f"\nReading: {events_path}")
-        data = EventData.from_root(events_path, label, self._config,
-                                   create_tree=self._create_tree,
-                                   cache_dir=self._cache_dir)
+        data = EventData.from_edm4hep(events_path, label, self._config)
         n_total = len(data)
         print(f"Valid events: {n_total}")
 
@@ -108,7 +106,8 @@ class ValidationRunner:
         if not cutset.is_empty:
             print(f"Events after cuts ({cutset.label.strip()}): {n_selected}")
         if self._save_tree:
-            self._write_cut_tree(events_path, label, data, cutset)
+            print("WARNING: --save-tree is not supported for EDM4hep input "
+                  "(metrics live in the Cluster); skipping.")
         if n_selected == 0:
             print("WARNING: no events pass the cuts; skipping plots.")
             self._results.add(label=label, energy_gev=energy_gev,

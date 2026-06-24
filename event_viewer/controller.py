@@ -20,7 +20,7 @@ import pandas as pd
 from .analysis.clustering import UNCLUSTERED, ClusteringService
 from .analysis.cuts import CutModel
 from .config import ViewerConfig
-from .io import EventFileReader
+from .io import make_reader
 from .model import DetectorModel, Event, EventDataset
 from .viz import DetectorScene3D, DistributionPlots, LayerGrid2D
 
@@ -76,8 +76,7 @@ class ViewerController:
     def dataset(self, path: str) -> EventDataset:
         """Return (and cache) the :class:`EventDataset` for ``path``."""
         if path not in self._datasets:
-            reader = EventFileReader(path, self.config.tree_name,
-                                     self.config.n_layers)
+            reader = make_reader(path, self.config.tree_name, self.config.n_layers)
             self._datasets[path] = EventDataset(reader, self.detector)
         return self._datasets[path]
 
