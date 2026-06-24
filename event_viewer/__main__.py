@@ -26,6 +26,10 @@ def main() -> None:
                         help="Directory scanned for the file dropdown (default: <project>/data)")
     parser.add_argument("--host", default="127.0.0.1")
     parser.add_argument("--port", type=int, default=8050)
+    parser.add_argument("--max-recompute-events", type=int, default=None,
+                        help="Disable the interactive MIP cut for files without "
+                             "pre-computed metrics above this many events "
+                             "(default: 10000).")
     parser.add_argument("--debug", action="store_true",
                         help="Run Dash in debug mode (hot reload).")
     args = parser.parse_args()
@@ -33,6 +37,8 @@ def main() -> None:
     config = ViewerConfig()
     if args.data_dir:
         config.data_dir = args.data_dir
+    if args.max_recompute_events is not None:
+        config.max_recompute_events = args.max_recompute_events
     config.host, config.port = args.host, args.port
 
     app = build_app(config, initial_path=args.file)

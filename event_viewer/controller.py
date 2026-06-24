@@ -15,6 +15,7 @@ import os
 from typing import Dict, List, Optional
 
 import numpy as np
+import pandas as pd
 
 from .analysis.clustering import UNCLUSTERED, ClusteringService
 from .analysis.cuts import CutModel
@@ -91,17 +92,31 @@ class ViewerController:
         """
         if threshold <= 0.0:
             return self.dataset(path).table
+        key = (path, round(float(threshold), 4))
+        if key in self._table_cache:
+            return self._table_cache[key]
         reader = self.dataset(path).reader
         if reader.has_mip_thresholds:
-            return reader.event_table(float(threshold))
-        # Fallback: in-memory recompute (slow; only for ecal files without valcache).
-        key = (path, round(float(threshold), 4))
-        if key not in self._table_cache:
+            df = reader.event_table(float(threshold))
+        else:
+            # Fallback: in-memory recompute (slow; only for ecal files with no
+            # pre-computed branches).
             from .analysis.recompute import recompute_all_metrics
-            self._table_cache[key] = recompute_all_metrics(
+            df = recompute_all_metrics(
                 reader, self.detector.w_thickness_mm,
                 float(threshold), self.config.n_layers)
-        return self._table_cache[key]
+        # Only a subset of columns is recomputed per threshold; the variable
+        # menus, however, are built from the full threshold-0 table. Carry over
+        # any base columns the threshold table lacks (e.g. raw branches like
+        # ``nhit_slab``) so every selectable variable stays plottable. Rows are
+        # positionally aligned (one per event, same order/length).
+        base = self.dataset(path).table
+        missing = [c for c in base.columns if c not in df.columns]
+        if missing:
+            df = pd.concat([df.reset_index(drop=True),
+                            base[missing].reset_index(drop=True)], axis=1)
+        self._table_cache[key] = df
+        return df
 
     # ------------------------------------------------------- event figures --
     def event_figures(self, path: str, index: int, color_clip: bool,

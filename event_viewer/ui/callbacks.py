@@ -46,6 +46,8 @@ def register_callbacks(app, controller) -> None:
         Output("scatter-x", "options"), Output("scatter-x", "value"),
         Output("scatter-y", "options"), Output("scatter-y", "value"),
         Output("store-cluster", "data", allow_duplicate=True),
+        Output("hit-energy-slider", "disabled"),
+        Output("hit-energy-slider", "value"),
         Input("load-btn", "n_clicks"),
         Input("file-dropdown", "value"),
         State("file-path", "value"),
@@ -60,13 +62,13 @@ def register_callbacks(app, controller) -> None:
         empty = []
         if not path:
             return (None, "Select a .root file", empty, None, empty, [],
-                    empty, [], empty, None, empty, None, None)
+                    empty, [], empty, None, empty, None, None, True, 0)
         try:
             ds = controller.dataset(path)
         except Exception as error:  # noqa: BLE001 - surface any I/O failure
             return (no_update, f"Error opening: {error}", empty, no_update,
                     empty, no_update, empty, no_update, empty, no_update,
-                    empty, no_update, no_update)
+                    empty, no_update, no_update, no_update, no_update)
 
         cols = ds.feature_columns()
         opts = [{"label": c, "value": c} for c in cols]
@@ -75,20 +77,28 @@ def register_callbacks(app, controller) -> None:
         y0 = cols[1] if len(cols) > 1 else x0
         flag = "with metrics" if ds.has_metrics \
             else "WITHOUT metrics (basic quantities only)"
+        # Block the interactive MIP cut when it would fall back to the slow
+        # in-memory recompute (no pre-computed branches) on a large file.
+        max_events = controller.config.max_recompute_events
+        block_cut = (not ds.reader.has_mip_thresholds) and ds.n_events > max_events
+        if block_cut:
+            flag += (f"; MIP cut disabled (>{max_events} events, no precomputed "
+                     f"metrics — run validation to build a valcache)")
         status = f"{os.path.basename(path)} — {ds.n_events} events — {flag}"
+        slider_value = 0 if block_cut else no_update
         return (path, status, opts, dist_default, opts, [], opts, [],
-                opts, x0, opts, y0, None)
+                opts, x0, opts, y0, None, block_cut, slider_value)
 
     # -------------------------------------------------- hit-energy threshold --
     @app.callback(
         Output("store-hit-threshold", "data"),
-        Output("hit-threshold-label", "children"),
         Input("hit-energy-slider", "value"),
     )
     def update_hit_threshold(value):
-        thr = float(value or 0.0)
-        label = f"(recalculando métricas…)" if thr > 0 else ""
-        return thr, label
+        # The "Computing metrics…" note is shown by the dcc.Loading spinners that
+        # wrap the heavy graphs, so it appears only while the figures are being
+        # (re)built and clears automatically when they finish.
+        return float(value or 0.0)
 
     # ----------------------------------------------------- dynamic cut UI --
     @app.callback(
@@ -347,3 +357,31 @@ def register_callbacks(app, controller) -> None:
             passing, labels = cluster["passing"], cluster["labels"]
         return controller.cluster_scatter(
             path, xvar, yvar, passing, labels, CutModel.from_store(cuts), thr)
+
+    # ---------------------------------------------- "computing" status badge --
+    # Show the badge the instant the MIP slider changes (clientside = no server
+    # round-trip), then hide it as soon as the threshold-dependent figures have
+    # been rebuilt. This guarantees the note is visible for the whole compute
+    # cycle, even when it is fast (pre-computed valcache branches).
+    app.clientside_callback(
+        """
+        function(value) {
+            var on = value && value > 0;
+            return {display: on ? 'inline-block' : 'none',
+                    fontSize: '12px', fontWeight: '600', color: '#b8860b',
+                    marginLeft: '8px', whiteSpace: 'nowrap'};
+        }
+        """,
+        Output("compute-status", "style"),
+        Input("hit-energy-slider", "value"),
+    )
+
+    app.clientside_callback(
+        "function(){ return {display: 'none'}; }",
+        Output("compute-status", "style", allow_duplicate=True),
+        Input("scene3d", "figure"),
+        Input("layers2d", "figure"),
+        Input("dist-hist", "figure"),
+        Input("cluster-scatter", "figure"),
+        prevent_initial_call=True,
+    )

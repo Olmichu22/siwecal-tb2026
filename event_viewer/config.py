@@ -55,6 +55,12 @@ class ViewerConfig:
     n_layers: int = 15
     x0_mm: float = 3.5            # tungsten radiation length (for weighted energy)
 
+    # Interactive MIP cut: when a file has no pre-computed MIP-cut branches the
+    # slider falls back to an in-memory per-event recompute, which is too slow
+    # for large runs. The slider is disabled above this many events (generate a
+    # valcache with ``siwecal_validation`` to re-enable the cut on big files).
+    max_recompute_events: int = 10000
+
     # Display.
     colorscale: str = "Viridis"
     host: str = "127.0.0.1"

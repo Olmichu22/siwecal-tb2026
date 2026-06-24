@@ -65,6 +65,33 @@ computes only the cheap derivable quantities (`nhit`, `sum_energy`,
 the status bar flags the file as "SIN métricas". The event and layer views are
 unaffected.
 
+## MIP cut (hit-energy threshold)
+
+The Event tab has a **MIP cut** slider (`hit_energy ≥ 0 / 0.5 / 1.0 MIP`) that
+filters hits below the threshold and recomputes the per-event metrics
+accordingly.
+
+- **Files with a valcache** carry pre-computed branches (`mip05_*`, `mip1_*`)
+  written by `siwecal_validation`, so changing the cut is an instant branch
+  read.
+- **Plain `ecal_*.root` files** have no such branches, so the slider falls back
+  to an in-memory recompute that loops over every event in Python. This is fine
+  for small files but prohibitively slow on large runs.
+
+To avoid the viewer hanging, the MIP cut slider is **disabled** when a file both
+(1) lacks pre-computed MIP branches **and** (2) has more than
+`max_recompute_events` events (default **10000**). The status bar then notes
+*"MIP cut disabled"*. Generate a valcache for the run (run `siwecal_validation`
+on it) to re-enable the cut on large files.
+
+The limit is configurable:
+
+```bash
+python -m event_viewer --max-recompute-events 50000   # raise (or lower) the cap
+```
+
+or set `max_recompute_events` on `ViewerConfig`.
+
 ## Architecture (OOP)
 
 ```

@@ -15,6 +15,18 @@ from dash import dash_table, dcc, html
 from ..analysis.clustering import ALGORITHMS
 
 
+def _loading(*children):
+    """Wrap heavy graphs so a spinner overlays them *only while* the callbacks
+    that build them are running (e.g. live metric recompute), dimming the old
+    figure and clearing automatically when they finish. The textual
+    ``compute-status`` badge next to the slider complements this."""
+    return dcc.Loading(
+        type="circle",
+        overlay_style={"visibility": "visible", "opacity": 0.5},
+        children=list(children),
+    )
+
+
 def _file_bar(controller, initial_path: Optional[str]):
     options = [{"label": _short(p), "value": p} for p in controller.list_files()]
     return html.Div(className="file-bar", children=[
@@ -60,11 +72,13 @@ def _event_tab():
                             updatemode="mouseup",
                         ),
                     ]),
-                    html.Span(id="hit-threshold-label",
-                              style={"fontSize": "12px", "color": "#888"}),
+                    html.Span(id="compute-status", children="⏳ Computing metrics…",
+                              style={"display": "none"}),
                 ]),
-                dcc.Graph(id="scene3d", style={"height": "460px"}),
-                dcc.Graph(id="layers2d", style={"height": "640px"}),
+                _loading(
+                    dcc.Graph(id="scene3d", style={"height": "460px"}),
+                    dcc.Graph(id="layers2d", style={"height": "640px"}),
+                ),
             ]),
             html.Div(style={"flex": "1", "minWidth": "260px"}, children=[
                 html.H4("Event summary"),
@@ -101,7 +115,7 @@ def _distributions_tab():
                             {"label": " split by cluster", "value": "stack"}],
                         value=["stack"], style={"display": "inline-block"}),
                 ]),
-                dcc.Graph(id="dist-hist", style={"height": "360px"}),
+                _loading(dcc.Graph(id="dist-hist", style={"height": "360px"})),
                 html.H4("Dynamic cuts"),
                 dcc.Dropdown(id="cut-vars", multi=True,
                              placeholder="variables to cut on"),
@@ -144,13 +158,15 @@ def _distributions_tab():
                     html.Span("y:"),
                     dcc.Dropdown(id="scatter-y", style={"width": "200px"}),
                 ]),
-                dcc.Graph(id="cluster-scatter", style={"height": "460px"}),
+                _loading(dcc.Graph(id="cluster-scatter",
+                                   style={"height": "460px"})),
             ]),
         ]),
         # Full-width row of accumulated 3-D scenes, one per cluster.
         html.H4("Cluster examples (accumulated hits)"),
-        html.Div(id="cluster-examples",
-                 style={"display": "flex", "flexWrap": "wrap", "gap": "12px"}),
+        _loading(html.Div(id="cluster-examples",
+                          style={"display": "flex", "flexWrap": "wrap",
+                                 "gap": "12px"})),
       ]),
     ])
 
