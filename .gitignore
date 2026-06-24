@@ -32,3 +32,6 @@ _logs/
 .vscode/
 .idea/
 .claude/
+
+# build artifacts
+k4SiWEcalReco/build/
