@@ -10,6 +10,8 @@ Preserves the original ``plot_val_plots.py`` flags:
     --out DIR            output base (external; default: validation_output)
     --grid-only          produce only the combined grid PNG (no individuals)
     --no-grid            produce only the individual PNGs (no combined grid)
+    --no-plots           produce no plots at all, only the ROOT file(s)
+                         (valcache / --save-tree); for the event_viewer
     --nhit-min/max, --energy-min/max, --rate-min/max   general selection cuts
 
 Cache / augmented-tree flags:
@@ -64,6 +66,10 @@ def parse_args(argv=None):
                       help="Only the combined grid PNG (skip individual plots)")
     grid.add_argument("--no-grid", action="store_true",
                       help="Only the individual PNGs (skip the combined grid)")
+    grid.add_argument("--no-plots", action="store_true", dest="no_plots",
+                      help="Produce no plots at all; only generate the ROOT "
+                           "file(s) (valcache / --save-tree). Useful when the "
+                           "output is only needed for the event_viewer.")
     # General selection cuts (applied to all samples; per-energy YAML overrides).
     # One --<var>-min/--<var>-max float flag per CutSet variable, generated from
     # the spec so the CLI never drifts out of sync with selection.py.
@@ -118,8 +124,9 @@ def main(argv=None):
     args = parse_args(argv)
     general_cut = cutset_from_args(args)
     layout = OutputLayout(args.out)
-    make_individual = not args.grid_only
-    make_grid = not args.no_grid
+    # --no-plots wins over the grid/individual selection: skip every plot.
+    make_individual = not args.grid_only and not args.no_plots
+    make_grid = not args.no_grid and not args.no_plots
     runner = ValidationRunner(layout, config=PlotConfig(),
                               make_individual=make_individual,
                               make_grid=make_grid,
