@@ -30,6 +30,7 @@ calibration and one configuration file.
 | [`siwecal_validation`](siwecal_validation/README.md) | Validation plots + particle-discrimination metrics over the `ecal` tree; caches derived variables in `*.valcache.root`. | validation README |
 | [`event_viewer`](event_viewer/README.md) | Plotly Dash app to browse events one by one and explore file-level distributions with dynamic cuts and clustering. | viewer README |
 | [`event_display`](event_display/README.md) | Standalone ROOT TEve 3-D single-event display. Runs directly under key4hep (no virtualenv needed) — just `source setup.sh` and launch. | display README |
+| [`k4SiWEcalReco`](k4SiWEcalReco/README.md) | Gaudi/k4FWCore stage (C++) that turns the `ecal` tree into **EDM4hep** (`CalorimeterHit` + a per-event `Cluster` carrying the particle-ID shower variables in `shapeParameters`). A 1→1 port of `siwecal_validation.metrics`, parity-validated. | k4 reco README |
 | `siwecal_common` | Shared infrastructure: `paths`, the single source of truth for every filesystem location (driven by `settings.yml`). | — |
 
 ### How they depend on each other
