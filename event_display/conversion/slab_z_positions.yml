@@ -1,0 +1,42 @@
+# slab_z_positions.yml
+#
+# Physical z position (mm) of each slab along the beam axis, indexed by
+# hit_slab (0..14).  Edit these values to match the actual detector survey
+# or design geometry for your run configuration.
+#
+# w_thickness_mm: thickness of the W absorber plate in front of each slab (mm).
+# The absorber is drawn with its downstream face 5 mm upstream of the Si plane.
+
+slab_z_mm:
+  - 0.0     # slab  0
+  - -11.0    # slab  1
+  - -22.0    # slab  2
+  - -33.0    # slab  3
+  - -44.0    # slab  4
+  - -55.0    # slab  5
+  - -66.0    # slab  6
+  - -77.0    # slab  7
+  - -88.0    # slab  8
+  - -99.0    # slab  9
+  - -110.0   # slab 10
+  - -132.0   # slab 11
+  - -143.0   # slab 12
+  - -154.0   # slab 13
+  - -165.0   # slab 14
+
+w_thickness_mm:
+  - 2.8     # slab  0
+  - 4.2     # slab  1
+  - 4.2     # slab  2
+  - 4.2     # slab  3
+  - 4.2     # slab  4
+  - 4.2     # slab  5
+  - 4.2     # slab  6
+  - 4.2     # slab  7
+  - 4.2     # slab  8
+  - 5.6     # slab  9
+  - 5.6     # slab 10
+  - 5.6     # slab 11
+  - 5.6     # slab 12
+  - 5.6     # slab 13
+  - 5.6     # slab 14

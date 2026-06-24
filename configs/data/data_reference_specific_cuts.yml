@@ -1,0 +1,15 @@
+event_data:
+  P1_74GeV:
+    path: TB2026CERN_run_000007/ecal_TB2026CERN_run_000007.root
+  P1_52GeV:
+    path: TB2026CERN_run_000013/ecal_TB2026CERN_run_000013.root
+  P1_34GeV:
+    path: TB2026CERN_run_000015/ecal_TB2026CERN_run_000015.root
+  P1_20GeV:
+    path: ecal_20gev/ecal_P1_20GeV_runs_000016_000017_000018_000019_000020.root
+  P1_10GeV:
+    path: TB2026CERN_run_000021/ecal_TB2026CERN_run_000021.root
+  P1_7_5GeV:
+    path: TB2026CERN_run_000022/ecal_TB2026CERN_run_000022.root
+    # cuts: {rate_max: 0.3}
+

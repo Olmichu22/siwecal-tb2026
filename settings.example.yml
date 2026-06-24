@@ -1,0 +1,36 @@
+# ---------------------------------------------------------------------------
+# Shared configuration for the SiW-ECAL TB2026CERN monorepo.
+#
+# Copy this file to `settings.yml` and edit the paths for your machine. It is
+# read by all three packages through `siwecal_common.paths`, so it is the ONLY
+# place where filesystem locations are defined.
+#
+# Relative paths (./something) resolve against the repo root. Absolute paths are
+# used as-is. You can also point to a different file with $SIWECAL_SETTINGS.
+# ---------------------------------------------------------------------------
+
+# Where the (heavy) per-run / per-event ROOT files live. These are NOT part of
+# the repo. Provide a single path or a LIST of search roots: inputs are looked
+# up in each, in order, and the first match wins. Absolute paths written inside
+# the data_reference*.yml files always take precedence and are used verbatim.
+data_dir:
+  - /eos/home-o/oarquero/TB2026CERN
+  # - /eos/another/place/with/events
+
+# Calibration (pedestal + MIP) files. Defaults to the copies vendored in the
+# repo so the event builder runs out-of-the-box; point elsewhere to use your own.
+calib_dir: ./calibration
+
+# Geometry inputs: pad (chip,channel)->(x,y) maps + slab z + tungsten map.
+geometry_dir: ./geometry
+
+# Run-list configs (data_reference*.yml: energy/run -> events mapping).
+configs_dir: ./configs/data
+
+# Default output base for validation plots / results tables.
+output_dir: ./validation_output
+
+# Where to write the per-file <stem>.valcache.root metric caches.
+#   null  -> next to each input file (default; needs a writable data dir)
+#   path  -> all caches go here (use this when the data dir is read-only)
+cache_dir: null

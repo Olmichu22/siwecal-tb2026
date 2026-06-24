@@ -1,0 +1,37 @@
+W_thick:
+  t1: 2.8 # mm
+  t2: 4.2
+  t3: 5.6
+
+# sb0 is slab 0, sb1 is slab 1...
+structure: # the beginning is where the beam enters
+  - t1
+  - sb0
+  - t2
+  - sb1
+  - t2
+  - sb2
+  - t2
+  - sb3
+  - t2
+  - sb4
+  - t2
+  - sb5
+  - t2
+  - sb6
+  - t2
+  - sb7
+  - t3
+  - sb8
+  - t3
+  - sb9
+  - t3
+  - sb10
+  - t3
+  - sb11
+  - t3
+  - sb12
+  - t3
+  - sb13
+  - t3
+  - sb14

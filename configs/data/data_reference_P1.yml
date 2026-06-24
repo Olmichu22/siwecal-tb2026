@@ -1,0 +1,20 @@
+main_path: "/eos/user/o/oarquero/TB2026CERN/data/"
+
+event_data:
+  # P1_99GeV pendiente: faltan los eventos (solo existe el decoded
+  # TB2026CERN_run_000058.root). Descomentar tras construirlos:
+  # P1_99GeV:
+  #   path: TB2026CERN_run_000058/ecal_TB2026CERN_run_000058.root
+  P1_74GeV:
+    path: TB2026CERN_run_000007/ecal_TB2026CERN_run_000007.root
+    cuts: {rate_max: 0.1}
+  P1_52GeV:
+    path: TB2026CERN_run_000013/ecal_TB2026CERN_run_000013.root
+  P1_34GeV:
+    path: TB2026CERN_run_000015/ecal_TB2026CERN_run_000015.root
+  P1_20GeV:
+    path: TB2026CERN_run_000020/ecal_TB2026CERN_run_000020.root
+  P1_10GeV:
+    path: TB2026CERN_run_000021/ecal_TB2026CERN_run_000021.root
+  P1_7_5GeV:
+    path: TB2026CERN_run_000022/ecal_TB2026CERN_run_000022.root

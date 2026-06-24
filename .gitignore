@@ -1,0 +1,34 @@
+# --- Python ---
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+.ipynb_checkpoints/
+
+# --- Virtual environments (non-portable: recreate per machine, see README) ---
+.venv-viewer/
+.venv/
+venv/
+
+# --- Heavy / generated data (live outside the repo via settings.yml) ---
+*.root
+*.valcache.root
+validation_output/
+AllEnergiesPlots/
+
+# --- Generated figures / logs ---
+*.png
+*.pdf
+*.log
+_logs/
+
+# --- Local machine config (settings.yml is tracked as a template; uncomment
+#     the next line if your paths are private and you keep only the example) ---
+# settings.yml
+
+# --- Editor / OS noise ---
+*~
+.DS_Store
+.vscode/
+.idea/
+.claude/

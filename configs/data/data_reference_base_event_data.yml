@@ -1,0 +1,65 @@
+event_data:
+  P1_99GeV:
+    path: TB2026CERN_run_000058/ecal_TB2026CERN_run_000058.root
+  P1_74GeV:
+    path: TB2026CERN_run_000007/ecal_TB2026CERN_run_000007.root
+  P1_52GeV:
+    path: TB2026CERN_run_000013/ecal_TB2026CERN_run_000013.root
+  P1_34GeV:
+    path: TB2026CERN_run_000015/ecal_TB2026CERN_run_000015.root
+  P1_20GeV:
+    path: TB2026CERN_run_000020/ecal_TB2026CERN_run_000020.root
+  P1_10GeV:
+    path: TB2026CERN_run_000021/ecal_TB2026CERN_run_000021.root
+  P1_7_5GeV:
+    path: TB2026CERN_run_000022/ecal_TB2026CERN_run_000022.root
+  P2_7_5GeV:
+    path: ecal_P2_7_5GeV_runs_000023_000024.root
+  P2_10GeV:
+    path: TB2026CERN_run_000025/ecal_TB2026CERN_run_000025.root
+  P2_20GeV:
+    path: TB2026CERN_run_000026/ecal_TB2026CERN_run_000026.root
+  P2_34GeV:
+    path: TB2026CERN_run_000027/ecal_TB2026CERN_run_000027.root
+  P2_52GeV:
+    path: TB2026CERN_run_000028/ecal_TB2026CERN_run_000028.root
+  P2_74GeV:
+    path: TB2026CERN_run_000029/ecal_TB2026CERN_run_000029.root
+  P3_74GeV:
+    path: TB2026CERN_run_000030/ecal_TB2026CERN_run_000030.root
+  P3_52GeV:
+    path: TB2026CERN_run_000031/ecal_TB2026CERN_run_000031.root
+  P3_34GeV:
+    path: TB2026CERN_run_000032/ecal_TB2026CERN_run_000032.root
+  P3_20GeV:
+    path: ecal_P3_20GeV_runs_000033_000034_000035.root
+  P3_10GeV:
+    path: TB2026CERN_run_000036/ecal_TB2026CERN_run_000036.root
+  P3_7_5GeV:
+    path: ecal_P3_7_5GeV_runs_000038_000039.root
+  P4_7_5GeV:
+    path: TB2026CERN_run_000041/ecal_TB2026CERN_run_000041.root
+  P4_10GeV:
+    path: TB2026CERN_run_000042/ecal_TB2026CERN_run_000042.root
+  P4_20GeV:
+    path: TB2026CERN_run_000043/ecal_TB2026CERN_run_000043.root
+  P4_34GeV:
+    path: TB2026CERN_run_000044/ecal_TB2026CERN_run_000044.root
+  P4_52GeV:
+    path: TB2026CERN_run_000045/ecal_TB2026CERN_run_000045.root
+  P4_74GeV:
+    path: TB2026CERN_run_000046/ecal_TB2026CERN_run_000046.root
+  P5_74GeV:
+    path: TB2026CERN_run_000047/ecal_TB2026CERN_run_000047.root
+  P5_99GeV:
+    path: TB2026CERN_run_000048/ecal_TB2026CERN_run_000048.root
+  P5_52GeV:
+    path: TB2026CERN_run_000050/ecal_TB2026CERN_run_000050.root
+  P5_34GeV:
+    path: TB2026CERN_run_000051/ecal_TB2026CERN_run_000051.root
+  P5_20GeV:
+    path: TB2026CERN_run_000055/ecal_TB2026CERN_run_000055.root
+  P5_10GeV:
+    path: TB2026CERN_run_000056/ecal_TB2026CERN_run_000056.root
+  P5_7_5GeV:
+    path: TB2026CERN_run_000057/ecal_TB2026CERN_run_000057.root

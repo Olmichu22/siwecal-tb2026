@@ -1,0 +1,7 @@
+# Python dependencies NOT already provided by the key4hep stack.
+#
+# key4hep (sourced via setup.sh) already ships: numpy, pandas, scipy,
+# scikit-learn, matplotlib, pyyaml, uproot, awkward and ROOT. The only extra
+# packages are the interactive viewer's web stack:
+dash>=3.0
+plotly>=6.0
