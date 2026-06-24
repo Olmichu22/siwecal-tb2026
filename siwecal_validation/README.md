@@ -60,6 +60,7 @@ python -m siwecal_validation --point 2
 | `--cfg FILE` | `data_reference` YAML (default: `configs/data/data_reference.yml`) |
 | `--out DIR` | output base (default: `settings.yml` `output_dir`) |
 | `--grid-only` / `--no-grid` | only the combined grid PNG / only the individual PNGs |
+| `--no-plots` | produce no plots at all, only the ROOT file(s) (valcache / `--save-tree`) — for the `event_viewer` |
 | `--<var>-min` / `--<var>-max` | general selection cuts (one pair per `CutSet` variable) |
 | `--is-shower` / `--no-shower` | keep only shower / non-shower events |
 | `--create-tree` | force (re)generate the metrics cache (after a config change) |
