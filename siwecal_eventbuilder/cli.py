@@ -32,7 +32,7 @@ BASE_PATH = paths.data_dir()
 CALIB_DIR_DEFAULT = paths.calib_dir()
 CALIB_PEDESTAL_NAME = "dummy_pedestal_15_highgain.txt"
 CALIB_MIP_NAME = "dummy_mip_map_15_highgain.txt"
-MUON_CALIB_DIR = os.path.join(paths.calib_dir(), "MuonCalib_it2")
+MUON_CALIB_DIR = os.path.join(paths.calib_dir(), "MuonCalib_it2_corrected")
 MIP_RUN_DEFAULT = "TB2026CERN_run_000004"
 DEFAULT_RUN = "TB2026CERN_run_000013"
 

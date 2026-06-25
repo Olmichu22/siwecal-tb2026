@@ -99,3 +99,78 @@ of hits, total energy, ...) and per-hit arrays (`hit_slab`, `hit_chip`,
 `hit_chan`, `hit_x`, `hit_y`, `hit_z`, `hit_energy`, ...). `hit_energy` can be
 negative when an ADC sits below pedestal — expected for the current dummy
 calibration, not a physics signal.
+
+Channels with no MIP calibration (`mpv = 0`) cannot be turned into an energy.
+They are kept in the `ecal` tree as a raw record (`hit_energy = 0`) but tagged
+with the `hit_ismasked` branch (`1` = masked). Downstream stages drop them:
+`siwecal_validation` excludes them from its `*.valcache.root` cache and all
+metrics, and `EcalToEDM4hep` omits them from the EDM4hep output.
+
+## Calibration file format and NaN handling
+
+### Pedestal file format
+
+```
+layer  chip  channel   mean0 err0 wid0   mean1 err1 wid1  ...  mean14 err14 wid14
+```
+
+45 columns per row: `(slab_id, chip_id, channel)` followed by 15 × 3 values
+(mean, error, width) for each SCA (Switched Capacitor Array cell, 0–14).
+
+The calibration tool writes **`-nan`** as a sentinel for SCAs that had
+insufficient statistics (too few triggers on that SCA index). This is normal:
+muon runs may not cycle through all 15 SCAs evenly.
+
+### How sentinel entries are treated (current approach — under discussion)
+
+The calibration tool marks uncalibrated SCAs with two interchangeable sentinels:
+`-nan` (insufficient statistics) and `0` (no data). Both are treated identically.
+
+`_read_pedestal_file` applies the following logic per row:
+
+| Condition | Action |
+|-----------|--------|
+| Some SCAs are sentinel (`0` or `-nan`), at least one is a valid non-zero finite value | Sentinel SCAs are replaced by the **first valid mean** in the same row. |
+| **All** 15 SCA means are sentinels | The whole channel is added to the **masked set** — its hits get `hit_energy = 0` and `hit_ismasked = 1`, and are excluded from all downstream metrics. |
+
+In `MuonCalib_it2/run_000142`: 395 channels have all-zero SCAs (→ masked), 11
+have a mix of NaN and valid SCAs (→ substitution), none have zeros mixed with
+valid values.
+
+**Rationale**: the pedestal of a channel varies only slightly between SCAs
+(electronic baseline drift is small). A channel that has at least one calibrated
+SCA can safely use that value for the uncalibrated SCAs. A channel with no
+calibrated SCA at all has no reference and is treated the same way as a MIP-masked
+channel.
+
+### Open questions for team discussion
+
+The following choices were made pragmatically; they should be reviewed with the
+calibration team before being treated as the reference strategy:
+
+1. **First-valid substitution vs. averaging**: when multiple SCAs have finite
+   means, using the *first* valid one rather than the *average* or a
+   *nearest-neighbour* interpolation was chosen for simplicity. If the pedestal
+   drift between SCAs is measurable and systematic, an average or a weighted
+   interpolation may be more accurate.
+
+2. **Masking all-NaN channels vs. falling back to `pedestal_fallback`**: the
+   previous behaviour was to use `pedestal_fallback = 250 ADC` (a global
+   constant) when a key was missing from the map, which applied silently to *any*
+   uncalibrated channel — including all-NaN ones. The new behaviour masks them
+   explicitly. The physical question is: should an uncalibrated channel produce
+   hits at all (with a rough global fallback), or should it be suppressed
+   entirely? If suppressing is too aggressive and hides real signal, one could
+   revert all-NaN channels to the fallback instead.
+
+3. **MIP file**: currently channels with `mpv = 0` are masked (separate
+   mechanism in `_read_mip_file`). `-nan` MPV values are *not* present in the
+   MIP file (the tool only writes `0` there) so no equivalent fix is needed
+   there yet.
+
+4. **Coverage in `MuonCalib_it2`** (`run_000142` file): calibration coverage is
+   nearly complete — most chips on every layer have finite pedestal means.
+   Known gaps: chips 0–3 on layer 0, and chip 9 on layers 6 and 13. Those
+   channels use `pedestal_fallback` (250 ADC) and the global median MPV. Whether
+   250 ADC is a good estimate for those specific chips should be verified against
+   raw ADC distributions.

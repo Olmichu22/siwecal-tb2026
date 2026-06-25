@@ -33,6 +33,7 @@ class Hit:
     x: float = math.nan         # transverse position in mm        -> hit_x
     y: float = math.nan         # transverse position in mm        -> hit_y
     z: float = math.nan         # longitudinal position in mm      -> hit_z
+    is_masked: bool = False     # masked in ped or MIP file         -> hit_ismasked
 
 
 @dataclass
