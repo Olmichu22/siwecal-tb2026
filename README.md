@@ -66,6 +66,9 @@ export PYTHONPATH=$PWD/k4SiWEcalReco/build/genConfDir:$PWD:$PYTHONPATH
 ECAL_FILE=<data>/ecal_<run>.root ECAL_PID_OUT=ecal_pid.root \
     k4run k4SiWEcalReco/options/run_pid.py
 
+# Example
+ECAL_FILE=/eos/user/o/oarquero/TB2026CERN/data/TB2026CERN_run_000013/ecal_TB2026CERN_run_000013.root k4run k4SiWEcalReco/options/run_pid.py
+
 # or batch, same input options as siwecal_validation (--run/--file/--all/--point/--cfg)
 python k4SiWEcalReco/run_pid_batch.py --all   --outdir /tmp/pid
 python k4SiWEcalReco/run_pid_batch.py --run TB2026CERN_run_000007 --outdir /tmp/pid
@@ -73,6 +76,22 @@ python k4SiWEcalReco/run_pid_batch.py --run TB2026CERN_run_000007 --outdir /tmp/
 # validation / viewer then consume the EDM4hep file directly
 python -m siwecal_validation --file ecal_pid.root --run <label>
 ```
+
+> ⚠️ **Masked channels.** Two classes of channels are flagged `hit_ismasked = 1`
+> in the `ecal` tree and excluded from all downstream stages (cache, EDM4hep,
+> metrics, plots):
+> - **No MIP calibration** (`mpv = 0` in the MIP file).
+> - **No valid pedestal** (all 15 SCA means are `-nan` in the pedestal file — the
+>   calibration tool's sentinel for channels with insufficient statistics).
+>
+> Channels with only *partial* NaN coverage (some SCAs finite, some `-nan`) are
+> **not** masked; the first valid SCA mean is substituted for the missing ones.
+> See [`siwecal_eventbuilder/README.md`](siwecal_eventbuilder/README.md) for the
+> full discussion and open questions.
+>
+> If you open the viewer directly on a **raw** `ecal_<run>.root` (instead of the
+> `*.valcache.root` or the EDM4hep file), masked hits *will* show up — the `ecal`
+> tree keeps them as a raw record.
 
 See [`k4SiWEcalReco/README.md`](k4SiWEcalReco/README.md) for details.
 
@@ -164,7 +183,7 @@ Heavy per-run data (`ecal_<run>.root`, `*.valcache.root`, raw inputs) live
 source setup.sh
 
 # 1. Build events for one run (or a whole energy point with --energy / --all)
-python -m siwecal_eventbuilder --run TB2026CERN_run_000007
+python -m siwecal_eventbuilder --run TB2026CERN_run_000013 --th 220
 
 # 2. Validate it: plots + metrics, caching derived variables
 python -m siwecal_validation --run TB2026CERN_run_000007
