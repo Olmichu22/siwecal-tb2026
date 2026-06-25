@@ -82,6 +82,11 @@ struct EcalToEDM4hep final : k4FWCore::Producer<OutputType()> {
     m_hitX = std::make_unique<TTreeReaderArray<float>>(*m_reader, "hit_x");
     m_hitY = std::make_unique<TTreeReaderArray<float>>(*m_reader, "hit_y");
     m_hitZ = std::make_unique<TTreeReaderArray<float>>(*m_reader, "hit_z");
+    // Masked (uncalibrated) channels are flagged by the event builder and
+    // dropped here so the downstream PID sees only calibrated hits. Older ecal
+    // files predate the branch; bind it only when present (else keep all hits).
+    if (tree->GetBranch("hit_ismasked"))
+      m_hitMasked = std::make_unique<TTreeReaderArray<int>>(*m_reader, "hit_ismasked");
 
     m_coder = std::make_unique<dd4hep::DDSegmentation::BitFieldCoder>(m_cellIDEncoding.value());
     info() << "EcalToEDM4hep: " << m_reader->GetEntries(false) << " entries in '"
@@ -111,6 +116,10 @@ struct EcalToEDM4hep final : k4FWCore::Producer<OutputType()> {
 
     const int n = **m_nhit;
     for (int i = 0; i < n; ++i) {
+      // Skip masked channels: dropped from ECalHits and all parallel collections
+      // at once, so they stay index-aligned and the PID recomputes on the rest.
+      if (m_hitMasked && (*m_hitMasked)[i])
+        continue;
       auto hit = hits.create();
       std::uint64_t cellID = 0;
       m_coder->set(cellID, "slab", (*m_hitSlab)[i]);
@@ -146,6 +155,7 @@ private:
   std::unique_ptr<TTreeReader> m_reader;
   std::unique_ptr<TTreeReaderValue<int>> m_nhit, m_run, m_event, m_spill, m_bcid;
   std::unique_ptr<TTreeReaderArray<int>> m_hitSlab, m_hitChip, m_hitChan, m_hitSca;
+  std::unique_ptr<TTreeReaderArray<int>> m_hitMasked;   // null for pre-mask ecal files
   std::unique_ptr<TTreeReaderArray<float>> m_hitEnergy, m_hitHG, m_hitLG, m_hitX, m_hitY, m_hitZ;
   std::unique_ptr<dd4hep::DDSegmentation::BitFieldCoder> m_coder;
   mutable std::mutex m_mutex;

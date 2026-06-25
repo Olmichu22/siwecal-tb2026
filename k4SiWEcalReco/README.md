@@ -31,6 +31,12 @@ source sets `EvtMax = GetEntries()` and serves one event per call.
   - Parallel `UserDataCollection`s (same order as the hits) for the per-hit
     quantities `CalorimeterHit` has no native field for:
     `ECalHitChip/Chan/Sca` (int) and `ECalHitHG/LG` (float).
+
+  Channels flagged `hit_ismasked` in the `ecal` tree (no MIP calibration) are
+  dropped from `ECalHits` and every parallel collection at once, so the output
+  carries only calibrated hits and `EcalPidTransformer` recomputes the shower
+  variables on the filtered set. The branch is optional: pre-mask `ecal` files
+  keep all hits.
 - **`EcalPidTransformer`** (`src/components/EcalPidTransformer.cpp`) — one input
   `CalorimeterHitCollection` → one `Cluster`. The physics lives in
   `include/k4SiWEcalReco/EcalShowerVars.h` (a C++ port of
