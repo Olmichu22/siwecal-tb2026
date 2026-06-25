@@ -7,6 +7,7 @@ obtain the calibration, and process each run with the parallel pipeline.
 """
 
 import argparse
+import glob
 import os
 import sys
 
@@ -31,6 +32,7 @@ BASE_PATH = paths.data_dir()
 CALIB_DIR_DEFAULT = paths.calib_dir()
 CALIB_PEDESTAL_NAME = "dummy_pedestal_15_highgain.txt"
 CALIB_MIP_NAME = "dummy_mip_map_15_highgain.txt"
+MUON_CALIB_DIR = os.path.join(paths.calib_dir(), "MuonCalib_it2_corrected")
 MIP_RUN_DEFAULT = "TB2026CERN_run_000004"
 DEFAULT_RUN = "TB2026CERN_run_000013"
 
@@ -58,6 +60,35 @@ PAD_MAP_FILES_DEFAULT = {
 # Per-slab z positions for hit_z. This file is the live source of truth; if it
 # exists it overrides the DetectorGeometry default.
 SLAB_Z_FILE_DEFAULT = paths.geometry_file("slab_z_positions.yml")
+
+
+# ------------------------------------------------- MuonCalib_it2 resolution ---
+def resolve_muon_calib_files(th: str):
+    """Return (pedestal_path, mip_path) for the given threshold label (e.g. '220').
+
+    MIP file: the cumulative *_run_000th{th}_highgain.txt in the mips/th{th} folder.
+    Pedestal file: the lexicographically latest Pedestal_*_highgain.txt in
+    pedestals/th{th} (run numbers are zero-padded so sort order = numeric order).
+    """
+    mip_path = os.path.join(
+        MUON_CALIB_DIR, "mips", f"th{th}",
+        f"MIP_pedestalsubmode1_TB2026CERN_run_000th{th}_highgain.txt",
+    )
+    if not os.path.exists(mip_path):
+        print(f"ERROR: cumulative MIP file not found for --th {th}: {mip_path}",
+              file=sys.stderr)
+        sys.exit(1)
+
+    ped_pattern = os.path.join(
+        MUON_CALIB_DIR, "pedestals", f"th{th}", "Pedestal_*_highgain.txt"
+    )
+    ped_candidates = sorted(glob.glob(ped_pattern))
+    if not ped_candidates:
+        print(f"ERROR: no pedestal files found for --th {th} in "
+              f"{os.path.dirname(ped_pattern)}", file=sys.stderr)
+        sys.exit(1)
+    pedestal_path = ped_candidates[-1]
+    return pedestal_path, mip_path
 
 
 # ----------------------------------------------------- config / path helpers --
@@ -183,6 +214,10 @@ def parse_args(argv=None) -> argparse.Namespace:
     parser.add_argument("--workers", type=int, default=None,
                         help="Parallel workers per run")
 
+    parser.add_argument("--th", default=None, metavar="N",
+                        help="Threshold label (e.g. 220): loads cumulative "
+                             "MuonCalib_it2 calibration for th<N>. "
+                             "Overridden by --ped-file / --mip-file.")
     parser.add_argument("--calib-dir", default=None,
                         help="Directory with pedestal/MIP text files")
     parser.add_argument("--ped-file", default=None)
@@ -241,10 +276,13 @@ def build_calibration(args, config: BuilderConfig, geometry: DetectorGeometry,
             pedestal_max_entries=args.ped_max_entries,
             mip_max_entries=args.mip_max_entries)
 
-    pedestal_file = (args.ped_file or calib_settings.get("pedestal_file")
-                     or os.path.join(calib_dir, CALIB_PEDESTAL_NAME))
-    mip_file = (args.mip_file or calib_settings.get("mip_file")
-                or os.path.join(calib_dir, CALIB_MIP_NAME))
+    if args.th and not (args.ped_file or args.mip_file):
+        pedestal_file, mip_file = resolve_muon_calib_files(args.th)
+    else:
+        pedestal_file = (args.ped_file or calib_settings.get("pedestal_file")
+                         or os.path.join(calib_dir, CALIB_PEDESTAL_NAME))
+        mip_file = (args.mip_file or calib_settings.get("mip_file")
+                    or os.path.join(calib_dir, CALIB_MIP_NAME))
     for path in (pedestal_file, mip_file):
         if not os.path.exists(path):
             print(f"ERROR: calibration file not found: {path}", file=sys.stderr)

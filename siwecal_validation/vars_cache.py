@@ -38,8 +38,20 @@ import ROOT
 import uproot
 
 # Bump to invalidate every existing cache (e.g. when the schema changes).
-CACHE_FORMAT_VERSION = 2
+CACHE_FORMAT_VERSION = 3
 FINGERPRINT_KEY = "valcache_fingerprint"
+
+# Per-hit branches the cache rebuilds (filtered: masked channels removed) and
+# the per-event counters/sums it recomputes from the surviving hits. The
+# original ``hit_ismasked`` branch is read for filtering but not stored — by
+# construction no masked channel survives in the cache.
+_REBUILT_HIT_INT = ("hit_slab", "hit_chip", "hit_chan", "hit_sca")
+_REBUILT_HIT_FLOAT = ("hit_hg", "hit_lg", "hit_energy", "hit_x", "hit_y", "hit_z")
+_RECOMPUTED_COUNTERS = ("nhit_chan", "nhit_slab", "nhit_chip", "sum_hg", "sum_energy")
+# Branches dropped from the clone (rebuilt above, recomputed, or filter-only).
+_OVERRIDDEN_BRANCHES = (
+    _REBUILT_HIT_INT + _REBUILT_HIT_FLOAT + _RECOMPUTED_COUNTERS + ("hit_ismasked",)
+)
 
 # Pre-computed MIP-cut threshold levels stored in the cache.
 MIP_CUT_THRESHOLDS = [0.5, 1.0]
@@ -58,9 +70,13 @@ def _threshold_prefix(threshold: float) -> str:
 
 
 def _derived_names() -> list:
-    """Names of the per-event variables stored in the cache (all but ``label``)."""
+    """Names of the per-event variables stored in the cache (the metric arrays).
+
+    Excludes the non-metric meta fields (``label`` and the EDM4hep-only
+    ``source_index``), which are not part of the valcache schema.
+    """
     from .event_data import EventData          # lazy: avoid import cycle
-    return [f.name for f in fields(EventData) if f.name != "label"]
+    return [f.name for f in fields(EventData) if f.name not in EventData._META_FIELDS]
 
 
 def _scalar_derived_names() -> list:
@@ -146,9 +162,70 @@ def write(input_path: str, out_path: str, config, event_data,
 
     per_layer = {n for n in derived if getattr(event_data, n).ndim == 2}
 
+    present = {b.GetName() for b in in_tree.GetListOfBranches()}
+    has_ismasked = "hit_ismasked" in present
+
+    # Largest original hit multiplicity → buffer size for the rebuilt branches.
+    in_tree.SetBranchStatus("*", 0)
+    in_tree.SetBranchStatus("nhit_chan", 1)
+    max_hits = 0
+    for entry in range(in_tree.GetEntries()):
+        in_tree.GetEntry(entry)
+        max_hits = max(max_hits, int(in_tree.nhit_chan))
+    in_tree.SetBranchStatus("*", 1)
+    max_hits = max(max_hits, 1)
+
     tmp_path = out_path + ".tmp"
     fout = ROOT.TFile(tmp_path, "RECREATE")
-    out_tree = in_tree.CloneTree(0)              # empty clone, shares in_tree buffers
+
+    # Build a *fresh* output tree rather than CloneTree(0). Cloning the input,
+    # re-enabling its branches and then creating same-named override branches and
+    # Fill()ing corrupts the heap inside PyROOT (intermittent segfaults late in
+    # the fill loop). Creating every branch explicitly avoids the shared-buffer
+    # machinery entirely.
+    out_tree = ROOT.TTree(config.tree_name, config.tree_name)
+
+    # Event-identifier branches copied verbatim from the input: everything that
+    # is not rebuilt/recomputed below (typically run/event/spill/bcid).
+    _LEAF_NP = {"Int_t": (np.int32, "I"), "UInt_t": (np.uint32, "i"),
+                "Float_t": (np.float32, "F"), "Double_t": (np.float64, "D"),
+                "Long64_t": (np.int64, "L"), "ULong64_t": (np.uint64, "l")}
+    id_bufs = {}
+    for branch in in_tree.GetListOfBranches():
+        name = branch.GetName()
+        if name in _OVERRIDDEN_BRANCHES:
+            continue
+        leaf = branch.GetListOfLeaves()[0]
+        if leaf.GetLeafCount() or leaf.GetLen() != 1:
+            raise RuntimeError(
+                f"cannot copy non-scalar branch '{name}' verbatim into the cache")
+        if leaf.GetTypeName() not in _LEAF_NP:
+            raise RuntimeError(
+                f"unsupported leaf type '{leaf.GetTypeName()}' for branch '{name}'")
+        dtype, code = _LEAF_NP[leaf.GetTypeName()]
+        buf = np.zeros(1, dtype=dtype)
+        out_tree.Branch(name, buf, f"{name}/{code}")
+        id_bufs[name] = buf
+
+    # Recomputed per-event counters/sums (filled from the surviving hits).
+    nhit_chan_buf = np.zeros(1, dtype=np.int32)
+    nhit_slab_buf = np.zeros(1, dtype=np.int32)
+    nhit_chip_buf = np.zeros(1, dtype=np.int32)
+    sum_hg_buf = np.zeros(1, dtype=np.float32)
+    sum_energy_buf = np.zeros(1, dtype=np.float32)
+    out_tree.Branch("nhit_chan", nhit_chan_buf, "nhit_chan/I")
+    out_tree.Branch("nhit_slab", nhit_slab_buf, "nhit_slab/I")
+    out_tree.Branch("nhit_chip", nhit_chip_buf, "nhit_chip/I")
+    out_tree.Branch("sum_hg", sum_hg_buf, "sum_hg/F")
+    out_tree.Branch("sum_energy", sum_energy_buf, "sum_energy/F")
+
+    # Rebuilt per-hit branches (variable length, counted by nhit_chan).
+    hit_int_bufs = {n: np.zeros(max_hits, dtype=np.int32) for n in _REBUILT_HIT_INT}
+    hit_float_bufs = {n: np.zeros(max_hits, dtype=np.float32) for n in _REBUILT_HIT_FLOAT}
+    for name, buf in hit_int_bufs.items():
+        out_tree.Branch(name, buf, f"{name}[nhit_chan]/I")
+    for name, buf in hit_float_bufs.items():
+        out_tree.Branch(name, buf, f"{name}[nhit_chan]/F")
 
     # Derived-branch buffers (kept alive for the whole fill loop).
     buffers = {}
@@ -181,13 +258,43 @@ def write(input_path: str, out_path: str, config, event_data,
     valid_index = 0
     for entry in range(in_tree.GetEntries()):
         in_tree.GetEntry(entry)
-        n_channels = int(in_tree.nhit_chan)
+        n_orig = int(in_tree.nhit_chan)
+        if n_orig == 0:
+            continue
+
+        # Read every per-hit branch, then drop masked channels. The surviving
+        # hits define both the rebuilt arrays and the recomputed counters/sums,
+        # mirroring exactly the event set that EventData.from_root keeps.
+        hit_int = {n: np.frombuffer(getattr(in_tree, n), np.int32, count=n_orig)
+                   for n in _REBUILT_HIT_INT}
+        hit_float = {n: np.frombuffer(getattr(in_tree, n), np.float32, count=n_orig)
+                     for n in _REBUILT_HIT_FLOAT}
+        if has_ismasked:
+            keep = ~np.frombuffer(in_tree.hit_ismasked, np.int32,
+                                  count=n_orig).astype(bool)
+            hit_int = {n: v[keep] for n, v in hit_int.items()}
+            hit_float = {n: v[keep] for n, v in hit_float.items()}
+        n_channels = int(hit_int["hit_slab"].size)
         if n_channels == 0:
             continue
-        energy = np.frombuffer(in_tree.hit_energy, np.float32, count=n_channels)
-        if energy.sum() <= 0:
+        energy = hit_float["hit_energy"]
+        if not (energy.sum() > 0):
             continue
         if row_mask is None or row_mask[valid_index]:
+            # Copy the event identifiers verbatim from the input tree.
+            for name, buf in id_bufs.items():
+                buf[0] = getattr(in_tree, name)
+            # Recompute the per-event counters/sums from the surviving hits.
+            slab, chip = hit_int["hit_slab"], hit_int["hit_chip"]
+            nhit_chan_buf[0] = n_channels
+            nhit_slab_buf[0] = np.unique(slab).size
+            nhit_chip_buf[0] = np.unique(slab.astype(np.int64) << 16 | chip).size
+            sum_hg_buf[0] = float(hit_float["hit_hg"].sum())
+            sum_energy_buf[0] = float(energy.sum())
+            for name, buf in hit_int_bufs.items():
+                buf[:n_channels] = hit_int[name]
+            for name, buf in hit_float_bufs.items():
+                buf[:n_channels] = hit_float[name]
             for name in derived:
                 value = getattr(event_data, name)[valid_index]
                 if name in per_layer:
@@ -196,7 +303,7 @@ def write(input_path: str, out_path: str, config, event_data,
                     buffers[name][0] = value
             for (thr, name), buf in extra_buffers.items():
                 buf[0] = extra_scalars[thr][name][valid_index]
-            out_tree.Fill()                      # copies the original branches too
+            out_tree.Fill()
         valid_index += 1
     fin.Close()
 

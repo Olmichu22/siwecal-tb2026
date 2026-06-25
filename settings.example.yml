@@ -30,7 +30,14 @@ configs_dir: ./configs/data
 # Default output base for validation plots / results tables.
 output_dir: ./validation_output
 
-# Where to write the per-file <stem>.valcache.root metric caches.
+# Where k4SiWEcalReco writes (and siwecal_validation / event_viewer look for) the
+# per-run reconstruction output: ecal_<run>.edm4hep.root / ecal_<run>.valtree.root.
 #   null  -> next to each input file (default; needs a writable data dir)
-#   path  -> all caches go here (use this when the data dir is read-only)
+#   path  -> all outputs go here (use this when the data dir is read-only)
+pid_dir: null
+
+# Legacy *.valcache.root metric caches (still read by event_viewer if present).
+# siwecal_validation no longer writes these; metrics come from pid_dir above.
+#   null  -> next to each input file (default)
+#   path  -> all caches go here
 cache_dir: null

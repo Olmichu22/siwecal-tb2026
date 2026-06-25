@@ -36,8 +36,8 @@ class LayerGrid2D:
             cmax = float(np.nanmax(energy)) if energy.size else 1.0
             cmin = 0.0
         else:
-            bound = float(np.nanmax(np.abs(energy))) if energy.size else 1.0
-            cmin, cmax = -bound, bound
+            cmin = float(np.nanmin(energy)) if energy.size else 0.0
+            cmax = float(np.nanmax(energy)) if energy.size else 1.0
         if cmax <= cmin:
             cmax = cmin + 1.0
 

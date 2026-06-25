@@ -91,6 +91,7 @@ class EventDataset:
                                "xr": np.round(x, 2), "yr": np.round(y, 2),
                                "e": energy.astype(float)})
         agg = pooled.groupby(["slab", "xr", "yr"], as_index=False)["e"].sum()
+        agg["e"] /= max(len(indices), 1)
         slab_g = agg["slab"].to_numpy(dtype=np.int64)
         return Event(
             index=-1,

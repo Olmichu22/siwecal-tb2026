@@ -49,16 +49,12 @@ class ValidationRunner:
 
     def __init__(self, layout: OutputLayout, config: PlotConfig = None,
                  plotters=DEFAULT_PLOTTERS, make_individual=True,
-                 make_grid=True, create_tree=False, save_tree=False,
-                 cache_dir=None):
+                 make_grid=True):
         self._layout = layout
         self._config = config or PlotConfig()
         self._plotters = plotters
         self._make_individual = make_individual
         self._make_grid = make_grid
-        self._create_tree = create_tree   # force (re)generate the metrics cache
-        self._save_tree = save_tree        # also write a cut-applied augmented tree
-        self._cache_dir = cache_dir        # redirect *.valcache.root here (or None)
         self._results = ResultsWriter()
         # One run id per invocation, shared by the summary plots and the
         # results table so they stay associated (and never overwrite a
@@ -66,22 +62,34 @@ class ValidationRunner:
         self._run_id = layout.allocate_run_id()
         print(f"[Run id] {layout.id_token(self._run_id)}")
 
-    def _write_cut_tree(self, events_path, label, data, cutset) -> None:
-        """``--save-tree``: augmented tree of the cut-passing events.
+    # ------------------------------------------------------- source picking -
+    def _load_sample(self, events_path, label) -> EventData:
+        """Load one sample's :class:`EventData` from the ``k4SiWEcalReco`` output.
 
-        Written to ``<out>/<label>/trees/<label><suffix>.root`` (the cut suffix
-        in the name). Best-effort: a write failure only logs a warning.
+        Given ``events_path`` (the event-builder ``ecal_<X>.root``), the
+        per-event metrics are read -- never recomputed -- from, in order:
+
+        * the EDM4hep PID file ``ecal_<X>.edm4hep.root`` (metrics straight from
+          the Cluster), else
+        * its ``ecal_<X>.valtree.root`` tree (same derived branches).
+
+        Errors if neither exists, pointing at the generation stage.
         """
-        mask = cutset.mask(data)
-        out_path = os.path.join(self._layout.label_dir(label, "trees"),
-                                f"{label}{cutset.suffix}.root")
-        try:
-            vars_cache.write(events_path, out_path, self._config, data,
-                             row_mask=mask)
-            print(f"[SaveTree] wrote {int(mask.sum())} cut-passing event(s) "
-                  f"-> {out_path}")
-        except (OSError, RuntimeError, ValueError) as error:
-            print(f"WARNING: could not write --save-tree {out_path}: {error}")
+        pid_path = paths.pid_path_for(events_path)
+        if pid_path is not None:
+            print(f"Reading (EDM4hep PID): {pid_path}")
+            return EventData.from_edm4hep(pid_path, label, self._config)
+
+        tree_path = paths.valtree_path_for(events_path)
+        if tree_path is not None:
+            print(f"Reading (valtree): {tree_path}")
+            return vars_cache.read(tree_path, label, self._config)
+
+        raise RuntimeError(
+            f"no metrics source found for '{label}' near {events_path}:\n"
+            f"  EDM4hep PID (ecal_<run>.edm4hep.root): not found\n"
+            f"  valtree     (ecal_<run>.valtree.root): not found\n"
+            f"Generate one first with k4SiWEcalReco/run_pid_batch.py.")
 
     # ----------------------------------------------------------- one sample -
     def run_sample(self, events_path, label, cutset: CutSet = None,
@@ -91,15 +99,12 @@ class ValidationRunner:
         If ``collect`` (a list) is given, append ``(ctx, selected_data)`` for
         this sample so the caller can build cross-sample grids afterwards.
         """
-        if not os.path.exists(events_path):
-            print(f"ERROR: events file not found: {events_path}")
-            return {}
-
         cutset = cutset or CutSet()
-        print(f"\nReading: {events_path}")
-        data = EventData.from_root(events_path, label, self._config,
-                                   create_tree=self._create_tree,
-                                   cache_dir=self._cache_dir)
+        try:
+            data = self._load_sample(events_path, label)
+        except RuntimeError as error:
+            print(f"ERROR: {error}")
+            return {}
         n_total = len(data)
         print(f"Valid events: {n_total}")
 
@@ -107,8 +112,6 @@ class ValidationRunner:
         n_selected = len(selected)
         if not cutset.is_empty:
             print(f"Events after cuts ({cutset.label.strip()}): {n_selected}")
-        if self._save_tree:
-            self._write_cut_tree(events_path, label, data, cutset)
         if n_selected == 0:
             print("WARNING: no events pass the cuts; skipping plots.")
             self._results.add(label=label, energy_gev=energy_gev,

@@ -21,7 +21,8 @@ def main() -> None:
         prog="event_viewer",
         description="Interactive SiW-ECAL event viewer (Plotly Dash).")
     parser.add_argument("--file", default=None,
-                        help="ROOT file to open on startup (.valcache.root or ecal_*.root)")
+                        help="ROOT file to open on startup (k4SiWEcalReco "
+                             ".edm4hep.root / .valtree.root, or a plain ecal_*.root)")
     parser.add_argument("--data-dir", default=None,
                         help="Directory scanned for the file dropdown (default: <project>/data)")
     parser.add_argument("--host", default="127.0.0.1")
