@@ -117,6 +117,9 @@ class AcquisitionReader:
     #: Leaf names of the large flat arrays read through ``TLeaf.GetValue``.
     _LEAF_NAMES = ("nhits", "bcid", "badbcid", "hitbit_high", "adc_high", "adc_low")
 
+    #: Branches read via direct ``tree.<attr>`` access (see :class:`Acquisition`).
+    _DIRECT_BRANCHES = ("n_slboards", "slboard_id", "chipid")
+
     def __init__(self, input_path: str, geometry: DetectorGeometry, tree_name: str):
         self._geometry = geometry
         self._file = ROOT.TFile(input_path, "READ")
@@ -125,6 +128,14 @@ class AcquisitionReader:
         self._tree = self._file.Get(tree_name)
         if not self._tree:
             raise IOError(f"Tree '{tree_name}' not found in {input_path}")
+        # Read only the branches the builder actually touches. The converted
+        # input also carries several huge per-channel arrays we never use
+        # (autogainbit_high/low, hitbit_low) plus slow-control branches; without
+        # this, ``GetEntry`` reads them all on every acquisition and that wasted
+        # I/O dominates the whole event-building runtime.
+        self._tree.SetBranchStatus("*", 0)
+        for name in self._LEAF_NAMES + self._DIRECT_BRANCHES:
+            self._tree.SetBranchStatus(name, 1)
         self._leaves = {name: self._tree.GetLeaf(name) for name in self._LEAF_NAMES}
 
     @property
