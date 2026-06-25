@@ -79,7 +79,8 @@ class HitCollector:
         mip = self._calibration.mip(slab_id, chip_id, channel)
 
         adc_high_pedsub = adc_high - pedestal
-        if self._calibration.is_masked(slab_id, chip_id, channel):
+        is_masked = self._calibration.is_masked(slab_id, chip_id, channel)
+        if is_masked:
             energy_mip = 0.0
         else:
             energy_mip = adc_high_pedsub / mip if mip > 0 else 0.0
@@ -100,4 +101,5 @@ class HitCollector:
             x=x,
             y=y,
             z=self._geometry.slab_z(slab),
+            is_masked=is_masked,
         )
