@@ -46,8 +46,9 @@ def _jobs(args):
         if not data_map:
             raise SystemExit(f"ERROR: no matching 'event_data' entries in {args.cfg}")
         base_path = cfg.get("main_path", BASE_PATH)
-        for label, entry in data_map.items():
-            yield label, _resolve(entry["path"], base_path)
+        for entry in data_map.values():
+            path = _resolve(entry["path"], base_path)
+            yield _label(path), path
     elif args.file:
         yield (args.run or _label(args.file)), args.file
     else:
