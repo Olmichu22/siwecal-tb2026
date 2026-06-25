@@ -117,6 +117,9 @@ class AcquisitionReader:
     #: Leaf names of the large flat arrays read through ``TLeaf.GetValue``.
     _LEAF_NAMES = ("nhits", "bcid", "badbcid", "hitbit_high", "adc_high", "adc_low")
 
+    #: Branches read via direct ``tree.<attr>`` access (see :class:`Acquisition`).
+    _DIRECT_BRANCHES = ("n_slboards", "slboard_id", "chipid")
+
     def __init__(self, input_path: str, geometry: DetectorGeometry, tree_name: str):
         self._geometry = geometry
         self._file = ROOT.TFile(input_path, "READ")
@@ -125,6 +128,14 @@ class AcquisitionReader:
         self._tree = self._file.Get(tree_name)
         if not self._tree:
             raise IOError(f"Tree '{tree_name}' not found in {input_path}")
+        # Read only the branches the builder actually touches. The converted
+        # input also carries several huge per-channel arrays we never use
+        # (autogainbit_high/low, hitbit_low) plus slow-control branches; without
+        # this, ``GetEntry`` reads them all on every acquisition and that wasted
+        # I/O dominates the whole event-building runtime.
+        self._tree.SetBranchStatus("*", 0)
+        for name in self._LEAF_NAMES + self._DIRECT_BRANCHES:
+            self._tree.SetBranchStatus(name, 1)
         self._leaves = {name: self._tree.GetLeaf(name) for name in self._LEAF_NAMES}
 
     @property
@@ -183,6 +194,7 @@ class EcalWriter:
         self._hit_x = np.zeros(max_hits_per_event, dtype=np.float32)
         self._hit_y = np.zeros(max_hits_per_event, dtype=np.float32)
         self._hit_z = np.zeros(max_hits_per_event, dtype=np.float32)
+        self._hit_ismasked = np.zeros(max_hits_per_event, dtype=np.int32)
 
         self._tree.Branch("run", self._run, "run/I")
         self._tree.Branch("event", self._event, "event/I")
@@ -203,6 +215,7 @@ class EcalWriter:
         self._tree.Branch("hit_x", self._hit_x, "hit_x[nhit_chan]/F")
         self._tree.Branch("hit_y", self._hit_y, "hit_y[nhit_chan]/F")
         self._tree.Branch("hit_z", self._hit_z, "hit_z[nhit_chan]/F")
+        self._tree.Branch("hit_ismasked", self._hit_ismasked, "hit_ismasked[nhit_chan]/I")
 
     def write(self, event, spill_index: int, event_index: int) -> bool:
         """Fill one :class:`ReconstructedEvent`. Returns ``False`` if skipped.
@@ -237,6 +250,7 @@ class EcalWriter:
             self._hit_x[i] = hit.x
             self._hit_y[i] = hit.y
             self._hit_z[i] = hit.z
+            self._hit_ismasked[i] = int(hit.is_masked)
 
         self._tree.Fill()
         return True

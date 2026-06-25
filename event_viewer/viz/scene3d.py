@@ -9,7 +9,9 @@ coloured by hit energy.
 Note on negative energies: ``hit_energy`` can be slightly negative when the raw
 ADC sits below pedestal (a known artefact of the dummy calibration, not physics).
 By default the colour range is clipped at 0 so the colour scale tracks real
-signal; ``color_clip=False`` switches to a symmetric range to expose the noise.
+signal; ``color_clip=False`` switches to the actual ``[min, max]`` of the shown
+hits, so the scale reflects the real (incl. negative) energies and its lower end
+maps to the faintest displayed pad.
 """
 
 from __future__ import annotations
@@ -107,8 +109,8 @@ class DetectorScene3D:
         if color_clip:
             cmin, cmax = 0.0, float(np.nanmax(energy)) if energy.size else 1.0
         else:
-            bound = float(np.nanmax(np.abs(energy))) if energy.size else 1.0
-            cmin, cmax = -bound, bound
+            cmin = float(np.nanmin(energy)) if energy.size else 0.0
+            cmax = float(np.nanmax(energy)) if energy.size else 1.0
         if cmax <= cmin:
             cmax = cmin + 1.0
         return cmin, cmax

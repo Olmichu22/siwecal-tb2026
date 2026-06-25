@@ -1,30 +1,33 @@
 # siwecal_validation
 
-Validation plots and **particle-identification metrics** for the reconstructed
-`ecal` tree produced by [`siwecal_eventbuilder`](../siwecal_eventbuilder/README.md).
-For one file or a whole energy scan it computes per-event variables, applies
+Validation plots and **particle-identification metrics** for the SiW-ECAL.
+For one file or a whole energy scan it reads the per-event variables, applies
 selection cuts, fits the energy peak, and writes PNG plots plus a results table.
 It is the object-oriented successor of `plot_val_plots.py`.
+
+The per-event metrics are **not computed here** — they are read from the
+[`k4SiWEcalReco`](../k4SiWEcalReco/README.md) output next to each input
+(`ecal_<run>.edm4hep.root`, or its `ecal_<run>.valtree.root` tree if the EDM4hep
+file is absent). This module is plots-only; generate the metrics first with
+`k4SiWEcalReco/run_pid_batch.py`.
 
 ## How it works
 
 For each input file the pipeline (one class per concern) does:
 
-1. **Read + derive** (`event_data.py`, `metrics.py`) — load the `ecal` tree with
-   `uproot` and compute every per-event variable: basic ones (`nhit`, `zbary`,
-   `energy`, `hits_per_layer`, `mip_likeness`) and the particle-discrimination
-   metrics (shower start/length, tungsten-weighted energy, Molière radius,
-   transverse RMS, ...). Events with no hits or non-positive energy are skipped.
-2. **Cache** (`vars_cache.py`) — the full original tree plus all derived
-   variables is written to a `<stem>.valcache.root` so re-runs are instant. The
-   cache stores a fingerprint of the config; a config change invalidates it
-   automatically.
-3. **Select** (`selection.py`) — apply a `CutSet` (general cuts from the CLI, or
+1. **Read** (`event_data.py`) — load every per-event variable from the
+   `k4SiWEcalReco` output: basic ones (`nhit`, `zbary`, `energy`,
+   `hits_per_layer`, `mip_likeness`) and the particle-discrimination metrics
+   (shower start/length, tungsten-weighted energy, Molière radius, transverse
+   RMS, ...). Metrics come straight from the EDM4hep Cluster (or the valtree's
+   derived branches); nothing is recomputed. Events with no hits or non-positive
+   energy were already dropped upstream.
+2. **Select** (`selection.py`) — apply a `CutSet` (general cuts from the CLI, or
    per-energy cuts from the YAML, which override the general ones).
-4. **Plot + fit** (`plots.py`, `fits.py`) — one `Plotter` subclass per plot type
+3. **Plot + fit** (`plots.py`, `fits.py`) — one `Plotter` subclass per plot type
    (energy histogram with a Gaussian fit, MIP-likeness, nHit-vs-⟨Z⟩, ...),
    produced individually and/or as a combined grid.
-5. **Results** (`results.py`, `output.py`) — a structured output tree under
+4. **Results** (`results.py`, `output.py`) — a structured output tree under
    `output_dir`, plus `results.csv` / `results.txt` (signal rate, fitted μ/σ,
    summary metrics). In `--all`/`--point` mode it also makes cross-energy summary
    plots (energy calibration, resolution vs E).
@@ -54,32 +57,29 @@ python -m siwecal_validation --point 2
 
 | Flag | Meaning |
 |---|---|
-| `--file FILE` | a specific `ecal`/`valcache` ROOT file |
+| `--file FILE` | a specific event-builder `ecal_<run>.root` (its metrics file is found next to it) |
 | `--run RUN` | a single run (resolved against the `settings.yml` data roots) |
 | `--all` / `--point N` | every entry of the YAML `event_data` map / only beam point P*N* |
 | `--cfg FILE` | `data_reference` YAML (default: `configs/data/data_reference.yml`) |
 | `--out DIR` | output base (default: `settings.yml` `output_dir`) |
 | `--grid-only` / `--no-grid` | only the combined grid PNG / only the individual PNGs |
-| `--no-plots` | produce no plots at all, only the ROOT file(s) (valcache / `--save-tree`) — for the `event_viewer` |
 | `--<var>-min` / `--<var>-max` | general selection cuts (one pair per `CutSet` variable) |
 | `--is-shower` / `--no-shower` | keep only shower / non-shower events |
-| `--create-tree` | force (re)generate the metrics cache (after a config change) |
-| `--save-tree` | also write a cut-applied augmented tree under the output dir |
-| `--cache-dir DIR` | put the `*.valcache.root` caches here instead of next to the input — **use this when the data directory is read-only** |
 
 Run `python -m siwecal_validation --help` for the complete list.
 
-## Caching: `*.valcache.root`
+## Metrics source
 
-The first run over a file computes the derived variables and writes a
-`<stem>.valcache.root`; later runs read it back (the fast path) unless the config
-changed or `--create-tree` is given. By default the cache sits next to the input;
-set `cache_dir` in `settings.yml` (or `--cache-dir`) to collect all caches in one
-writable directory. The same caches are what `event_viewer` reads to show metrics.
+The per-event metrics are read from the `k4SiWEcalReco` output located next to
+each input (or in `settings.yml` `pid_dir`): the EDM4hep PID file
+`ecal_<run>.edm4hep.root` first, else its `ecal_<run>.valtree.root` tree (the
+same derived variables in a plain TTree). If neither exists the run errors,
+asking you to generate one with `k4SiWEcalReco/run_pid_batch.py`. This module
+never writes those files.
 
 ## Stack
 
-Python with `uproot` (reading) + **PyROOT** (writing the valcache/augmented
-trees), `numpy`, `scipy` (Gaussian fits), `matplotlib` (PNGs, styled via
-`MLPConfig/newams.mplstyle`), `pyyaml`. Provided by key4hep — see the top-level
-[README](../README.md). Run the unit tests with `pytest siwecal_validation/tests`.
+Python with `uproot` (reading), `numpy`, `scipy` (Gaussian fits), `matplotlib`
+(PNGs, styled via `MLPConfig/newams.mplstyle`), `pyyaml`. Provided by key4hep —
+see the top-level [README](../README.md). Run the unit tests with
+`pytest siwecal_validation/tests`.

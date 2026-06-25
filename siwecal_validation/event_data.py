@@ -132,6 +132,16 @@ class EventData:
     n_layers_hit: np.ndarray        # number of layers with at least one hit
     e_over_nhit: np.ndarray         # energy / nhit (hit energy density)
 
+    # --- provenance (EDM4hep path only) ------------------------------------
+    #: Original podio frame index of each event (set by :meth:`from_edm4hep`;
+    #: ``None`` for the ``from_root`` path). Lets ``--save-tree`` map a cut mask
+    #: back to the frames to copy into a filtered EDM4hep file. Sliced by
+    #: :meth:`select` like any other per-event array.
+    source_index: np.ndarray = None
+
+    #: Dataclass fields that are not per-event metric arrays.
+    _META_FIELDS = ("label", "source_index")
+
     def __len__(self) -> int:
         return len(self.nhit)
 
@@ -173,8 +183,13 @@ class EventData:
             raise RuntimeError(f"Tree '{config.tree_name}' not found in {path}. "
                                f"Available: {keys}")
 
+        # Channels with no MIP calibration are flagged ``hit_ismasked`` by the
+        # event builder and excluded from every metric. Older ``ecal`` files
+        # predate the branch; there we keep all hits (no masking available).
+        has_ismasked = bool(tree.GetListOfBranches().FindObject("hit_ismasked"))
+
         # One list per EventData array field (filled per accepted event).
-        cols = {f.name: [] for f in fields(cls) if f.name != "label"}
+        cols = {f.name: [] for f in fields(cls) if f.name not in cls._META_FIELDS}
 
         # Extra MIP-cut threshold columns: {threshold: {scalar_name: list}}.
         from .vars_cache import MIP_CUT_THRESHOLDS, _scalar_derived_names
@@ -190,11 +205,21 @@ class EventData:
             slab = np.frombuffer(tree.hit_slab, np.int32, count=n_channels).copy()
             energy = np.frombuffer(tree.hit_energy, np.float32,
                                    count=n_channels).copy()
-            energy_sum = float(energy.sum())
-            if energy_sum <= 0:
-                continue
             x = np.frombuffer(tree.hit_x, np.float32, count=n_channels).copy()
             y = np.frombuffer(tree.hit_y, np.float32, count=n_channels).copy()
+
+            # Drop masked (uncalibrated) channels before any metric is computed.
+            if has_ismasked:
+                ismasked = np.frombuffer(tree.hit_ismasked, np.int32,
+                                         count=n_channels).astype(bool)
+                keep = ~ismasked
+                slab, energy, x, y = slab[keep], energy[keep], x[keep], y[keep]
+            n_channels = int(slab.size)
+            if n_channels == 0:
+                continue
+            energy_sum = float(energy.sum())
+            if not (energy_sum > 0):
+                continue
 
             # Per-layer profiles.
             hits_layer = metrics.hits_per_layer(slab, n_layers)
@@ -277,6 +302,56 @@ class EventData:
             except OSError as error:
                 print(f"WARNING: could not write metrics cache {cache}: {error}")
         return data
+
+    # ----------------------------------------------- loading (EDM4hep) ------
+    #: EventData fields stored as 2-D per-layer profiles (length ``n_layers``).
+    _PER_LAYER_FIELDS = ("hits_per_layer", "energy_per_layer", "weighte_per_layer")
+
+    @classmethod
+    def from_edm4hep(cls, path: str, label: str, config,
+                     mip_thresholds=(0.5, 1.0)) -> "EventData":
+        """Build an :class:`EventData` from a ``k4SiWEcalReco`` EDM4hep file.
+
+        The per-event discrimination variables are read straight from each
+        ``Cluster``'s ``shapeParameters`` (computed in C++ by
+        ``EcalPidTransformer``); nothing is recomputed here. Events with no hits
+        or non-positive energy are dropped, matching :meth:`from_root`.
+
+        ``mip_thresholds`` must match the file's ``shapeParameters`` layout
+        (empty when the PID stage ran in physics mode without the MIP-variant
+        blocks); it only affects the width check, not the cut variables read.
+        """
+        from siwecal_common.edm4hep_pid import PidFileReader
+
+        reader = PidFileReader(path, n_layers=config.n_layers,
+                               mip_thresholds=mip_thresholds)
+        cols = reader.scalar_columns()
+        ids = reader.identifiers()
+        n_layers = config.n_layers
+
+        valid = (ids["nhit_chan"] > 0) & (cols["energy"] > 0)
+
+        scalar_fields = [f.name for f in fields(cls)
+                         if f.name not in cls._META_FIELDS
+                         and f.name not in cls._PER_LAYER_FIELDS]
+        arrays = {}
+        for name in scalar_fields:
+            if name not in cols:
+                raise RuntimeError(
+                    f"Variable '{name}' not found in {path}. Available shape "
+                    f"parameters: {reader.shape_names[:5]}...")
+            values = cols[name][valid]
+            arrays[name] = values.astype(bool) if name == "is_shower" else values.astype(float)
+
+        for name in cls._PER_LAYER_FIELDS:
+            profile = np.stack([cols[f"{name}_{i}"] for i in range(n_layers)], axis=1)
+            arrays[name] = profile[valid].astype(float)
+
+        # Original podio frame index of each surviving event, so --save-tree can
+        # copy exactly the cut-passing frames into a filtered EDM4hep file.
+        arrays["source_index"] = np.nonzero(valid)[0].astype(np.int64)
+
+        return cls(label=label, **arrays)
 
     # ----------------------------------------------------------- filtering --
     def select(self, cutset) -> "EventData":

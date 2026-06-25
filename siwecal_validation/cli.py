@@ -10,17 +10,13 @@ Preserves the original ``plot_val_plots.py`` flags:
     --out DIR            output base (external; default: validation_output)
     --grid-only          produce only the combined grid PNG (no individuals)
     --no-grid            produce only the individual PNGs (no combined grid)
-    --no-plots           produce no plots at all, only the ROOT file(s)
-                         (valcache / --save-tree); for the event_viewer
     --nhit-min/max, --energy-min/max, --rate-min/max   general selection cuts
 
-Cache / augmented-tree flags:
-
-    --create-tree        force (re)generate the per-file metrics cache
-                         (``<stem>.valcache.root`` next to the input); useful
-                         after a config change or to pre-warm a fresh dataset.
-    --save-tree          also write a cut-applied augmented TTree in the output
-                         directory (``<out>/<label>/trees/<label><suffix>.root``).
+This module only makes the validation plots: the per-event metrics are read
+from the ``k4SiWEcalReco`` output next to each input (the EDM4hep PID file
+``ecal_<run>.edm4hep.root``, or its ``ecal_<run>.valtree.root`` tree if the
+EDM4hep file is absent). It never (re)generates those files -- run
+``k4SiWEcalReco/run_pid_batch.py`` first if neither exists.
 
 General cuts apply to every sample; in ``--all`` mode a per-energy ``cuts:``
 block in the YAML overrides them, so selections can be optimised per energy.
@@ -66,10 +62,6 @@ def parse_args(argv=None):
                       help="Only the combined grid PNG (skip individual plots)")
     grid.add_argument("--no-grid", action="store_true",
                       help="Only the individual PNGs (skip the combined grid)")
-    grid.add_argument("--no-plots", action="store_true", dest="no_plots",
-                      help="Produce no plots at all; only generate the ROOT "
-                           "file(s) (valcache / --save-tree). Useful when the "
-                           "output is only needed for the event_viewer.")
     # General selection cuts (applied to all samples; per-energy YAML overrides).
     # One --<var>-min/--<var>-max float flag per CutSet variable, generated from
     # the spec so the CLI never drifts out of sync with selection.py.
@@ -86,18 +78,6 @@ def parse_args(argv=None):
                         const=True, default=None, help="keep only shower events")
     shower.add_argument("--no-shower", dest="is_shower", action="store_const",
                         const=False, help="keep only non-shower events")
-    # Augmented-tree / cache flags.
-    p.add_argument("--create-tree", action="store_true", dest="create_tree",
-                   help="Force (re)generate the per-file metrics cache next to "
-                        "the input (*.valcache.root). Use after a config change "
-                        "or to pre-warm a fresh dataset.")
-    p.add_argument("--save-tree", action="store_true", dest="save_tree",
-                   help="Write a cut-applied augmented TTree to the output "
-                        "directory (<out>/<label>/trees/<label><suffix>.root).")
-    p.add_argument("--cache-dir", default=paths.cache_dir(), dest="cache_dir",
-                   help="Directory for the *.valcache.root metric caches "
-                        "(default: settings.yml cache_dir, else next to each "
-                        "input). Use this when the data directory is read-only.")
     return p.parse_args(argv)
 
 
@@ -124,15 +104,11 @@ def main(argv=None):
     args = parse_args(argv)
     general_cut = cutset_from_args(args)
     layout = OutputLayout(args.out)
-    # --no-plots wins over the grid/individual selection: skip every plot.
-    make_individual = not args.grid_only and not args.no_plots
-    make_grid = not args.no_grid and not args.no_plots
+    make_individual = not args.grid_only
+    make_grid = not args.no_grid
     runner = ValidationRunner(layout, config=PlotConfig(),
                               make_individual=make_individual,
-                              make_grid=make_grid,
-                              create_tree=args.create_tree,
-                              save_tree=args.save_tree,
-                              cache_dir=args.cache_dir)
+                              make_grid=make_grid)
 
     if args.all or args.point is not None:
         with open(args.cfg) as handle:
