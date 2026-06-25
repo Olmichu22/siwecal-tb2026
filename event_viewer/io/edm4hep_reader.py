@@ -34,6 +34,10 @@ class Edm4hepEventReader:
         self.tree_name = tree_name
         self.n_layers = n_layers
         self._pid = PidFileReader(path, n_layers=n_layers)
+        # Force the lazy scalar build so ``shape_names`` reflects the file's ACTUAL
+        # layout: physics-mode files carry no ``mip05_/mip1_`` blocks, which
+        # PidFileReader only detects once the scalars are read.
+        _ = self._pid.n_events
 
         # Base per-event scalars = shape parameters that are neither per-layer
         # blocks nor MIP-cut variants. Note the MIP-cut prefixes are ``mip05_``/

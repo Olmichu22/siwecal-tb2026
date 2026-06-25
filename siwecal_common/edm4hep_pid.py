@@ -20,6 +20,7 @@ read straight from the Cluster (computed in C++ by ``EcalPidTransformer``).
 
 from __future__ import annotations
 
+import os
 from typing import Dict, List, Optional
 
 import numpy as np
@@ -76,6 +77,7 @@ class PidFileReader:
         self._header_coll = header_coll
 
         # Names from the Python schema -> opening a file does no podio work.
+        self._n_layers = n_layers
         self.shape_names: List[str] = canonical_shape_names(n_layers, mip_thresholds)
         self._name_idx = {n: i for i, n in enumerate(self.shape_names)}
 
@@ -121,10 +123,18 @@ class PidFileReader:
         ev = self._events_coll
         sp = tree[f"_{ev}_shapeParameters"].array()
         mat = ak.to_numpy(sp)                      # regular: 1 cluster/event
-        if mat.shape[1] != len(self.shape_names):  # safety against a layout change
-            raise RuntimeError(
-                f"shapeParameters width {mat.shape[1]} != "
-                f"{len(self.shape_names)} names in {self.path}")
+        if mat.shape[1] != len(self.shape_names):
+            # The PID stage may run without the mip05_/mip1_ variant blocks
+            # (physics mode). Adapt to the file's actual width when it matches the
+            # no-variant layout; otherwise the layout is genuinely unexpected.
+            base = canonical_shape_names(self._n_layers, mip_thresholds=())
+            if mat.shape[1] == len(base):
+                self.shape_names = base
+                self._name_idx = {n: i for i, n in enumerate(base)}
+            else:
+                raise RuntimeError(
+                    f"shapeParameters width {mat.shape[1]} != "
+                    f"{len(self.shape_names)} names in {self.path}")
 
         hd = self._header_coll
         first = lambda field: ak.to_numpy(  # noqa: E731
@@ -198,3 +208,173 @@ class PidFileReader:
     def close(self) -> None:
         # podio Reader has no explicit close; drop references.
         self._frames = None
+
+
+def write_filtered(in_path: str, out_path: str, frame_indices,
+                   events_category: str = "events") -> int:
+    """Write a filtered copy of an EDM4hep PID file (the ``--save-tree`` output).
+
+    Copies only the ``events`` frames whose podio index is in ``frame_indices``
+    (the original frame indices of the cut-passing events, see
+    :attr:`EventData.source_index`), plus every non-event category (``metadata``
+    with ``ECalPid_shapeParameterNames``, ``configuration_metadata``) verbatim so
+    the result stays a self-describing, re-readable PID file. Returns the number
+    of event frames written.
+    """
+    import podio.root_io as rio
+
+    indices = sorted({int(i) for i in frame_indices})
+    out_dir = os.path.dirname(out_path)
+    if out_dir:
+        os.makedirs(out_dir, exist_ok=True)
+
+    reader = rio.Reader(in_path)
+    writer = rio.Writer(out_path)
+
+    events = reader.get(events_category)
+    for idx in indices:
+        writer.write_frame(events[idx], events_category)
+
+    # Preserve the metadata / configuration categories unchanged.
+    for category in reader.categories:
+        if category == events_category:
+            continue
+        for frame in reader.get(category):
+            writer.write_frame(frame, category)
+
+    # Flush/close now (the Python Writer only finishes at interpreter exit via
+    # its atexit hook); the underlying C++ writer exposes finish() directly.
+    writer._writer.finish()   # noqa: SLF001  (documented podio internal pattern)
+    return len(indices)
+
+
+def write_valtree(reader: "PidFileReader", out_path: str, config, frame_indices,
+                  tree_name: str = "ecal", mip_thresholds=(0.5, 1.0)) -> int:
+    """Write a valcache-schema TTree (``ecal``) from an EDM4hep PID file.
+
+    Re-serialises the EDM4hep PID file ``reader`` opens into the same plain
+    augmented tree that :mod:`siwecal_validation.vars_cache` writes (the
+    ``*.valcache.root`` schema), keeping only the events whose podio frame index
+    is in ``frame_indices`` (the original frame indices of the cut-passing
+    events, i.e. ``EventData.source_index[mask]``). Returns the number of events
+    written. Written atomically.
+
+    The per-event derived scalars / per-layer profiles / MIP-variant blocks are
+    read straight from the Cluster ``shapeParameters`` (no recompute); the
+    per-hit branches and the recomputed counters/sums come from the per-event
+    ``CalorimeterHit`` + ``UserDataCollection`` arrays. ``mip_thresholds`` must
+    match the file's layout (empty in physics mode -> no ``mip05_/mip1_``
+    branches); only thresholds actually present in the file are written.
+    """
+    import ROOT
+
+    # Reuse the valcache schema definitions so the branch list never drifts.
+    from siwecal_validation.vars_cache import (
+        _REBUILT_HIT_INT, _REBUILT_HIT_FLOAT, _PER_LAYER_FIELDS,
+        _scalar_derived_names, _threshold_prefix)
+
+    n_layers = config.n_layers
+    indices = sorted({int(i) for i in frame_indices})
+
+    cols = reader.scalar_columns()    # per-event (all events): base + per-layer + mip
+    ids = reader.identifiers()
+    scalar_names = _scalar_derived_names()       # 21 scalars incl. is_shower
+    per_layer = list(_PER_LAYER_FIELDS)          # 3 per-layer profile blocks
+    # Only the MIP-variant blocks actually present in this file (validation mode).
+    active_mip = [t for t in mip_thresholds
+                  if f"{_threshold_prefix(t)}_nhit" in cols]
+
+    # Read the kept events' hits once (podio frame access is the slow part) and
+    # size the rebuilt per-hit buffers from the largest surviving multiplicity.
+    hits_cache = {i: reader.read_hits(i) for i in indices}
+    max_hits = max([1] + [int(h["hit_slab"].size) for h in hits_cache.values()])
+
+    out_dir = os.path.dirname(out_path)
+    if out_dir:
+        os.makedirs(out_dir, exist_ok=True)
+    tmp_path = out_path + ".tmp"
+    fout = ROOT.TFile(tmp_path, "RECREATE")
+    out_tree = ROOT.TTree(tree_name, tree_name)
+
+    # --- branch buffers (kept alive for the whole fill loop) ------------------
+    id_bufs = {n: np.zeros(1, dtype=np.int32) for n in ("run", "event", "spill", "bcid")}
+    for name, buf in id_bufs.items():
+        out_tree.Branch(name, buf, f"{name}/I")
+
+    nhit_chan_buf = np.zeros(1, dtype=np.int32)
+    nhit_slab_buf = np.zeros(1, dtype=np.int32)
+    nhit_chip_buf = np.zeros(1, dtype=np.int32)
+    sum_hg_buf = np.zeros(1, dtype=np.float32)
+    sum_energy_buf = np.zeros(1, dtype=np.float32)
+    out_tree.Branch("nhit_chan", nhit_chan_buf, "nhit_chan/I")
+    out_tree.Branch("nhit_slab", nhit_slab_buf, "nhit_slab/I")
+    out_tree.Branch("nhit_chip", nhit_chip_buf, "nhit_chip/I")
+    out_tree.Branch("sum_hg", sum_hg_buf, "sum_hg/F")
+    out_tree.Branch("sum_energy", sum_energy_buf, "sum_energy/F")
+
+    hit_int_bufs = {n: np.zeros(max_hits, dtype=np.int32) for n in _REBUILT_HIT_INT}
+    hit_float_bufs = {n: np.zeros(max_hits, dtype=np.float32) for n in _REBUILT_HIT_FLOAT}
+    for name, buf in hit_int_bufs.items():
+        out_tree.Branch(name, buf, f"{name}[nhit_chan]/I")
+    for name, buf in hit_float_bufs.items():
+        out_tree.Branch(name, buf, f"{name}[nhit_chan]/F")
+
+    scalar_bufs = {}
+    for name in scalar_names:
+        if name == "is_shower":
+            buf = np.zeros(1, dtype=np.bool_)
+            out_tree.Branch(name, buf, f"{name}/O")
+        else:
+            buf = np.zeros(1, dtype=np.float64)
+            out_tree.Branch(name, buf, f"{name}/D")
+        scalar_bufs[name] = buf
+
+    layer_bufs = {}
+    for block in per_layer:
+        buf = np.zeros(n_layers, dtype=np.float64)
+        out_tree.Branch(block, buf, f"{block}[{n_layers}]/D")
+        layer_bufs[block] = buf
+
+    mip_bufs = {}    # (prefix, name) -> buffer
+    for thr in active_mip:
+        prefix = _threshold_prefix(thr)
+        for name in scalar_names:
+            full = f"{prefix}_{name}"
+            if name == "is_shower":
+                buf = np.zeros(1, dtype=np.bool_)
+                out_tree.Branch(full, buf, f"{full}/O")
+            else:
+                buf = np.zeros(1, dtype=np.float64)
+                out_tree.Branch(full, buf, f"{full}/D")
+            mip_bufs[(prefix, name)] = buf
+
+    # --- fill ----------------------------------------------------------------
+    for i in indices:
+        for name, buf in id_bufs.items():
+            buf[0] = ids[name][i]
+        hits = hits_cache[i]
+        slab = hits["hit_slab"].astype(np.int64)
+        chip = hits["hit_chip"].astype(np.int64)
+        n = int(slab.size)
+        nhit_chan_buf[0] = n
+        nhit_slab_buf[0] = np.unique(slab).size
+        nhit_chip_buf[0] = np.unique((slab << 16) | chip).size
+        sum_hg_buf[0] = float(hits["hit_hg"].sum())
+        sum_energy_buf[0] = float(hits["hit_energy"].sum())
+        for name, buf in hit_int_bufs.items():
+            buf[:n] = hits[name]
+        for name, buf in hit_float_bufs.items():
+            buf[:n] = hits[name]
+        for name, buf in scalar_bufs.items():
+            buf[0] = cols[name][i]
+        for block, buf in layer_bufs.items():
+            buf[:] = [cols[f"{block}_{j}"][i] for j in range(n_layers)]
+        for (prefix, name), buf in mip_bufs.items():
+            buf[0] = cols[f"{prefix}_{name}"][i]
+        out_tree.Fill()
+
+    fout.cd()
+    out_tree.Write()
+    fout.Close()
+    os.replace(tmp_path, out_path)
+    return len(indices)

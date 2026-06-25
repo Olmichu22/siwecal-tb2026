@@ -4,7 +4,8 @@ Dash callbacks wiring the stores, the controller and the figures together.
 Session state lives in four light ``dcc.Store``s:
 
 * ``store-file``    : path of the loaded ROOT file.
-* ``store-pos``     : 0-based position within the list of events passing the cuts.
+* ``store-pos``     : absolute entry index of the shown event (stable across
+                      threshold changes; position in the passing list is derived).
 * ``store-cuts``    : list of ``{variable, lo, hi}`` cut dicts.
 * ``store-cluster`` : ``{passing: [...], labels: [...]}`` from the last run.
 
@@ -17,6 +18,7 @@ from __future__ import annotations
 
 import os
 
+import numpy as np
 import plotly.graph_objects as go
 from dash import ALL, MATCH, Input, Output, State, ctx, dcc, html, no_update
 from dash.exceptions import PreventUpdate
@@ -31,6 +33,14 @@ def _empty_fig(message: str = "") -> go.Figure:
         fig.add_annotation(text=message, showarrow=False,
                            xref="paper", yref="paper", x=0.5, y=0.5)
     return fig
+
+
+def _pos_of(passing, cur_index) -> int:
+    """Position of absolute entry ``cur_index`` in the passing list, else 0."""
+    if cur_index is None:
+        return 0
+    loc = np.where(np.asarray(passing) == cur_index)[0]
+    return int(loc[0]) if loc.size else 0
 
 
 def register_callbacks(app, controller) -> None:
@@ -150,7 +160,7 @@ def register_callbacks(app, controller) -> None:
         State("store-hit-threshold", "data"),
         prevent_initial_call=True,
     )
-    def navigate(_prev, _next, event_input, pos, path, cuts, hit_threshold):
+    def navigate(_prev, _next, event_input, cur_index, path, cuts, hit_threshold):
         if not path:
             raise PreventUpdate
         thr = float(hit_threshold or 0.0)
@@ -158,20 +168,19 @@ def register_callbacks(app, controller) -> None:
         n_pass = len(passing)
         if n_pass == 0:
             raise PreventUpdate
-        pos = pos or 0
+        pos = _pos_of(passing, cur_index)
         triggered = ctx.triggered_id
         if triggered == "prev-btn":
-            new = pos - 1
+            pos -= 1
         elif triggered == "next-btn":
-            new = pos + 1
+            pos += 1
         elif triggered == "event-input":
-            new = (int(event_input) - 1) if event_input else pos
-        else:
-            new = pos
-        new = max(0, min(n_pass - 1, new))
-        if new == pos:
+            pos = (int(event_input) - 1) if event_input else pos
+        pos = max(0, min(n_pass - 1, pos))
+        new_index = int(passing[pos])
+        if new_index == cur_index:
             raise PreventUpdate
-        return new
+        return new_index
 
     @app.callback(
         Output("store-pos", "data", allow_duplicate=True),
@@ -180,7 +189,7 @@ def register_callbacks(app, controller) -> None:
         prevent_initial_call=True,
     )
     def reset_pos(_path, _cuts):
-        return 0
+        return None
 
     # ------------------------------------------------------- event render --
     @app.callback(
@@ -196,7 +205,7 @@ def register_callbacks(app, controller) -> None:
         Input("color-clip", "value"),
         Input("store-hit-threshold", "data"),
     )
-    def render_event(path, pos, cuts, clip, hit_threshold):
+    def render_event(path, cur_index, cuts, clip, hit_threshold):
         if not path:
             return (_empty_fig("Load a file"), _empty_fig(), [],
                     "no file", None, 1)
@@ -206,7 +215,7 @@ def register_callbacks(app, controller) -> None:
         if n_pass == 0:
             return (_empty_fig("No events pass the cuts"), _empty_fig(),
                     [], "0 events passing cuts", None, 1)
-        pos = max(0, min(n_pass - 1, pos or 0))
+        pos = _pos_of(passing, cur_index)
         index = int(passing[pos])
         color_clip = "clip" in (clip or [])
         scene, layers, rows = controller.event_figures(path, index, color_clip, thr)
@@ -266,6 +275,16 @@ def register_callbacks(app, controller) -> None:
         change its passing-index snapshot is stale, so drop it. This unsticks the
         histogram / scatter / cluster examples (which read the snapshot) and lets
         them follow the current selection again -- re-run clustering to refresh."""
+        return None
+
+    @app.callback(
+        Output("store-cluster", "data", allow_duplicate=True),
+        Input("cluster-reset", "n_clicks"),
+        prevent_initial_call=True,
+    )
+    def reset_cluster(_n_clicks):
+        """Clear the last clustering run so the cluster panels, scatter colouring
+        and stacked histogram fall back to the plain (uncluster) view."""
         return None
 
     @app.callback(
