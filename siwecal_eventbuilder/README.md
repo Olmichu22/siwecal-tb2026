@@ -102,9 +102,9 @@ calibration, not a physics signal.
 
 Channels with no MIP calibration (`mpv = 0`) cannot be turned into an energy.
 They are kept in the `ecal` tree as a raw record (`hit_energy = 0`) but tagged
-with the `hit_ismasked` branch (`1` = masked). Downstream stages drop them:
-`siwecal_validation` excludes them from its `*.valcache.root` cache and all
-metrics, and `EcalToEDM4hep` omits them from the EDM4hep output.
+with the `hit_ismasked` branch (`1` = masked). The reconstruction drops them:
+`k4SiWEcalReco`'s `EcalToEDM4hep` omits masked channels from its output, so they
+never reach the shower variables or the `siwecal_validation` plots.
 
 ## Calibration file format and NaN handling
 

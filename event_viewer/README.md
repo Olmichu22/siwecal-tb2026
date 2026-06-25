@@ -44,8 +44,10 @@ ssh -L 8050:localhost:8050 you@lxplus.cern.ch
 ```
 
 Without `--file` the viewer scans every `data_dir` configured in `settings.yml`
-(plus `cache_dir` if set) for `*.valcache.root` and `ecal_*.root`, and you pick a
-run from the dropdown or change file at runtime.
+(plus `cache_dir` if set) for `*.valcache.root` and `ecal_*.root` — the latter
+also matches the `k4SiWEcalReco` outputs `ecal_<run>.edm4hep.root` /
+`ecal_<run>.valtree.root`, read automatically with the right reader. Pick a run
+from the dropdown or change file at runtime.
 
 ## Tabs
 
@@ -71,9 +73,9 @@ The Event tab has a **MIP cut** slider (`hit_energy ≥ 0 / 0.5 / 1.0 MIP`) that
 filters hits below the threshold and recomputes the per-event metrics
 accordingly.
 
-- **Files with a valcache** carry pre-computed branches (`mip05_*`, `mip1_*`)
-  written by `siwecal_validation`, so changing the cut is an instant branch
-  read.
+- **Files with the metrics tree** carry pre-computed branches (`mip05_*`,
+  `mip1_*`) written by `k4SiWEcalReco` in `--validation` mode, so changing the
+  cut is an instant branch read.
 - **Plain `ecal_*.root` files** have no such branches, so the slider falls back
   to an in-memory recompute that loops over every event in Python. This is fine
   for small files but prohibitively slow on large runs.
@@ -81,8 +83,9 @@ accordingly.
 To avoid the viewer hanging, the MIP cut slider is **disabled** when a file both
 (1) lacks pre-computed MIP branches **and** (2) has more than
 `max_recompute_events` events (default **10000**). The status bar then notes
-*"MIP cut disabled"*. Generate a valcache for the run (run `siwecal_validation`
-on it) to re-enable the cut on large files.
+*"MIP cut disabled"*. Generate a metrics file with the pre-computed MIP branches
+(`python k4SiWEcalReco/run_pid_batch.py --validation`) to re-enable the cut on
+large files.
 
 The limit is configurable:
 

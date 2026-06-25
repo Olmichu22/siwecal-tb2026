@@ -153,3 +153,55 @@ def pid_dir() -> Optional[str]:
     to keep them next to each input ``ecal_<run>.root`` (the default)."""
     value = _get("pid_dir")
     return resolve(str(value)) if value else None
+
+
+def pid_path_for(events_path: str) -> Optional[str]:
+    """Locate the Gaudi PID (EDM4hep) file for an event-builder ``events_path``.
+
+    The PID stage names its output ``ecal_<X>.edm4hep.root`` mirroring the input
+    ``ecal_<X>.root`` (see ``k4SiWEcalReco/run_pid_batch.py``); the legacy
+    ``ecal_pid_<X>.root`` name is still recognised for already-produced files. It
+    is searched in :func:`pid_dir` first (if configured) and then next to
+    ``events_path``. Returns the first existing candidate, or ``None`` if none.
+    """
+    base = os.path.basename(events_path)
+    stem = base[:-len(".root")] if base.endswith(".root") else base
+    label = stem[len("ecal_"):] if stem.startswith("ecal_") else stem
+    pid_names = (f"ecal_{label}.edm4hep.root", f"ecal_pid_{label}.root")
+    dirs = []
+    pdir = pid_dir()
+    if pdir:
+        dirs.append(pdir)
+    dirs.append(os.path.dirname(events_path))
+    for directory in dirs:
+        for pid_name in pid_names:
+            candidate = os.path.join(directory, pid_name)
+            if os.path.exists(candidate):
+                return candidate
+    return None
+
+
+def valtree_path_for(events_path: str) -> Optional[str]:
+    """Locate the plain metrics tree for an event-builder ``events_path``.
+
+    The PID stage can write a ``ecal_<X>.valtree.root`` (the valcache-schema
+    TTree) alongside the input; the legacy ``ecal_<X>.valcache.root`` is the same
+    format and is recognised too. Searched in :func:`pid_dir` first (if
+    configured) and then next to ``events_path``. Returns the first existing
+    candidate, or ``None``.
+    """
+    base = os.path.basename(events_path)
+    stem = base[:-len(".root")] if base.endswith(".root") else base
+    label = stem[len("ecal_"):] if stem.startswith("ecal_") else stem
+    tree_names = (f"ecal_{label}.valtree.root", f"ecal_{label}.valcache.root")
+    dirs = []
+    pdir = pid_dir()
+    if pdir:
+        dirs.append(pdir)
+    dirs.append(os.path.dirname(events_path))
+    for directory in dirs:
+        for tree_name in tree_names:
+            candidate = os.path.join(directory, tree_name)
+            if os.path.exists(candidate):
+                return candidate
+    return None

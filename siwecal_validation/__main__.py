@@ -6,7 +6,7 @@ to the ``-m`` launcher. Examples::
 
     python -m siwecal_validation --run TB2026CERN_run_000007
     python -m siwecal_validation --all
-    python -m siwecal_validation --file FILE.root --nhit-min 20 --cache-dir /tmp/cache
+    python -m siwecal_validation --file FILE.root --nhit-min 20
 """
 
 from .cli import main

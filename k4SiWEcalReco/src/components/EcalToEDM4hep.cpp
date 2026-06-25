@@ -120,6 +120,11 @@ struct EcalToEDM4hep final : k4FWCore::Producer<OutputType()> {
       // at once, so they stay index-aligned and the PID recomputes on the rest.
       if (m_hitMasked && (*m_hitMasked)[i])
         continue;
+      // Hit-level MIP cut: drop sub-threshold hits the same index-aligned way, so
+      // the PID recomputes every variable on the cleaned hit set. Disabled (<0)
+      // by default; a literal >=0 cut still drops negative pedestal-noise hits.
+      if (m_hitMipCut.value() >= 0.0 && (*m_hitEnergy)[i] < m_hitMipCut.value())
+        continue;
       auto hit = hits.create();
       std::uint64_t cellID = 0;
       m_coder->set(cellID, "slab", (*m_hitSlab)[i]);
@@ -149,6 +154,9 @@ struct EcalToEDM4hep final : k4FWCore::Producer<OutputType()> {
   Gaudi::Property<std::string> m_cellIDEncoding{
       this, "CellIDEncoding", "system:8,slab:8,chip:16,channel:8,sca:8",
       "DD4hep bitfield descriptor for the CalorimeterHit cellID"};
+  Gaudi::Property<double> m_hitMipCut{
+      this, "HitMipCut", -1.0,
+      "Drop hits with energy < this MIP threshold; <0 disables the cut"};
 
 private:
   std::unique_ptr<TFile> m_file;

@@ -37,9 +37,19 @@ svc = IOSvc("IOSvc")
 svc.Output = out_file
 # No svc.Input: EcalToEDM4hep reads the (non-podio) ecal tree itself.
 
-source = EcalToEDM4hep("EcalToEDM4hep", InputFile=ecal_file, TreeName=tree_name)
+# Run mode (set by run_pid_batch.py; sensible defaults if run k4run directly):
+#  - ECAL_HIT_MIP_CUT: drop hits below this MIP energy (<0 disables; default off).
+#  - ECAL_MIP_THRESHOLDS: comma list of MIP-cut variant blocks to compute in the
+#    Cluster ("0.5,1.0" = visualizer mode; "" = none, the physics-mode default).
+hit_mip_cut = float(os.environ.get("ECAL_HIT_MIP_CUT", "-1"))
+_raw_mip = os.environ.get("ECAL_MIP_THRESHOLDS", "0.5,1.0")
+mip_thresholds = [float(t) for t in _raw_mip.split(",") if t.strip()]
+
+source = EcalToEDM4hep("EcalToEDM4hep", InputFile=ecal_file, TreeName=tree_name,
+                       HitMipCut=hit_mip_cut)
 pid = EcalPidTransformer("EcalPidTransformer",
-                         InputCaloHits=["ECalHits"], OutputClusters=["ECalPid"])
+                         InputCaloHits=["ECalHits"], OutputClusters=["ECalPid"],
+                         MipThresholds=mip_thresholds)
 
 ApplicationMgr(TopAlg=[source, pid],
                EvtSel="NONE",

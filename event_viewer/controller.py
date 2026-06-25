@@ -56,8 +56,10 @@ class ViewerController:
     def list_files(self) -> List[str]:
         """All ``*.valcache.root`` then ``ecal_*.root`` files under every data dir.
 
-        Scans each configured root (``settings.yml`` data roots + the optional
-        valcache dir), so caches redirected elsewhere still show up.
+        The ``ecal_*.root`` pattern also matches the ``k4SiWEcalReco`` outputs
+        (``ecal_<run>.edm4hep.root`` / ``ecal_<run>.valtree.root``), which
+        ``make_reader`` then reads with the right reader. Scans each configured
+        root (``settings.yml`` data roots + the optional cache dir).
         """
         seen, files = set(), []
         for data_dir in self.config.data_dirs:

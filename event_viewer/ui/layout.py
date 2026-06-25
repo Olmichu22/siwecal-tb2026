@@ -147,6 +147,7 @@ def _distributions_tab():
                     dcc.Input(id="cluster-minsamples", type="number", min=1,
                               step=1, value=5, style={"width": "70px"}),
                     html.Button("Run", id="cluster-run", n_clicks=0),
+                    html.Button("Reset", id="cluster-reset", n_clicks=0),
                 ]),
                 html.Div(id="cluster-param-hint",
                          style={"fontSize": "12px", "color": "#666",
