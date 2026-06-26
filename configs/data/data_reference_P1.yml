@@ -1,4 +1,6 @@
-main_path: "/eos/user/o/oarquero/TB2026CERN/data/"
+# Data root for the runs below. When set it WINS over settings.yml (data_dir);
+# commented => fall back to settings.yml. Per-entry absolute paths win over this.
+# main_path: /path/to/your/TB2026CERN/data
 
 event_data:
   # P1_99GeV pendiente: faltan los eventos (solo existe el decoded

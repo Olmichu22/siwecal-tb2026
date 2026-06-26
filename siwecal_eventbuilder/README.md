@@ -40,7 +40,8 @@ dataclass defaults  →  config.yml  →  data_reference.yml  →  command-line 
 optional `config.yml` overrides only the keys you list (sections `builder`,
 `geometry`, `paths`, `calibration`, `mapping`, parsed by `settings.py`); the CLI
 wins last. Filesystem locations default to the shared `settings.yml` via
-`siwecal_common.paths`.
+`siwecal_common.paths`. A documented template lives at the repo root —
+`cp config.example.yml config.yml` and uncomment only what you need.
 
 ## Usage
 
@@ -108,6 +109,20 @@ never reach the shower variables or the `siwecal_validation` plots.
 
 ## Calibration file format and NaN handling
 
+### Muon calibration tables (`MuonCalib_it2*`)
+
+`--th N` loads the cumulative MuonCalib tables for threshold `th<N>` from
+**`calibration/MuonCalib_it2_corrected/`** — this `_corrected` set is the one the
+builder uses (see `MUON_CALIB_DIR` in `cli.py`). It is the corrected variant of
+the original `MuonCalib_it2/`: in `_corrected` the pedestal sentinels have been
+resolved — finite means are kept, missing SCAs are **imputed** from the first
+valid SCA in the row, and channels whose 15 SCAs are **all** sentinel are masked
+out entirely. The original `MuonCalib_it2/` is kept alongside for reference/
+provenance; the layout (`mips/th<N>/`, `pedestals/th<N>/`) is identical, only the
+pedestal values differ. The same sentinel logic is also applied at read time by
+`_read_pedestal_file` (below), so a raw set still works — `_corrected` just bakes
+it into the files.
+
 ### Pedestal file format
 
 ```
@@ -133,7 +148,7 @@ The calibration tool marks uncalibrated SCAs with two interchangeable sentinels:
 | Some SCAs are sentinel (`0` or `-nan`), at least one is a valid non-zero finite value | Sentinel SCAs are replaced by the **first valid mean** in the same row. |
 | **All** 15 SCA means are sentinels | The whole channel is added to the **masked set** — its hits get `hit_energy = 0` and `hit_ismasked = 1`, and are excluded from all downstream metrics. |
 
-In `MuonCalib_it2/run_000142`: 395 channels have all-zero SCAs (→ masked), 11
+In `MuonCalib_it2_corrected/run_000142`: 395 channels have all-zero SCAs (→ masked), 11
 have a mix of NaN and valid SCAs (→ substitution), none have zeros mixed with
 valid values.
 
@@ -168,7 +183,7 @@ calibration team before being treated as the reference strategy:
    MIP file (the tool only writes `0` there) so no equivalent fix is needed
    there yet.
 
-4. **Coverage in `MuonCalib_it2`** (`run_000142` file): calibration coverage is
+4. **Coverage in `MuonCalib_it2_corrected`** (`run_000142` file): calibration coverage is
    nearly complete — most chips on every layer have finite pedestal means.
    Known gaps: chips 0–3 on layer 0, and chip 9 on layers 6 and 13. Those
    channels use `pedestal_fallback` (250 ADC) and the global median MPV. Whether

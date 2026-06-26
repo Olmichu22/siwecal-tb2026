@@ -1,4 +1,8 @@
-main_path: "/eos/user/o/oarquero/TB2026CERN/data/"
+# Data root for every run listed below. When set, this WINS over settings.yml
+# (data_dir): the convenient single place to point a whole run list at your data.
+# Left commented => fall back to settings.yml. A per-entry absolute path always
+# wins over this, and files not found here fall back to the settings.yml roots.
+# main_path: /path/to/your/TB2026CERN/data
 pedestrial_and_mip: "./calibration"
 data:
   P1_99GeV: [TB2026CERN_run_000058]

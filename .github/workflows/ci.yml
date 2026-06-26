@@ -1,0 +1,30 @@
+name: ci
+
+# Lightweight CI: the full suite needs the key4hep stack from cvmfs (uproot,
+# ROOT, ...), which is not available on GitHub runners. But the pure-numpy core
+# -- `siwecal_validation.metrics`, the C++ parity oracle -- is importable with
+# just numpy (the package __init__ is lazy), so we lint and unit-test that here.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  metrics-tests:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        python-version: ["3.9", "3.11"]
+    steps:
+      - uses: actions/checkout@v4
+      - name: Set up Python ${{ matrix.python-version }}
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+      - name: Install test dependencies
+        run: python -m pip install --upgrade pip numpy pytest
+      - name: Byte-compile all sources
+        run: python -m compileall -q siwecal_common siwecal_eventbuilder siwecal_validation event_viewer
+      - name: Run metrics unit tests
+        run: pytest -q siwecal_validation/tests/
