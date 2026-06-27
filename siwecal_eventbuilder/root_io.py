@@ -166,11 +166,13 @@ class EcalWriter:
     as instance attributes for exactly that reason.
     """
 
-    def __init__(self, output_path: str, max_hits_per_event: int, run_id: int = -1):
+    def __init__(self, output_path: str, max_hits_per_event: int, run_id: int = -1,
+                 threshold_dac: int = -1):
         self._file = ROOT.TFile(output_path, "RECREATE")
         self._tree = ROOT.TTree("ecal", "Reconstructed SiW-ECAL events")
         self._max_hits = max_hits_per_event
         self._run_id = int(run_id)
+        self._threshold_dac_val = int(threshold_dac)
 
         # Scalar (per-event) branch buffers.
         self._run = np.zeros(1, dtype=np.int32)
@@ -182,6 +184,7 @@ class EcalWriter:
         self._n_chan = np.zeros(1, dtype=np.int32)
         self._sum_hg = np.zeros(1, dtype=np.float32)
         self._sum_energy = np.zeros(1, dtype=np.float32)
+        self._thresh_dac = np.zeros(1, dtype=np.int32)
 
         # Variable-length (per-hit) branch buffers, sized by ``nhit_chan``.
         self._hit_slab = np.zeros(max_hits_per_event, dtype=np.int32)
@@ -197,6 +200,7 @@ class EcalWriter:
         self._hit_ismasked = np.zeros(max_hits_per_event, dtype=np.int32)
 
         self._tree.Branch("run", self._run, "run/I")
+        self._tree.Branch("threshold_dac", self._thresh_dac, "threshold_dac/I")
         self._tree.Branch("event", self._event, "event/I")
         self._tree.Branch("spill", self._spill, "spill/I")
         self._tree.Branch("bcid", self._bcid, "bcid/I")
@@ -230,6 +234,7 @@ class EcalWriter:
             return False
 
         self._run[0] = self._run_id
+        self._thresh_dac[0] = self._threshold_dac_val
         self._spill[0] = spill_index
         self._event[0] = spill_index * 1000 + event_index
         self._bcid[0] = event.bcid

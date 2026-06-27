@@ -38,7 +38,7 @@ _WORKER_PAD_MAP = None
 
 def _process_chunk(input_path: str, output_path: str,
                    entry_start: int, entry_end: int, worker_id: int,
-                   run_id: int = -1) -> int:
+                   run_id: int = -1, threshold_dac: int = -1) -> int:
     """Build events for acquisitions ``[entry_start, entry_end)`` into one file.
 
     Runs inside a worker process and relies on the fork-inherited globals for its
@@ -51,7 +51,8 @@ def _process_chunk(input_path: str, output_path: str,
 
     reader = AcquisitionReader(input_path, geometry, config.tree_name)
     builder = EventBuilder(config, geometry, calibration, pad_map=pad_map)
-    writer = EcalWriter(output_path, config.max_hits_per_event, run_id=run_id)
+    writer = EcalWriter(output_path, config.max_hits_per_event, run_id=run_id,
+                        threshold_dac=threshold_dac)
 
     n_written = 0
     n_chunk = entry_end - entry_start
@@ -72,9 +73,10 @@ def _process_chunk(input_path: str, output_path: str,
 
 def _chunk_worker(args) -> tuple:
     """Picklable Pool entry point: unpacks ``args`` and runs :func:`_process_chunk`."""
-    input_path, output_path, entry_start, entry_end, worker_id, run_id = args
+    input_path, output_path, entry_start, entry_end, worker_id, run_id, threshold_dac = args
     return output_path, _process_chunk(input_path, output_path,
-                                       entry_start, entry_end, worker_id, run_id)
+                                       entry_start, entry_end, worker_id,
+                                       run_id, threshold_dac)
 
 
 class EventBuildingPipeline:
@@ -88,11 +90,14 @@ class EventBuildingPipeline:
         self._pad_map = pad_map
 
     def build_run(self, input_path: str, output_path: str,
-                  max_entries=None, n_workers=None, run_id=None) -> int:
+                  max_entries=None, n_workers=None, run_id=None,
+                  threshold_dac: int = -1) -> int:
         """Build every event of one run and write the merged ``ecal`` file.
 
         ``run_id`` is the numeric run identifier stamped on every event for
         provenance; if ``None`` it is inferred from the input file name.
+        ``threshold_dac`` is the discriminator threshold read from the DAQ
+        Run_Settings.txt; stored as-is in every event row (-1 if unknown).
         Returns the total number of events written.
         """
         n_workers = n_workers or self._config.default_workers
@@ -105,7 +110,8 @@ class EventBuildingPipeline:
             n_total = min(n_total, max_entries)
 
         n_workers = max(1, min(n_workers, n_total))
-        chunk_args = self._partition(input_path, output_path, n_total, n_workers, run_id)
+        chunk_args = self._partition(input_path, output_path, n_total, n_workers,
+                                     run_id, threshold_dac)
 
         print(f"[Build] {n_total} acquisitions -> {n_workers} workers "
               f"(~{n_total // n_workers} acq/worker)")
@@ -136,7 +142,8 @@ class EventBuildingPipeline:
         return total_events
 
     def build_runs(self, input_paths: list, output_path: str,
-                   max_entries=None, n_workers=None) -> int:
+                   max_entries=None, n_workers=None,
+                   threshold_dacs: list = None) -> int:
         """Build several runs and merge **all** their events into one file.
 
         Each run is built independently into a temporary per-run file (reusing
@@ -144,16 +151,22 @@ class EventBuildingPipeline:
         same ``hadd``-based merge used for worker chunks. Returns the grand total
         of events written across all runs.
 
+        ``threshold_dacs`` is an optional list of per-run ThresholdDAC values
+        (same length as ``input_paths``); missing or ``None`` entries fall back to -1.
+
         Note
         ----
         The events keep their per-run ``event``/``spill`` numbering, so those
         numbers are no longer unique across the combined file. The physics
         content (one row per reconstructed event) is unaffected.
         """
+        dacs = threshold_dacs or []
+
         if len(input_paths) == 1:
             # Nothing to concatenate: build straight into the final file.
             return self.build_run(input_paths[0], output_path,
-                                  max_entries=max_entries, n_workers=n_workers)
+                                  max_entries=max_entries, n_workers=n_workers,
+                                  threshold_dac=dacs[0] if dacs else -1)
 
         per_run_files = []
         total_events = 0
@@ -161,8 +174,10 @@ class EventBuildingPipeline:
             part_path = output_path.replace(".root", f"_part{run_position:02d}.root")
             print(f"\n--- Run {run_position + 1}/{len(input_paths)}: "
                   f"{os.path.basename(input_path)} ---")
+            dac = dacs[run_position] if run_position < len(dacs) else -1
             total_events += self.build_run(input_path, part_path,
-                                           max_entries=max_entries, n_workers=n_workers)
+                                           max_entries=max_entries, n_workers=n_workers,
+                                           threshold_dac=dac)
             per_run_files.append(part_path)
 
         print(f"\n[Concat] {total_events} events across {len(per_run_files)} run(s) "
@@ -176,7 +191,8 @@ class EventBuildingPipeline:
     # ------------------------------------------------------ internal steps ---
 
     @staticmethod
-    def _partition(input_path, output_path, n_total, n_workers, run_id=-1) -> list:
+    def _partition(input_path, output_path, n_total, n_workers,
+                   run_id=-1, threshold_dac=-1) -> list:
         """Split ``n_total`` acquisitions into contiguous per-worker slices."""
         chunk_size = n_total // n_workers
         chunk_args = []
@@ -184,7 +200,8 @@ class EventBuildingPipeline:
             start = worker_id * chunk_size
             end = start + chunk_size if worker_id < n_workers - 1 else n_total
             tmp_path = output_path.replace(".root", f"_chunk{worker_id:02d}.root")
-            chunk_args.append((input_path, tmp_path, start, end, worker_id, run_id))
+            chunk_args.append((input_path, tmp_path, start, end, worker_id,
+                               run_id, threshold_dac))
         return chunk_args
 
     @staticmethod
