@@ -20,7 +20,7 @@ from siwecal_common import paths
 from .calibration import Calibration
 from .config import BuilderConfig
 from .run_settings import read_threshold_dac, run_settings_path
-from .geometry import DetectorGeometry, load_slab_z_mm
+from .geometry import DetectorGeometry, load_slab_z_mm, load_slab_w_thickness_mm
 from .pad_map import PadMap
 from .pipeline import EventBuildingPipeline
 from .settings import AppSettings
@@ -377,10 +377,16 @@ def main(argv=None) -> None:
     # geometry default if it is absent or empty.
     if os.path.exists(SLAB_Z_FILE_DEFAULT):
         slab_z = load_slab_z_mm(SLAB_Z_FILE_DEFAULT)
+        slab_w = load_slab_w_thickness_mm(SLAB_Z_FILE_DEFAULT)
+        overrides = {}
         if slab_z:
-            geometry = replace(geometry, slab_z_mm=slab_z)
-            print(f"[Geometry] hit_z from {SLAB_Z_FILE_DEFAULT} "
-                  f"({len(slab_z)} slabs)")
+            overrides["slab_z_mm"] = slab_z
+        if slab_w:
+            overrides["slab_w_thickness_mm"] = slab_w
+        if overrides:
+            geometry = replace(geometry, **overrides)
+            print(f"[Geometry] hit_z/hit_X0 from {SLAB_Z_FILE_DEFAULT} "
+                  f"({len(slab_z or ())} slabs)")
     # calib_dir: CLI -> config.yml[paths] -> data_reference.yml -> default.
     calib_dir = (args.calib_dir
                  or settings.paths.get("calibration_dir")

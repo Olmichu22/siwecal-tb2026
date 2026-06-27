@@ -197,6 +197,7 @@ class EcalWriter:
         self._hit_x = np.zeros(max_hits_per_event, dtype=np.float32)
         self._hit_y = np.zeros(max_hits_per_event, dtype=np.float32)
         self._hit_z = np.zeros(max_hits_per_event, dtype=np.float32)
+        self._hit_x0 = np.zeros(max_hits_per_event, dtype=np.float32)
         self._hit_ismasked = np.zeros(max_hits_per_event, dtype=np.int32)
 
         self._tree.Branch("run", self._run, "run/I")
@@ -219,6 +220,7 @@ class EcalWriter:
         self._tree.Branch("hit_x", self._hit_x, "hit_x[nhit_chan]/F")
         self._tree.Branch("hit_y", self._hit_y, "hit_y[nhit_chan]/F")
         self._tree.Branch("hit_z", self._hit_z, "hit_z[nhit_chan]/F")
+        self._tree.Branch("hit_X0", self._hit_x0, "hit_X0[nhit_chan]/F")
         self._tree.Branch("hit_ismasked", self._hit_ismasked, "hit_ismasked[nhit_chan]/I")
 
     def write(self, event, spill_index: int, event_index: int) -> bool:
@@ -255,6 +257,7 @@ class EcalWriter:
             self._hit_x[i] = hit.x
             self._hit_y[i] = hit.y
             self._hit_z[i] = hit.z
+            self._hit_x0[i] = hit.x0
             self._hit_ismasked[i] = int(hit.is_masked)
 
         self._tree.Fill()

@@ -141,7 +141,7 @@ struct EcalPidTransformer final
   // double (not float) to bit-match metrics.py's float64 W/X0 weights.
   Gaudi::Property<std::vector<double>> m_wThicknesses{
       this, "WThicknesses",
-      {2.8, 4.2, 4.2, 4.2, 4.2, 4.2, 4.2, 4.2, 5.6, 5.6, 5.6, 5.6, 5.6, 5.6, 5.6},
+      {2.8, 4.2, 4.2, 4.2, 4.2, 4.2, 4.2, 4.2, 4.2, 5.6, 5.6, 5.6, 5.6, 5.6, 5.6},
       "Per-slab tungsten thickness [mm]"};
   Gaudi::Property<double> m_wX0{this, "WX0", 3.5, "Tungsten radiation length [mm]"};
   Gaudi::Property<std::string> m_showerProfile{this, "ShowerProfile", "nhit",
