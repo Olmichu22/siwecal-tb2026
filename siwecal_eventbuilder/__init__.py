@@ -27,7 +27,7 @@ from .bcid_clustering import BcidClusterer
 from .calibration import Calibration
 from .config import BuilderConfig
 from .event_builder import EventBuilder
-from .geometry import DetectorGeometry
+from .geometry import DetectorGeometry, W_X0_MM, load_slab_w_thickness_mm
 from .hit_collector import HitCollector
 from .models import BcidWindow, Hit, ReconstructedEvent
 from .pad_map import PadMap, load_mapping_file
@@ -42,6 +42,8 @@ __all__ = [
     "BuilderConfig",
     "EventBuilder",
     "DetectorGeometry",
+    "W_X0_MM",
+    "load_slab_w_thickness_mm",
     "HitCollector",
     "PadMap",
     "load_mapping_file",

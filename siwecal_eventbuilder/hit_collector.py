@@ -101,5 +101,6 @@ class HitCollector:
             x=x,
             y=y,
             z=self._geometry.slab_z(slab),
+            x0=self._geometry.slab_x0(slab),
             is_masked=is_masked,
         )

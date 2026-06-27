@@ -22,11 +22,19 @@ from typing import Mapping, Optional
 
 import yaml
 
+# Radiation length of tungsten [mm].
+W_X0_MM = 3.5
+
 # Per-slab physical z position [mm] along the beam (hit_slab 0..14). Mirrors
 # event_display/conversion/slab_z_positions.yml; the live file can override it
 # (see :func:`load_slab_z_mm`).
 DEFAULT_SLAB_Z_MM = (0.0, 11.0, 22.0, 33.0, 44.0, 55.0, 66.0, 77.0,
                      88.0, 99.0, 110.0, 132.0, 143.0, 154.0, 165.0)
+
+# Thickness [mm] of the W absorber plate in front of each slab (hit_slab 0..14).
+# Mirrors the w_thickness_mm key in slab_z_positions.yml.
+DEFAULT_SLAB_W_THICKNESS_MM = (2.8, 4.2, 4.2, 4.2, 4.2, 4.2, 4.2, 4.2,
+                                4.2, 5.6, 5.6, 5.6, 5.6, 5.6, 5.6)
 
 
 def load_slab_z_mm(path: str) -> tuple:
@@ -34,6 +42,13 @@ def load_slab_z_mm(path: str) -> tuple:
     with open(path) as handle:
         document = yaml.safe_load(handle) or {}
     return tuple(float(z) for z in document.get("slab_z_mm", ()))
+
+
+def load_slab_w_thickness_mm(path: str) -> tuple:
+    """Read the per-slab W absorber thicknesses [mm] from a ``slab_z_positions`` YAML."""
+    with open(path) as handle:
+        document = yaml.safe_load(handle) or {}
+    return tuple(float(t) for t in document.get("w_thickness_mm", ()))
 
 
 @dataclass(frozen=True)
@@ -49,7 +64,8 @@ class DetectorGeometry:
     n_chips_per_slab: int = 16      # SKIROC2 ASICs per slab (ic)
     n_scas_per_chip: int = 15       # SCA memory cells per chip (isca / icol)
     n_channels_per_chip: int = 64   # pixels per chip (ipix)
-    slab_z_mm: tuple = DEFAULT_SLAB_Z_MM   # per-slab z position [mm] -> hit_z
+    slab_z_mm: tuple = DEFAULT_SLAB_Z_MM              # per-slab z [mm] -> hit_z
+    slab_w_thickness_mm: tuple = DEFAULT_SLAB_W_THICKNESS_MM  # W absorber thickness [mm] per slab
 
     @classmethod
     def from_mapping(cls, overrides: Optional[Mapping] = None) -> "DetectorGeometry":
@@ -77,7 +93,7 @@ class DetectorGeometry:
             )
         converted = {}
         for key, value in overrides.items():
-            if key == "slab_z_mm":
+            if key in ("slab_z_mm", "slab_w_thickness_mm"):
                 converted[key] = tuple(float(item) for item in value)
             else:
                 converted[key] = int(value)
@@ -87,6 +103,16 @@ class DetectorGeometry:
         """Physical z [mm] of a slab along the beam, or NaN if out of range."""
         if 0 <= slab < len(self.slab_z_mm):
             return float(self.slab_z_mm[slab])
+        return float("nan")
+
+    def slab_x0(self, slab: int) -> float:
+        """Cumulative radiation lengths of W traversed up to and including slab ``slab``.
+
+        Sums the W absorber thicknesses for slabs 0..slab and divides by X0(W)=3.5 mm.
+        Returns NaN if ``slab`` is out of range.
+        """
+        if 0 <= slab < len(self.slab_w_thickness_mm):
+            return sum(self.slab_w_thickness_mm[:slab + 1]) / W_X0_MM
         return float("nan")
 
     def sca_index(self, slab: int, chip: int, sca: int) -> int:
