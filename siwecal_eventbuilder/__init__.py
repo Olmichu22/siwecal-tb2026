@@ -33,6 +33,7 @@ from .models import BcidWindow, Hit, ReconstructedEvent
 from .pad_map import PadMap, load_mapping_file
 from .pipeline import EventBuildingPipeline
 from .root_io import Acquisition, AcquisitionReader, EcalWriter
+from .run_settings import read_threshold_dac, run_settings_path
 from .settings import AppSettings, load_config_file
 
 __all__ = [
@@ -51,6 +52,8 @@ __all__ = [
     "Acquisition",
     "AcquisitionReader",
     "EcalWriter",
+    "read_threshold_dac",
+    "run_settings_path",
     "AppSettings",
     "load_config_file",
 ]

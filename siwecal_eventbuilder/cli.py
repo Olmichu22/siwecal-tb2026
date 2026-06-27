@@ -19,6 +19,7 @@ from siwecal_common import paths
 
 from .calibration import Calibration
 from .config import BuilderConfig
+from .run_settings import read_threshold_dac, run_settings_path
 from .geometry import DetectorGeometry, load_slab_z_mm
 from .pad_map import PadMap
 from .pipeline import EventBuildingPipeline
@@ -60,6 +61,9 @@ PAD_MAP_FILES_DEFAULT = {
 # Per-slab z positions for hit_z. This file is the live source of truth; if it
 # exists it overrides the DetectorGeometry default.
 SLAB_Z_FILE_DEFAULT = paths.geometry_file("slab_z_positions.yml")
+
+# Raw DAQ data directory: contains per-run subdirs with Run_Settings.txt.
+RAW_BASE_DEFAULT = "/eos/experiment/drdcalo/siw-ecal/TB2026-06/rundata"
 
 
 # ------------------------------------------------- MuonCalib_it2 resolution ---
@@ -234,6 +238,12 @@ def parse_args(argv=None) -> argparse.Namespace:
     parser.add_argument("--no-mapping", action="store_true",
                         help="Do not assign pad (x,y) positions "
                              "(hit_x/hit_y are written as NaN)")
+
+    parser.add_argument("--raw-dir", default=None, metavar="PATH",
+                        help="Base directory containing raw run subdirs with "
+                             f"Run_Settings.txt (default: {RAW_BASE_DEFAULT}). "
+                             "Used to read ThresholdDAC and store it in the output "
+                             "tree.")
     return parser.parse_args(argv)
 
 
@@ -376,6 +386,40 @@ def main(argv=None) -> None:
                  or settings.paths.get("calibration_dir")
                  or reference.get("pedestrial_and_mip", CALIB_DIR_DEFAULT)).rstrip("/")
     all_runs = [run for _label, runs, _is_energy in jobs for run in runs]
+
+    # Read ThresholdDAC for every run upfront so we can auto-select calibration.
+    raw_dir = args.raw_dir or RAW_BASE_DEFAULT
+    all_runs_dacs = {}
+    for run_name in all_runs:
+        all_runs_dacs[run_name] = read_threshold_dac(
+            run_settings_path(raw_dir, run_name))
+
+    # Auto-select --th from Run_Settings when no explicit calibration is forced.
+    # If --th / --ped-file / --mip-file / --no-calib / --compute-calib are given
+    # the user's choice takes full precedence; otherwise we pick the threshold
+    # that appears in the majority of runs and check that the MuonCalib files
+    # exist for it before committing.
+    if not (args.th or args.ped_file or args.mip_file
+            or args.no_calib or args.compute_calib):
+        valid_dacs = [v for v in all_runs_dacs.values() if v != -1]
+        if valid_dacs:
+            auto_th = str(max(set(valid_dacs), key=valid_dacs.count))
+            th_ped_dir = os.path.join(MUON_CALIB_DIR, "pedestals", f"th{auto_th}")
+            if os.path.isdir(th_ped_dir):
+                print(f"[Calib] Auto-detected ThresholdDAC={auto_th} from Run_Settings "
+                      f"-> MuonCalib_it2_corrected/th{auto_th} "
+                      f"(override with --th or --ped-file/--mip-file)")
+                args.th = auto_th
+            else:
+                print(f"ERROR: ThresholdDAC={auto_th} detected from Run_Settings but no "
+                      f"MuonCalib pedestal directory found for that threshold.\n"
+                      f"  Looked for: {th_ped_dir}\n"
+                      f"  To use a different threshold: --th N\n"
+                      f"  To use explicit calibration files: --ped-file / --mip-file\n"
+                      f"  To skip calibration entirely: --no-calib",
+                      file=sys.stderr)
+                sys.exit(1)
+
     calibration = build_calibration(args, config, geometry, base_path, calib_dir,
                                     all_runs, settings.calibration)
     pad_map = build_pad_map(args, settings.mapping)
@@ -400,6 +444,17 @@ def main(argv=None) -> None:
         output_path = output_for(label, run_names, base_path, out_dir=args.outdir,
                                  explicit=explicit, is_energy=is_energy)
 
+        # Reuse the ThresholdDAC values already read above (stored in output tree).
+        threshold_dacs = []
+        for run_name in run_names:
+            dac = all_runs_dacs.get(run_name, -1)
+            if dac == -1:
+                print(f"  [Settings] WARNING: ThresholdDAC not found for {run_name} "
+                      f"(stored as -1). Check --raw-dir.", file=sys.stderr)
+            else:
+                print(f"  [Settings] {run_name}: ThresholdDAC = {dac}")
+            threshold_dacs.append(dac)
+
         print(f"\n{'=' * 60}")
         if is_energy:
             print(f"  Energy  : {label}  ({len(run_names)} run(s) -> 1 file)")
@@ -413,7 +468,8 @@ def main(argv=None) -> None:
         os.makedirs(os.path.dirname(os.path.abspath(output_path)), exist_ok=True)
         try:
             pipeline.build_runs(input_paths, output_path,
-                                max_entries=args.max_entries, n_workers=args.workers)
+                                max_entries=args.max_entries, n_workers=args.workers,
+                                threshold_dacs=threshold_dacs)
         except Exception as error:                       # keep going in --all mode
             print(f"FAIL {label}: {error}", file=sys.stderr)
             n_fail += 1
