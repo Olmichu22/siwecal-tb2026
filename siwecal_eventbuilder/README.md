@@ -79,11 +79,11 @@ Run `python -m siwecal_eventbuilder --help` for the complete list.
 
 - **Calibration**: `calibration/dummy_pedestal_15_highgain.txt`,
   `dummy_mip_map_15_highgain.txt` (vendored; override with `--calib-dir`).
-- **Pad maps**: `geometry/fev10_rotate_chip_channel_x_y_mapping.txt` (default
-  wafer) and `geometry/fev11_cob_good_rotate_chip_channel_x_y_mapping.txt`
+- **Pad maps**: `mappings/fev10_rotate_chip_channel_x_y_mapping.txt` (default
+  wafer) and `mappings/fev11_cob_good_rotate_chip_channel_x_y_mapping.txt`
   (FEV11 chip-on-board, slab 12 override). These are the *rotated* maps that put
   every layer in its true detector orientation.
-- **Slab z**: `geometry/slab_z_positions.yml` (live source of truth for `hit_z`).
+- **Slab z**: `mappings/slab_z_positions.yml` (live source of truth for `hit_z`).
 - **Run lists**: `configs/data/data_reference*.yml`.
 
 ## Stack

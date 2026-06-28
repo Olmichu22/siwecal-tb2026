@@ -16,7 +16,7 @@ from typing import List
 
 import pandas as pd
 
-from siwecal_common.edm4hep_pid import PidFileReader
+from .._edm4hep_pid import PidFileReader
 
 # Identifier-like columns: never offered as cut/cluster variables.
 IDENTIFIER_COLUMNS = ("run", "event", "spill", "bcid", "nhit_chan")
@@ -58,7 +58,7 @@ class Edm4hepEventReader:
 
     @property
     def perhit_branches(self) -> List[str]:
-        from siwecal_common.edm4hep_pid import PERHIT_FIELDS
+        from .._edm4hep_pid import PERHIT_FIELDS
         return list(PERHIT_FIELDS)
 
     @property

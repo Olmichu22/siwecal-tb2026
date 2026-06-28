@@ -160,7 +160,7 @@ A single file at the repo root, read by all packages through
 data_dir:                                   # heavy run/event ROOT files (NOT in repo)
   - /eos/home-o/oarquero/TB2026CERN         #   single path or a LIST of search roots
 calib_dir:    ./calibration                 # pedestal / MIP files (vendored)
-geometry_dir: ./geometry                    # pad maps, slab z, tungsten map
+geometry_dir: ./mappings                    # pad maps, slab z, tungsten map
 configs_dir:  ./configs/data                # data_reference*.yml run lists
 output_dir:   ./validation_output           # validation plots / results
 pid_dir:      null                          # k4SiWEcalReco outputs (null = next to input)
@@ -190,7 +190,7 @@ siwecal-tb2026/
 ├── siwecal_validation/                   validation + metrics (+ README)
 ├── event_viewer/                         Dash viewer (+ README)
 ├── event_display/                        ROOT TEve 3-D event display (native key4hep, no extra deps)
-├── geometry/                             pad maps, slab_z_positions.yml, Tungsten_thickness.yml
+├── mappings/                             pad maps, slab_z_positions.yml, Tungsten_thickness.yml
 ├── configs/data/                         data_reference*.yml run lists
 └── calibration/                          vendored dummy pedestal/MIP files
 ```

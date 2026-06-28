@@ -13,7 +13,7 @@ from __future__ import annotations
 import numpy as np
 import pandas as pd
 
-from siwecal_validation import metrics
+from .. import _metrics as metrics
 
 # Mirror siwecal_validation.config defaults so threshold=0 matches valcache.
 _SHOWER_THR   = 5.0   # per-layer nhit threshold (profile_kind = "nhit")

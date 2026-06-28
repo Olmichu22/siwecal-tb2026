@@ -34,7 +34,7 @@ For each input file the pipeline (one class per concern) does:
 
 `PlotConfig` (`config.py`) holds the tunables (layer count, fit windows,
 tungsten map, shower thresholds, ...). Tungsten thickness and slab z default to
-values matching `geometry/Tungsten_thickness.yml` / `slab_z_positions.yml`.
+values matching `mappings/Tungsten_thickness.yml` / `slab_z_positions.yml`.
 
 ## Usage
 

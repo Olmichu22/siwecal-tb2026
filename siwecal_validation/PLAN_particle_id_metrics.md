@@ -43,8 +43,8 @@ the absorber directly preceding each slab gives the **per-slab W [mm]**:
 
 | slab | 0 | 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9 | 10 | 11 | 12 | 13 | 14 |
 |------|---|---|---|---|---|---|---|---|---|---|----|----|----|----|----|
-| W mm |2.8|4.2|4.2|4.2|4.2|4.2|4.2|4.2|5.6|5.6|5.6|5.6|5.6|5.6|5.6|
-| X0   |0.8|1.2|1.2|1.2|1.2|1.2|1.2|1.2|1.6|1.6|1.6|1.6|1.6|1.6|1.6|
+| W mm |2.8|4.2|4.2|4.2|4.2|4.2|4.2|4.2|4.2|5.6|5.6|5.6|5.6|5.6|5.6|
+| X0   |0.8|1.2|1.2|1.2|1.2|1.2|1.2|1.2|1.2|1.6|1.6|1.6|1.6|1.6|1.6|
 
 The template's weight is `E_hit * W[slab] / 3.5`, where **3.5 mm ≈ X0 of
 tungsten**, so the factor is the absorber depth in radiation lengths (bottom
@@ -161,7 +161,7 @@ computes per event, then fills).
 
 3. **`config.py` `PlotConfig` — new tunables (all defaulted, documented):**
    - `w_thicknesses: tuple` — per-slab W [mm], default = the resolved map above
-     `(2.8, 4.2×7, 5.6×7)`; `w_x0_mm = 3.5` (tungsten X0). A small loader parses
+     `(2.8, 4.2×8, 5.6×6)`; `w_x0_mm = 3.5` (tungsten X0). A small loader parses
      `Tungsten_thickness.yml` (`W_thick` + `structure`) into the per-slab array
      so the map stays authoritative; the baked tuple is the fallback default.
    - `shower_profile = "nhit"` (base profile for the shower flag / start-end),
