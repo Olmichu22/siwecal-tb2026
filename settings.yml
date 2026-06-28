@@ -4,13 +4,13 @@
 # Heavy run/event ROOT files (kept outside the repo). Single path or a list of
 # search roots (first match wins). Absolute paths in data_reference*.yml win.
 data_dir:
-  - /eos/home-o/oarquero/TB2026CERN/data
+  - /eos/experiment/drdcalo/siw-ecal/TB2026-06/data
 
 # Calibration files (vendored copies live in ./calibration).
 calib_dir: ./calibration
 
 # Geometry inputs (pad maps, slab z, tungsten map).
-geometry_dir: ./geometry
+geometry_dir: ./mappings
 
 # Run-list configs.
 configs_dir: ./configs/data

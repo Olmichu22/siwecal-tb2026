@@ -13,11 +13,20 @@ venv/
 # --- Heavy / generated data (live outside the repo via settings.yml) ---
 *.root
 *.valcache.root
+*.slcio
+*.npy
+*.npz
+*.pkl
+*.csv
 validation_output/
 AllEnergiesPlots/
+output/
+results/
 
 # --- Generated figures / logs ---
 *.png
+*.jpg
+*.jpeg
 *.pdf
 *.log
 _logs/
@@ -34,4 +43,5 @@ _logs/
 .claude/
 
 # build artifacts
+build/
 k4SiWEcalReco/build/

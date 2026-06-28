@@ -176,7 +176,7 @@ def build_layout(controller, initial_path: Optional[str] = None) -> html.Div:
     """Assemble the full page (file bar + tabs + state stores)."""
     return html.Div(style={"fontFamily": "sans-serif", "padding": "8px"},
                     children=[
-        html.H2("SiW-ECAL Event Viewer — TB2026CERN"),
+        html.H2("SiW-ECAL Event Viewer"),
         _file_bar(controller, initial_path),
         # Lightweight session state.
         dcc.Store(id="store-file", data=initial_path),
@@ -192,5 +192,7 @@ def build_layout(controller, initial_path: Optional[str] = None) -> html.Div:
 
 
 def _short(path: str) -> str:
+    """Display label for a file path: last two components (parent/filename)."""
     import os
-    return os.path.relpath(path)
+    parts = path.replace("\\", "/").split("/")
+    return "/".join(parts[-2:]) if len(parts) >= 2 else path

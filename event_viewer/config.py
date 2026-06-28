@@ -11,7 +11,7 @@ import os
 from dataclasses import dataclass, field
 from typing import Dict, List
 
-from siwecal_common import paths
+from . import _paths as paths
 
 from . import PROJECT_ROOT
 

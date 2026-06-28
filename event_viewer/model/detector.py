@@ -21,8 +21,8 @@ from typing import Dict, List, Tuple
 import numpy as np
 import yaml
 
-from siwecal_eventbuilder.geometry import DetectorGeometry
-from siwecal_eventbuilder.pad_map import PadMap
+from .._geometry import DetectorGeometry
+from .._pad_map import PadMap
 
 # The W plate's downstream face sits this far upstream of its Si plane (mm);
 # mirrors the convention documented in slab_z_positions.yml.

@@ -17,7 +17,7 @@ from __future__ import annotations
 import numpy as np
 import pandas as pd
 
-from siwecal_validation import metrics
+from .. import _metrics as metrics
 
 
 # Columns produced here (order defines the DataFrame layout).

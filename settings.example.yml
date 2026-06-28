@@ -22,7 +22,7 @@ data_dir:
 calib_dir: ./calibration
 
 # Geometry inputs: pad (chip,channel)->(x,y) maps + slab z + tungsten map.
-geometry_dir: ./geometry
+geometry_dir: ./mappings
 
 # Run-list configs (data_reference*.yml: energy/run -> events mapping).
 configs_dir: ./configs/data
