@@ -84,7 +84,7 @@ To avoid the viewer hanging, the MIP cut slider is **disabled** when a file both
 (1) lacks pre-computed MIP branches **and** (2) has more than
 `max_recompute_events` events (default **10000**). The status bar then notes
 *"MIP cut disabled"*. Generate a metrics file with the pre-computed MIP branches
-(`python k4SiWEcalReco/run_pid_batch.py --validation`) to re-enable the cut on
+(`python gaudi_jobs/run_pid_batch.py --validation`) to re-enable the cut on
 large files.
 
 The limit is configurable:

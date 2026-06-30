@@ -16,7 +16,7 @@ This module only makes the validation plots: the per-event metrics are read
 from the ``k4SiWEcalReco`` output next to each input (the EDM4hep PID file
 ``ecal_<run>.edm4hep.root``, or its ``ecal_<run>.valtree.root`` tree if the
 EDM4hep file is absent). It never (re)generates those files -- run
-``k4SiWEcalReco/run_pid_batch.py`` first if neither exists.
+``gaudi_jobs/run_pid_batch.py`` first if neither exists.
 
 General cuts apply to every sample; in ``--all`` mode a per-energy ``cuts:``
 block in the YAML overrides them, so selections can be optimised per energy.

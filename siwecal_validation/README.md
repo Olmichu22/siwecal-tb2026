@@ -6,10 +6,10 @@ selection cuts, fits the energy peak, and writes PNG plots plus a results table.
 It is the object-oriented successor of `plot_val_plots.py`.
 
 The per-event metrics are **not computed here** — they are read from the
-[`k4SiWEcalReco`](../k4SiWEcalReco/README.md) output next to each input
+[`gaudi_source`](../gaudi_source/README.md) output next to each input
 (`ecal_<run>.edm4hep.root`, or its `ecal_<run>.valtree.root` tree if the EDM4hep
 file is absent). This module is plots-only; generate the metrics first with
-`k4SiWEcalReco/run_pid_batch.py`.
+`gaudi_jobs/run_pid_batch.py`.
 
 ## How it works
 
@@ -74,7 +74,7 @@ The per-event metrics are read from the `k4SiWEcalReco` output located next to
 each input (or in `settings.yml` `pid_dir`): the EDM4hep PID file
 `ecal_<run>.edm4hep.root` first, else its `ecal_<run>.valtree.root` tree (the
 same derived variables in a plain TTree). If neither exists the run errors,
-asking you to generate one with `k4SiWEcalReco/run_pid_batch.py`. This module
+asking you to generate one with `gaudi_jobs/run_pid_batch.py`. This module
 never writes those files.
 
 ## Stack

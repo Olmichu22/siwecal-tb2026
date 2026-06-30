@@ -159,7 +159,7 @@ def pid_path_for(events_path: str) -> Optional[str]:
     """Locate the Gaudi PID (EDM4hep) file for an event-builder ``events_path``.
 
     The PID stage names its output ``ecal_<X>.edm4hep.root`` mirroring the input
-    ``ecal_<X>.root`` (see ``k4SiWEcalReco/run_pid_batch.py``); the legacy
+    ``ecal_<X>.root`` (see ``gaudi_jobs/run_pid_batch.py``); the legacy
     ``ecal_pid_<X>.root`` name is still recognised for already-produced files. It
     is searched in :func:`pid_dir` first (if configured) and then next to
     ``events_path``. Returns the first existing candidate, or ``None`` if none.
