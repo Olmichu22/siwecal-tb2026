@@ -89,7 +89,7 @@ class ValidationRunner:
             f"no metrics source found for '{label}' near {events_path}:\n"
             f"  EDM4hep PID (ecal_<run>.edm4hep.root): not found\n"
             f"  valtree     (ecal_<run>.valtree.root): not found\n"
-            f"Generate one first with k4SiWEcalReco/run_pid_batch.py.")
+            f"Generate one first with gaudi_jobs/run_pid_batch.py.")
 
     # ----------------------------------------------------------- one sample -
     def run_sample(self, events_path, label, cutset: CutSet = None,

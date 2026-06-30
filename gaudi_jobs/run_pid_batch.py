@@ -26,8 +26,8 @@ is always enforced (events with no hits or non-positive energy are dropped).
 Run after sourcing key4hep and exporting LD_LIBRARY_PATH / PYTHONPATH (see the
 top-level README). Example::
 
-    python k4SiWEcalReco/run_pid_batch.py --all --outdir /tmp/pid --format both
-    python k4SiWEcalReco/run_pid_batch.py --run TB2026CERN_run_000007 --validation
+    python gaudi_jobs/run_pid_batch.py --all --format both
+    python gaudi_jobs/run_pid_batch.py --run TB2026CERN_run_000007 --validation
 """
 import argparse
 import os
@@ -43,7 +43,7 @@ from siwecal_validation.cli import cutset_from_args
 from siwecal_validation.event_data import EventData
 from siwecal_validation.selection import CutSet, _CUT_SPEC
 
-_STEERING = os.path.join(os.path.dirname(__file__), "options", "run_pid.py")
+_STEERING = os.path.join(os.path.dirname(__file__), "..", "gaudi_source", "options", "run_pid.py")
 
 
 def _label(events_path):

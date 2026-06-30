@@ -3,7 +3,7 @@
 # Cluster with the particle-ID shower variables in shapeParameters).
 #
 #   ECAL_FILE=/path/ecal_run.root ECAL_PID_OUT=out.root \
-#       k4run k4SiWEcalReco/options/run_pid.py
+#       k4run gaudi_source/options/run_pid.py
 #
 import os
 

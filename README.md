@@ -16,7 +16,7 @@ calibration and one configuration file.
         │
         ▼
  ┌─────────────────────────┐   per-event metrics + cuts (C++), one of two formats:
- │      k4SiWEcalReco      │   ─────────────────────►  ecal_<run>.edm4hep.root
+ │      gaudi_source       │   ─────────────────────►  ecal_<run>.edm4hep.root
  │  shower vars + selection│                           ecal_<run>.valtree.root
  └─────────────────────────┘
         │                                   │
@@ -29,7 +29,7 @@ calibration and one configuration file.
 ```
 
 The per-event metrics **and the cut/cleaned event collections** are produced by
-`k4SiWEcalReco` (in C++, fast). `siwecal_validation` and `event_viewer` only read
+`gaudi_source` (in C++, fast). `siwecal_validation` and `event_viewer` only read
 that output — neither recomputes metrics nor writes any tree.
 
 ## Packages
@@ -37,10 +37,11 @@ that output — neither recomputes metrics nor writes any tree.
 | Package | What it does | Docs |
 |---|---|---|
 | [`siwecal_eventbuilder`](siwecal_eventbuilder/README.md) | Turns the decoded raw tree into reconstructed `ecal` events (BCID clustering, calibration, pad/geometry mapping). | builder README |
-| [`siwecal_validation`](siwecal_validation/README.md) | Validation plots only: reads the per-event metrics from the `k4SiWEcalReco` output (EDM4hep / valtree), applies cuts, fits the energy peak, writes PNGs + results. Generates no trees. | validation README |
+| [`siwecal_validation`](siwecal_validation/README.md) | Validation plots only: reads the per-event metrics from the `gaudi_source` output (EDM4hep / valtree), applies cuts, fits the energy peak, writes PNGs + results. Generates no trees. | validation README |
 | [`event_viewer`](event_viewer/README.md) | Plotly Dash app to browse events one by one and explore file-level distributions with dynamic cuts and clustering. | viewer README |
 | [`event_display`](event_display/README.md) | Standalone ROOT TEve 3-D single-event display. Runs directly under key4hep (no virtualenv needed) — just `source setup.sh` and launch. | display README |
-| [`k4SiWEcalReco`](k4SiWEcalReco/README.md) | Gaudi/k4FWCore stage (C++) that computes the particle-ID shower variables (a parity-validated port of `siwecal_validation.metrics`), applies the hit-level + event-level cuts, and writes the cut-passing events as **EDM4hep** (`ecal_<run>.edm4hep.root`) or a plain **valtree** TTree (`ecal_<run>.valtree.root`). | k4 reco README |
+| [`gaudi_source`](gaudi_source/README.md) | Gaudi/k4FWCore stage (C++) that computes the particle-ID shower variables (a parity-validated port of `siwecal_validation.metrics`), applies the hit-level + event-level cuts, and writes the cut-passing events as **EDM4hep** (`ecal_<run>.edm4hep.root`) or a plain **valtree** TTree (`ecal_<run>.valtree.root`). | gaudi README |
+| [`gaudi_jobs`](gaudi_jobs/) | Driver de batch (`run_pid_batch.py`) y ejemplos de jobs concretos (e.g. `run000013/`). | — |
 | `siwecal_common` | Shared infrastructure: `paths`, the single source of truth for every filesystem location (driven by `settings.yml`). | — |
 
 ### How they depend on each other
@@ -48,22 +49,23 @@ that output — neither recomputes metrics nor writes any tree.
 ```
 event_viewer  ──imports──▶  siwecal_eventbuilder.{geometry, pad_map}
               └─imports──▶  siwecal_validation.metrics
-k4SiWEcalReco ──imports──▶  siwecal_validation.{selection, event_data, vars_cache}
+gaudi_source  ──imports──▶  siwecal_validation.{selection, event_data, vars_cache}
 siwecal_eventbuilder ─┐
 siwecal_validation  ──┼──▶  siwecal_common.paths
-k4SiWEcalReco       ──┘
+gaudi_source        ──┘
 ```
 
-`metrics.py` is the parity oracle: `k4SiWEcalReco` is a C++ port of it, and its
-batch driver reuses the validation's `CutSet` and tree schema so the cut logic
-and the output branches never drift. `siwecal_validation` then reads the metrics
-back from the `k4SiWEcalReco` output (it no longer touches the raw `ecal` tree).
-All modules resolve paths through `siwecal_common.paths`, so **no module
-hard-codes an absolute `/eos` path** — change `settings.yml` and everything follows.
+`metrics.py` is the parity oracle: `gaudi_source` is a C++ port of it, and its
+batch driver (`gaudi_jobs/run_pid_batch.py`) reuses the validation's `CutSet` and
+tree schema so the cut logic and the output branches never drift. `siwecal_validation`
+then reads the metrics back from the `gaudi_source` output (it no longer touches
+the raw `ecal` tree). All modules resolve paths through `siwecal_common.paths`,
+so **no module hard-codes an absolute `/eos` path** — change `settings.yml` and
+everything follows.
 
-### Reconstruction stage (Gaudi): `k4SiWEcalReco`
+### Reconstruction stage (Gaudi): `gaudi_source` + `gaudi_jobs`
 
-`k4SiWEcalReco` is the **Gaudi/k4FWCore** stage that computes the particle-ID
+`gaudi_source` is the **Gaudi/k4FWCore** stage that computes the particle-ID
 shower variables in C++ (a parity-validated port of `siwecal_validation.metrics`)
 and produces the **cut-passing event collections** consumed downstream. Per run
 it applies an optional hit-level MIP cut and the event selection (the same
@@ -81,16 +83,19 @@ default except total per-event energy > 0 (always enforced).
 
 ```bash
 source /cvmfs/sw.hsf.org/key4hep/setup.sh -r 2026-04-08
-cmake -S k4SiWEcalReco -B k4SiWEcalReco/build && cmake --build k4SiWEcalReco/build -j4
-export LD_LIBRARY_PATH=$PWD/k4SiWEcalReco/build:$LD_LIBRARY_PATH
-export PYTHONPATH=$PWD/k4SiWEcalReco/build/genConfDir:$PWD:$PYTHONPATH
+cmake -S gaudi_source -B gaudi_source/build && cmake --build gaudi_source/build -j4
+export LD_LIBRARY_PATH=$PWD/gaudi_source/build:$LD_LIBRARY_PATH
+export PYTHONPATH=$PWD/gaudi_source/build/genConfDir:$PWD:$PYTHONPATH
 
 # batch driver, same input options as siwecal_validation (--run/--file/--all/--point/--cfg)
-python k4SiWEcalReco/run_pid_batch.py --run TB2026CERN_run_000007 --outdir /tmp/pid
-python k4SiWEcalReco/run_pid_batch.py --all --format both --nhit-min 20 --outdir /tmp/pid
-python k4SiWEcalReco/run_pid_batch.py --run TB2026CERN_run_000007 --validation   # viewer mode
+python gaudi_jobs/run_pid_batch.py --run TB2026CERN_run_000007
+python gaudi_jobs/run_pid_batch.py --all --format both --nhit-min 20
+python gaudi_jobs/run_pid_batch.py --run TB2026CERN_run_000007 --validation   # viewer mode
 
-# validation / viewer then consume the output directly (found next to the input)
+# concrete job example (steering file for run000013, physics mode)
+k4run gaudi_jobs/run000013/steer_run000013.py
+
+# validation / viewer then consume the output directly
 python -m siwecal_validation --run TB2026CERN_run_000007
 ```
 
@@ -107,21 +112,24 @@ python -m siwecal_validation --run TB2026CERN_run_000007
 > full discussion and open questions.
 >
 > If you open the viewer directly on a **raw** `ecal_<run>.root` (instead of the
-> `k4SiWEcalReco` output — the EDM4hep or valtree file), masked hits *will* show
+> `gaudi_source` output — the EDM4hep or valtree file), masked hits *will* show
 > up — the `ecal` tree keeps them as a raw record.
 
-See [`k4SiWEcalReco/README.md`](k4SiWEcalReco/README.md) for details.
+See [`gaudi_source/README.md`](gaudi_source/README.md) for details.
 
 ## The software stack
 
 - **[key4hep](https://key4hep.github.io/)** from CVMFS provides the scientific
   Python stack used everywhere: `numpy`, `scipy`, `pandas`, `scikit-learn`,
   `matplotlib`, `pyyaml`, `uproot`, `awkward` and **ROOT** (PyROOT). The event
-  builder and `k4SiWEcalReco` write ROOT trees with PyROOT; `siwecal_validation`
+  builder and `gaudi_source` write ROOT trees with PyROOT; `siwecal_validation`
   and the viewer read with `uproot` (no PyROOT needed there).
 - **dash + plotly** (the only packages not in key4hep) power the `event_viewer`
   web UI. They live in a local `--system-site-packages` virtualenv,
   `.venv-viewer` (not versioned — recreate it per machine, see below).
+- **`gaudi_source`** (the Gaudi/k4FWCore plugin) and its jobs driver
+  (`gaudi_jobs/run_pid_batch.py`) also require key4hep. Build with CMake once
+  and export `LD_LIBRARY_PATH` / `PYTHONPATH` as shown above.
 
 ## Quick start
 
@@ -163,7 +171,7 @@ calib_dir:    ./calibration                 # pedestal / MIP files (vendored)
 geometry_dir: ./mappings                    # pad maps, slab z, tungsten map
 configs_dir:  ./configs/data                # data_reference*.yml run lists
 output_dir:   ./validation_output           # validation plots / results
-pid_dir:      null                          # k4SiWEcalReco outputs (null = next to input)
+pid_dir:      null                          # gaudi_source outputs (null = next to input)
 cache_dir:    null                          # legacy *.valcache.root (null = next to input)
 ```
 
@@ -171,7 +179,7 @@ Notes:
 - `data_dir` may be a **list of search roots**: inputs are looked up in each, in
   order, and the first match wins. Absolute paths written inside the
   `data_reference*.yml` files always take precedence.
-- `pid_dir` is where `k4SiWEcalReco` writes (and `siwecal_validation` /
+- `pid_dir` is where `gaudi_source` writes (and `siwecal_validation` /
   `event_viewer` look for) `ecal_<run>.edm4hep.root` / `ecal_<run>.valtree.root`
   — set it when your data directory is read-only.
 - `cache_dir` is the legacy `*.valcache.root` location (still read by the viewer
@@ -190,12 +198,15 @@ siwecal-tb2026/
 ├── siwecal_validation/                   validation + metrics (+ README)
 ├── event_viewer/                         Dash viewer (+ README)
 ├── event_display/                        ROOT TEve 3-D event display (native key4hep, no extra deps)
+├── gaudi_source/                         Gaudi/k4FWCore C++ source + CMake + steering file genérico
+├── gaudi_jobs/                           driver de batch (run_pid_batch.py) + ejemplos de jobs
+│   └── run000013/                        ejemplo concreto para TB2026CERN_run_000013
 ├── mappings/                             pad maps, slab_z_positions.yml, Tungsten_thickness.yml
 ├── configs/data/                         data_reference*.yml run lists
 └── calibration/                          vendored dummy pedestal/MIP files
 ```
 
-Heavy per-run data (`ecal_<run>.root`, the `k4SiWEcalReco` outputs
+Heavy per-run data (`ecal_<run>.root`, the `gaudi_source` outputs
 `ecal_<run>.edm4hep.root` / `ecal_<run>.valtree.root`, raw inputs) live
 **outside** the repo, under `data_dir`.
 
@@ -208,8 +219,8 @@ source setup.sh
 python -m siwecal_eventbuilder --run TB2026CERN_run_000013 --th 220
 
 # 2. Reconstruct: shower variables + cuts -> ecal_<run>.edm4hep.root (needs key4hep,
-#    see the k4SiWEcalReco README; add --validation for the viewer's slider blocks)
-python k4SiWEcalReco/run_pid_batch.py --run TB2026CERN_run_000007
+#    see the gaudi_source README; add --validation for the viewer's slider blocks)
+python gaudi_jobs/run_pid_batch.py --run TB2026CERN_run_000007
 
 # 3. Validate it: plots + fits with the cuts you want (reads the step-2 output)
 python -m siwecal_validation --run TB2026CERN_run_000007 --nhit-min 20

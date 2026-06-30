@@ -1,4 +1,4 @@
-# k4SiWEcalReco
+# gaudi_source
 
 Gaudi/k4FWCore stage that turns the per-event reconstructed `ecal` tree (written
 by `siwecal_eventbuilder`) into the high-level reconstruction product, computing
@@ -76,14 +76,14 @@ profiles. Readers (`PidFileReader`) auto-detect which layout a file uses.
 
 ```bash
 source /cvmfs/sw.hsf.org/key4hep/setup.sh -r 2026-04-08
-cmake -S k4SiWEcalReco -B k4SiWEcalReco/build -DCMAKE_BUILD_TYPE=Release
-cmake --build k4SiWEcalReco/build -j4
+cmake -S gaudi_source -B gaudi_source/build -DCMAKE_BUILD_TYPE=Release
+cmake --build gaudi_source/build -j4
 
-export LD_LIBRARY_PATH=$PWD/k4SiWEcalReco/build:$LD_LIBRARY_PATH
-export PYTHONPATH=$PWD/k4SiWEcalReco/build/genConfDir:$PWD:$PYTHONPATH
+export LD_LIBRARY_PATH=$PWD/gaudi_source/build:$LD_LIBRARY_PATH
+export PYTHONPATH=$PWD/gaudi_source/build/genConfDir:$PWD:$PYTHONPATH
 ```
 
-### Batch driver (recommended): `run_pid_batch.py`
+### Batch driver (recommended): `gaudi_jobs/run_pid_batch.py`
 
 Resolves inputs exactly like `siwecal_validation` (`--run/--file/--all/--point/--cfg`),
 runs the Gaudi stage per `ecal_<run>.root`, then applies the cuts and writes the
@@ -91,13 +91,13 @@ final output(s):
 
 ```bash
 # physics mode (default): hit-MIP cut >= 0.5, energy>0, no mip05_/mip1_ blocks
-python k4SiWEcalReco/run_pid_batch.py --run TB2026CERN_run_000007 --outdir /tmp/pid
+python gaudi_jobs/run_pid_batch.py --run TB2026CERN_run_000007
 
 # both formats + an event cut (cuts use the same flags as siwecal_validation)
-python k4SiWEcalReco/run_pid_batch.py --all --format both --nhit-min 20 --outdir /tmp/pid
+python gaudi_jobs/run_pid_batch.py --all --format both --nhit-min 20
 
 # validation/visualizer mode: no hit cut, compute the mip05_/mip1_ slider blocks
-python k4SiWEcalReco/run_pid_batch.py --run TB2026CERN_run_000007 --validation
+python gaudi_jobs/run_pid_batch.py --run TB2026CERN_run_000007 --validation
 ```
 
 Key flags:
@@ -112,8 +112,16 @@ Key flags:
 Cut policy: all cuts are off by default **except total per-event energy > 0**,
 which is always enforced. In `--all`/`--point` a per-energy `cuts:` block in the
 YAML overrides the CLI cuts (the two-level `general.merge(per_energy)` scheme).
-Outputs are named `ecal_<label>.edm4hep.root` and `ecal_<label>.valtree.root`,
-next to each input or under `--outdir` / `settings.yml` `pid_dir`.
+Outputs are named `ecal_<label>.edm4hep.root` and `ecal_<label>.valtree.root`
+under `settings.yml` `pid_dir` (or `--outdir`).
+
+### Ejemplo concreto: `gaudi_jobs/run000013/`
+
+Steering file autocontenido para TB2026CERN_run_000013 (modo físico):
+
+```bash
+k4run gaudi_jobs/run000013/steer_run000013.py
+```
 
 ### Single file via `k4run` (low level)
 
@@ -122,9 +130,9 @@ next to each input or under `--outdir` / `settings.yml` `pid_dir`.
 # control the mode; ECAL_PID_OUT receives the *unfiltered* EDM4hep file.
 ECAL_FILE=/path/ecal_<run>.root ECAL_PID_OUT=out.root \
 ECAL_HIT_MIP_CUT=0.5 ECAL_MIP_THRESHOLDS= \
-    k4run k4SiWEcalReco/options/run_pid.py
+    k4run gaudi_source/options/run_pid.py
 ```
-(`k4run` alone does not apply the event-level cuts — use `run_pid_batch.py` for
+(`k4run` alone does not apply the event-level cuts — use `gaudi_jobs/run_pid_batch.py` for
 the cut-passing, correctly-named outputs.)
 
 ## Verification (parity vs `metrics.py`)

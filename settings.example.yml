@@ -30,7 +30,7 @@ configs_dir: ./configs/data
 # Default output base for validation plots / results tables.
 output_dir: ./validation_output
 
-# Where k4SiWEcalReco writes (and siwecal_validation / event_viewer look for) the
+# Where gaudi_source writes (and siwecal_validation / event_viewer look for) the
 # per-run reconstruction output: ecal_<run>.edm4hep.root / ecal_<run>.valtree.root.
 #   null  -> next to each input file (default; needs a writable data dir)
 #   path  -> all outputs go here (use this when the data dir is read-only)
