@@ -255,10 +255,8 @@ def register_callbacks(app, controller) -> None:
         Input("color-clip", "value"),
         Input("store-hit-threshold", "data"),
         Input("show-overlays", "value"),
-        Input("axis-mode", "value"),
     )
-    def render_event(path, cur_index, cuts, clip, hit_threshold,
-                     overlays, axis_mode):
+    def render_event(path, cur_index, cuts, clip, hit_threshold, overlays):
         if not path:
             return (_empty_fig("Load a file"), _empty_fig(), [],
                     "no file", None, 1)
@@ -274,8 +272,7 @@ def register_callbacks(app, controller) -> None:
         overlays = overlays or []
         scene, layers, rows = controller.event_figures(
             path, index, color_clip, thr,
-            show_moliere="moliere" in overlays, show_axis="axis" in overlays,
-            axis_mode=axis_mode or "weighted")
+            show_moliere="moliere" in overlays, show_axis="axis" in overlays)
         ds = controller.dataset(path)
         label = (f"event {pos + 1} / {n_pass} passing "
                  f"(entry {index}, {ds.n_events} total)")

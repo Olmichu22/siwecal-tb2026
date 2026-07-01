@@ -75,9 +75,8 @@ def _event_tab():
                     html.Span(id="compute-status", children="⏳ Computing metrics…",
                               style={"display": "none"}),
                 ]),
-                # Shower overlays drawn on the 3-D scene, driven by the per-event
-                # metrics (bar_x/bar_y/moliere for the cylinder, the on-the-fly
-                # per-layer barycenters for the axis).
+                # Shower overlays drawn on the 3-D scene, both driven by the
+                # per-event metrics stored in the tree (bar_x/bar_y/moliere).
                 html.Div(style={"display": "flex", "gap": "14px",
                                 "alignItems": "center", "marginBottom": "10px",
                                 "flexWrap": "wrap"}, children=[
@@ -87,14 +86,6 @@ def _event_tab():
                             {"label": " Molière cylinder", "value": "moliere"},
                             {"label": " shower axis", "value": "axis"}],
                         value=[], style={"display": "inline-block"},
-                        inputStyle={"marginRight": "4px", "marginLeft": "10px"}),
-                    html.Span("axis:", style={"fontSize": "13px"}),
-                    dcc.RadioItems(
-                        id="axis-mode",
-                        options=[
-                            {"label": " energy-weighted", "value": "weighted"},
-                            {"label": " geometric", "value": "geom"}],
-                        value="weighted", style={"display": "inline-block"},
                         inputStyle={"marginRight": "4px", "marginLeft": "10px"}),
                 ]),
                 _loading(

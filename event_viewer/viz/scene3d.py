@@ -76,18 +76,16 @@ class DetectorScene3D:
 
     def event_figure(self, event, color_clip: bool = True,
                      threshold=None, show_moliere: bool = False,
-                     show_axis: bool = False,
-                     axis_mode: str = "weighted") -> go.Figure:
+                     show_axis: bool = False) -> go.Figure:
         """Detector geometry + this event's hits coloured by energy.
 
         ``threshold`` (energy, MIP) fades hits *below* it: they are drawn in a
         separate, almost-transparent mesh so the high-energy core -- the shower
         profile -- stands out. ``None`` or ``0`` shows every hit fully opaque.
 
-        ``show_moliere`` overlays the Molière cylinder from the per-event
-        ``bar_x``/``bar_y``/``moliere`` metrics; ``show_axis`` overlays the shower
-        axis built from the per-layer energy-weighted (``axis_mode="weighted"``)
-        or geometric (``"geom"``) barycenters of this event's hits.
+        ``show_moliere`` overlays the Molière cylinder and ``show_axis`` the
+        shower axis, both from the per-event ``bar_x``/``bar_y`` (and ``moliere``)
+        metrics stored in the tree.
         """
         traces = list(self._base_traces)
         if event is not None and event.n_hits:
@@ -112,7 +110,7 @@ class DetectorScene3D:
             if show_moliere:
                 traces += self._moliere_traces(event)
             if show_axis:
-                axis = self._axis_trace(event, axis_mode)
+                axis = self._axis_trace(event)
                 if axis is not None:
                     traces.append(axis)
         return self._wrap(traces)
@@ -188,41 +186,36 @@ class DetectorScene3D:
             name=f"Molière r={r:.1f} mm", hoverinfo="name")
         return [surface, rings]
 
-    def _axis_trace(self, event, axis_mode: str = "weighted"):
-        """Polyline through the per-layer barycenters of the event's hits.
+    def _axis_trace(self, event):
+        """Shower axis as a vertical line at the stored transverse barycenter.
 
-        ``axis_mode="weighted"`` uses the energy-weighted transverse barycenter
-        of each layer (positive energies only); ``"geom"`` uses the plain mean of
-        the hit positions. Returns ``None`` for an empty event.
+        Uses the per-event ``bar_x``/``bar_y`` written in the tree (the
+        energy-weighted transverse barycenter), drawn over the shower's z range
+        with a marker at the longitudinal barycenter ``zbary`` when available.
+        Returns ``None`` when ``bar_x``/``bar_y`` are missing.
         """
-        x = np.asarray(event.x, dtype=float)
-        y = np.asarray(event.y, dtype=float)
-        z = np.asarray(event.z, dtype=float)
-        e = np.asarray(event.energy, dtype=float)
-        good = np.isfinite(x) & np.isfinite(y) & np.isfinite(z)
-        if not good.any():
+        m = event.metrics or {}
+        bx, by = m.get("bar_x"), m.get("bar_y")
+        if bx is None or by is None or not (np.isfinite(bx) and np.isfinite(by)):
             return None
-        x, y, z, e = x[good], y[good], z[good], e[good]
-        weighted = axis_mode != "geom"
-        bx, by, bz = [], [], []
-        for zl in np.unique(z):
-            sel = z == zl
-            w = e[sel]
-            if weighted and np.any(w > 0):
-                w = np.where(w > 0, w, 0.0)
-                tot = w.sum()
-                bx.append(float(np.dot(w, x[sel]) / tot))
-                by.append(float(np.dot(w, y[sel]) / tot))
-            else:
-                bx.append(float(x[sel].mean()))
-                by.append(float(y[sel].mean()))
-            bz.append(float(zl))
-        name = "axis (energy-weighted)" if weighted else "axis (geometric)"
+        zr = self._shower_z_range(event)
+        if zr is None:
+            return None
+        z0, z1 = zr
+        # zbary is an energy-weighted *layer index*; map it to a z in mm.
+        zbary = m.get("zbary")
+        zs = [z0, z1]
+        if zbary is not None and np.isfinite(zbary):
+            slab_z = self.detector.slab_z_mm
+            zbary_mm = float(np.interp(zbary, np.arange(slab_z.size), slab_z))
+            if z0 <= zbary_mm <= z1:
+                zs = [z0, zbary_mm, z1]
         return go.Scatter3d(
-            x=bx, y=by, z=bz, mode="lines+markers",
+            x=[bx] * len(zs), y=[by] * len(zs), z=zs, mode="lines+markers",
             line=dict(color="#111111", width=5),
-            marker=dict(size=3, color="#111111"),
-            name=name, hoverinfo="name")
+            marker=dict(size=[2, 5, 2] if len(zs) == 3 else [2, 2],
+                        color="#111111"),
+            name="shower axis (bar_x, bar_y)", hoverinfo="name")
 
     @staticmethod
     def _color_range(energy, color_clip):
