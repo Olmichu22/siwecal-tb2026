@@ -26,9 +26,9 @@ class DistributionPlots:
         """1-D histogram of ``values`` with ``nbins`` bins.
 
         If ``labels`` is given (one cluster label per value), the histogram is
-        split into one stacked series per cluster (``barmode="stack"``) so the
-        cluster separation is visible; otherwise a single series is drawn. The
-        bin edges are shared across series so the stacking aligns. ``cut_range``
+        split into one overlaid series per cluster (``barmode="overlay"`` with
+        alpha) so each cluster's shape stays visible; otherwise a single series is
+        drawn. The bin edges are shared across series so they align. ``cut_range``
         is shaded when provided.
         """
         values = np.asarray(values, dtype=float)
@@ -55,11 +55,11 @@ class DistributionPlots:
                 series = values[mask]
                 series = series[np.isfinite(series)]
                 name = "unclustered" if lab == UNCLUSTERED else f"cluster {lab}"
-                marker = dict(color="lightgrey") if lab == UNCLUSTERED else None
+                marker = dict(color="#8c8c8c") if lab == UNCLUSTERED else None
                 fig.add_trace(go.Histogram(
                     x=series, xbins=xbins, name=name, bingroup="dist",
-                    opacity=0.85, marker=marker))
-            fig.update_layout(barmode="stack")
+                    opacity=0.55, marker=marker))
+            fig.update_layout(barmode="overlay")
 
         if cut_range is not None:
             lo, hi = cut_range
@@ -69,6 +69,49 @@ class DistributionPlots:
             xaxis_title=variable, yaxis_title="events",
             margin=dict(l=50, r=20, t=20, b=40), bargap=0.02,
             uirevision=f"hist-{variable}")
+        return fig
+
+    def histogram_split(self, values: np.ndarray, keep: np.ndarray,
+                        variable: str, nbins: int = 60) -> go.Figure:
+        """Full distribution of ``values`` split into kept vs removed by ``keep``.
+
+        Unlike :meth:`histogram`, the *whole* distribution is drawn: the events
+        that survive every cut (``keep`` True) are shown in a vivid colour and
+        the events removed by the cuts in a muted grey, stacked on shared bins so
+        the fraction kept in each bin is directly visible. ``keep`` is a boolean
+        mask aligned with ``values``.
+        """
+        values = np.asarray(values, dtype=float)
+        keep = np.asarray(keep, dtype=bool)
+        finite = np.isfinite(values)
+        fig = go.Figure()
+        if not finite.any():
+            fig.update_layout(xaxis_title=variable, yaxis_title="events",
+                              margin=dict(l=50, r=20, t=20, b=40))
+            return fig
+
+        vals = values[finite]
+        start, end = float(vals.min()), float(vals.max())
+        if end <= start:
+            end = start + 1.0
+        size = (end - start) / max(int(nbins), 1)
+        xbins = dict(start=start, end=end + size, size=size)
+
+        kept = values[finite & keep]
+        removed = values[finite & ~keep]
+        # Overlaid (not stacked) so each series keeps its own shape; alpha lets
+        # both show through where they overlap.
+        fig.add_trace(go.Histogram(
+            x=removed, xbins=xbins, name="cut out", bingroup="ev",
+            marker_color="#4c78a8", opacity=0.5))
+        fig.add_trace(go.Histogram(
+            x=kept, xbins=xbins, name="kept", bingroup="ev",
+            marker_color="#e4572e", opacity=0.6))
+        fig.update_layout(
+            barmode="overlay", xaxis_title=variable, yaxis_title="events",
+            margin=dict(l=50, r=20, t=20, b=40), bargap=0.02,
+            legend=dict(orientation="h", yanchor="bottom", y=1.0),
+            uirevision=f"evhist-{variable}")
         return fig
 
     def scatter(self, df, xvar: str, yvar: str,

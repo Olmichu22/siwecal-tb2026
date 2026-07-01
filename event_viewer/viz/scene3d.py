@@ -75,12 +75,19 @@ class DetectorScene3D:
         return self._wrap(list(self._base_traces))
 
     def event_figure(self, event, color_clip: bool = True,
-                     threshold=None) -> go.Figure:
+                     threshold=None, show_moliere: bool = False,
+                     show_axis: bool = False,
+                     axis_mode: str = "weighted") -> go.Figure:
         """Detector geometry + this event's hits coloured by energy.
 
         ``threshold`` (energy, MIP) fades hits *below* it: they are drawn in a
         separate, almost-transparent mesh so the high-energy core -- the shower
         profile -- stands out. ``None`` or ``0`` shows every hit fully opaque.
+
+        ``show_moliere`` overlays the Molière cylinder from the per-event
+        ``bar_x``/``bar_y``/``moliere`` metrics; ``show_axis`` overlays the shower
+        axis built from the per-layer energy-weighted (``axis_mode="weighted"``)
+        or geometric (``"geom"``) barycenters of this event's hits.
         """
         traces = list(self._base_traces)
         if event is not None and event.n_hits:
@@ -102,7 +109,120 @@ class DetectorScene3D:
                                            opacity=1.0, showscale=True)
                 if strong is not None:
                     traces.append(strong)
+            if show_moliere:
+                traces += self._moliere_traces(event)
+            if show_axis:
+                axis = self._axis_trace(event, axis_mode)
+                if axis is not None:
+                    traces.append(axis)
         return self._wrap(traces)
+
+    # ---------------------------------------------------------- shower overlays --
+    def _shower_z_range(self, event):
+        """(z0, z1) mm spanning the shower, from metrics or the hit z extent."""
+        m = event.metrics or {}
+        n = self.detector.slab_z_mm.size
+
+        def _z_of_layer(key):
+            v = m.get(key)
+            if v is None or not np.isfinite(v):
+                return None
+            i = int(round(float(v)))
+            return float(self.detector.slab_z_mm[i]) if 0 <= i < n else None
+
+        z0 = _z_of_layer("shower_start")
+        z1 = _z_of_layer("shower_end")
+        if z0 is None or z1 is None:
+            z0 = z0 if z0 is not None else _z_of_layer("first_layer")
+            z1 = z1 if z1 is not None else _z_of_layer("last_layer")
+        if z0 is None or z1 is None:
+            z = np.asarray(event.z, dtype=float)
+            z = z[np.isfinite(z)]
+            if z.size == 0:
+                return None
+            z0, z1 = float(z.min()), float(z.max())
+        return (min(z0, z1), max(z0, z1))
+
+    def _moliere_traces(self, event, n_theta: int = 48):
+        """Translucent lateral cylinder + two ring outlines at the Molière radius.
+
+        Centred on the transverse barycenter ``(bar_x, bar_y)`` with radius
+        ``moliere``, spanning the shower's z range. Returns an empty list when the
+        needed metrics are missing (e.g. non-valcache files, or non-showers).
+        """
+        m = event.metrics or {}
+        bx, by, r = m.get("bar_x"), m.get("bar_y"), m.get("moliere")
+        if bx is None or by is None or r is None:
+            return []
+        if not (np.isfinite(bx) and np.isfinite(by) and np.isfinite(r)) or r <= 0:
+            return []
+        zr = self._shower_z_range(event)
+        if zr is None:
+            return []
+        z0, z1 = zr
+        theta = np.linspace(0, 2 * np.pi, n_theta, endpoint=True)
+        cx, cy = bx + r * np.cos(theta), by + r * np.sin(theta)
+        color = "rgba(224, 87, 46, 0.9)"
+
+        # Lateral surface: two rings (z0, z1) stitched with triangles.
+        xs = np.concatenate([cx, cx])
+        ys = np.concatenate([cy, cy])
+        zs = np.concatenate([np.full(n_theta, z0), np.full(n_theta, z1)])
+        tri_i, tri_j, tri_k = [], [], []
+        for a in range(n_theta - 1):
+            b, lo0, lo1 = a + 1, a, a + 1
+            up0, up1 = a + n_theta, a + 1 + n_theta
+            tri_i += [lo0, lo1]
+            tri_j += [up0, up0]
+            tri_k += [up1, lo1]
+        surface = go.Mesh3d(
+            x=xs, y=ys, z=zs, i=tri_i, j=tri_j, k=tri_k,
+            color="rgba(224, 87, 46, 0.12)", opacity=0.12, hoverinfo="skip",
+            showscale=False, flatshading=True, name="Molière cylinder")
+        rings = go.Scatter3d(
+            x=np.concatenate([cx, [np.nan], cx]),
+            y=np.concatenate([cy, [np.nan], cy]),
+            z=np.concatenate([np.full(n_theta, z0), [np.nan],
+                              np.full(n_theta, z1)]),
+            mode="lines", line=dict(color=color, width=4),
+            name=f"Molière r={r:.1f} mm", hoverinfo="name")
+        return [surface, rings]
+
+    def _axis_trace(self, event, axis_mode: str = "weighted"):
+        """Polyline through the per-layer barycenters of the event's hits.
+
+        ``axis_mode="weighted"`` uses the energy-weighted transverse barycenter
+        of each layer (positive energies only); ``"geom"`` uses the plain mean of
+        the hit positions. Returns ``None`` for an empty event.
+        """
+        x = np.asarray(event.x, dtype=float)
+        y = np.asarray(event.y, dtype=float)
+        z = np.asarray(event.z, dtype=float)
+        e = np.asarray(event.energy, dtype=float)
+        good = np.isfinite(x) & np.isfinite(y) & np.isfinite(z)
+        if not good.any():
+            return None
+        x, y, z, e = x[good], y[good], z[good], e[good]
+        weighted = axis_mode != "geom"
+        bx, by, bz = [], [], []
+        for zl in np.unique(z):
+            sel = z == zl
+            w = e[sel]
+            if weighted and np.any(w > 0):
+                w = np.where(w > 0, w, 0.0)
+                tot = w.sum()
+                bx.append(float(np.dot(w, x[sel]) / tot))
+                by.append(float(np.dot(w, y[sel]) / tot))
+            else:
+                bx.append(float(x[sel].mean()))
+                by.append(float(y[sel].mean()))
+            bz.append(float(zl))
+        name = "axis (energy-weighted)" if weighted else "axis (geometric)"
+        return go.Scatter3d(
+            x=bx, y=by, z=bz, mode="lines+markers",
+            line=dict(color="#111111", width=5),
+            marker=dict(size=3, color="#111111"),
+            name=name, hoverinfo="name")
 
     @staticmethod
     def _color_range(energy, color_clip):
