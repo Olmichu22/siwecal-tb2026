@@ -212,9 +212,9 @@ class DetectorScene3D:
                 zs = [z0, zbary_mm, z1]
         return go.Scatter3d(
             x=[bx] * len(zs), y=[by] * len(zs), z=zs, mode="lines+markers",
-            line=dict(color="#111111", width=5),
+            line=dict(color="red", width=5),
             marker=dict(size=[2, 5, 2] if len(zs) == 3 else [2, 2],
-                        color="#111111"),
+                        color="red"),
             name="shower axis (bar_x, bar_y)", hoverinfo="name")
 
     @staticmethod
