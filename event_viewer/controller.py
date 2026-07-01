@@ -122,7 +122,7 @@ class ViewerController:
     # ------------------------------------------------------- event figures --
     def event_figures(self, path: str, index: int, color_clip: bool,
                       hit_threshold: float = 0.0, show_moliere: bool = False,
-                      show_axis: bool = False, axis_mode: str = "weighted"):
+                      show_axis: bool = False):
         """``(scene3d_fig, layers2d_fig, metrics_rows)`` for one event."""
         event = self.dataset(path).get_event(index)
         if hit_threshold > 0.0:
@@ -132,8 +132,7 @@ class ViewerController:
             event.metrics = (table.iloc[index].to_dict()
                              if index < len(table) else {})
         scene = self.scene3d.event_figure(
-            event, color_clip, show_moliere=show_moliere,
-            show_axis=show_axis, axis_mode=axis_mode)
+            event, color_clip, show_moliere=show_moliere, show_axis=show_axis)
         layers = self.layers2d.build(event, color_clip)
         rows = self._metric_rows(event)
         return scene, layers, rows
