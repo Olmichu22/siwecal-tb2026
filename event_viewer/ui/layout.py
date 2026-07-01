@@ -75,6 +75,28 @@ def _event_tab():
                     html.Span(id="compute-status", children="⏳ Computing metrics…",
                               style={"display": "none"}),
                 ]),
+                # Shower overlays drawn on the 3-D scene, driven by the per-event
+                # metrics (bar_x/bar_y/moliere for the cylinder, the on-the-fly
+                # per-layer barycenters for the axis).
+                html.Div(style={"display": "flex", "gap": "14px",
+                                "alignItems": "center", "marginBottom": "10px",
+                                "flexWrap": "wrap"}, children=[
+                    dcc.Checklist(
+                        id="show-overlays",
+                        options=[
+                            {"label": " Molière cylinder", "value": "moliere"},
+                            {"label": " shower axis", "value": "axis"}],
+                        value=[], style={"display": "inline-block"},
+                        inputStyle={"marginRight": "4px", "marginLeft": "10px"}),
+                    html.Span("axis:", style={"fontSize": "13px"}),
+                    dcc.RadioItems(
+                        id="axis-mode",
+                        options=[
+                            {"label": " energy-weighted", "value": "weighted"},
+                            {"label": " geometric", "value": "geom"}],
+                        value="weighted", style={"display": "inline-block"},
+                        inputStyle={"marginRight": "4px", "marginLeft": "10px"}),
+                ]),
                 _loading(
                     dcc.Graph(id="scene3d", style={"height": "460px"}),
                     dcc.Graph(id="layers2d", style={"height": "640px"}),
@@ -89,6 +111,36 @@ def _event_tab():
                     style_cell={"fontSize": "12px", "textAlign": "left"},
                     style_table={"height": "1040px", "overflowY": "auto"},
                     page_size=60),
+            ]),
+        ]),
+        # Distribution + dynamic cuts that shape *which events are shown one by
+        # one* on this tab. These cuts are independent from the clustering tab's
+        # (they live in ``store-event-cuts``); the histogram highlights the part
+        # of the distribution kept by the cuts vs the part removed.
+        _event_cuts_section(),
+    ])
+
+
+def _event_cuts_section():
+    return html.Div(style={"marginTop": "14px"}, children=[
+        html.H4("Distribution & cuts — limit the events shown above"),
+        html.Div(style={"display": "flex", "gap": "16px"}, children=[
+            html.Div(style={"flex": "1"}, children=[
+                dcc.Dropdown(id="ev-dist-var", placeholder="variable"),
+                html.Div(style={"display": "flex", "gap": "10px",
+                                "alignItems": "center", "margin": "4px 0"},
+                         children=[
+                    html.Span("bins:"),
+                    dcc.Input(id="ev-dist-nbins", type="number", min=5, max=400,
+                              step=1, value=60, style={"width": "80px"}),
+                ]),
+                _loading(dcc.Graph(id="ev-dist-hist", style={"height": "340px"})),
+            ]),
+            html.Div(style={"flex": "1"}, children=[
+                html.H5("Dynamic cuts"),
+                dcc.Dropdown(id="ev-cut-vars", multi=True,
+                             placeholder="variables to cut on"),
+                html.Div(id="ev-cut-sliders"),
             ]),
         ]),
     ])
@@ -116,7 +168,7 @@ def _distributions_tab():
                         value=["stack"], style={"display": "inline-block"}),
                 ]),
                 _loading(dcc.Graph(id="dist-hist", style={"height": "360px"})),
-                html.H4("Dynamic cuts"),
+                html.H4("Dynamic cuts — limit distributions & clustering input"),
                 dcc.Dropdown(id="cut-vars", multi=True,
                              placeholder="variables to cut on"),
                 html.Div(id="cut-sliders"),
@@ -181,7 +233,8 @@ def build_layout(controller, initial_path: Optional[str] = None) -> html.Div:
         # Lightweight session state.
         dcc.Store(id="store-file", data=initial_path),
         dcc.Store(id="store-pos", data=0),          # position within passing list
-        dcc.Store(id="store-cuts", data=[]),        # list of cut dicts
+        dcc.Store(id="store-event-cuts", data=[]),  # Event tab cuts (nav + hist)
+        dcc.Store(id="store-cuts", data=[]),        # Clustering tab cuts (cluster)
         dcc.Store(id="store-cluster", data=None),   # {passing:[...], labels:[...]}
         dcc.Store(id="store-hit-threshold", data=0.0),  # hit_energy >= threshold
         dcc.Tabs(id="tabs", value="tab-event", children=[
