@@ -1,0 +1,63 @@
+# ---------------------------------------------------------------------------
+# OPTIONAL tunables for the SiW-ECAL event builder (`siwecal_eventbuilder`).
+#
+# This file is NOT required: the builder runs on the dataclass defaults shown
+# below. Copy it to `config.yml` (the default the builder looks for) and
+# uncomment ONLY the keys you want to change -- absent keys keep their default.
+#
+#   python -m siwecal_eventbuilder --run TB2026CERN_run_000007            # uses config.yml if present
+#   python -m siwecal_eventbuilder --run ... --config my_overrides.yml    # explicit file
+#
+# Precedence (lowest -> highest):  dataclass defaults  ->  this file  ->  CLI flags.
+# Unknown section names or option keys are reported (sections warn, options error
+# listing the valid names), so typos never pass silently.
+#
+# NB: filesystem *roots* (where the data lives) belong in `settings.yml`, not
+# here. The `paths:` section below only overrides the per-run-list main_path /
+# calibration_dir, mirroring what a `data_reference*.yml` can set.
+# ---------------------------------------------------------------------------
+
+# --- builder: thresholds and processing knobs (BuilderConfig) ---------------
+# builder:
+#   tree_name: siwecaldecoded     # input TTree name from the RAW2ROOT converter
+#   skip_bcid_start: 50           # reject BCIDs below this (noisy acquisition start)
+#   drop_bcids: [0, 901]          # known-artefact BCID values, always discarded
+#   merge_delta: 3                # merge consecutive BCIDs closer than this
+#   min_slabs_hit: 10             # keep a window only if it spans >= this many slabs
+#   bcid_overflow: 4096           # 12-bit BCID counter wrap
+#   bad_value: -999               # converter sentinel for empty/invalid SCA cells
+#   adc_underflow_threshold: 11   # high-gain ADC <= this is underflow -> dropped
+#   pedestal_fallback: 250.0      # pedestal assumed for a channel missing from the map
+#   default_mip_fallback: 20.0    # MIP assumed when no channel could be calibrated
+#   max_hits_per_event: 15360     # hard cap (= 15*16*64); guards the writer buffers
+#   default_workers: 5            # parallel worker processes per run
+
+# --- geometry: logical array dimensions (DetectorGeometry) ------------------
+# geometry:
+#   n_slab_positions: 15          # physical slab slots (ib)
+#   n_chips_per_slab: 16          # SKIROC2 ASICs per slab
+#   n_scas_per_chip: 15           # SCA memory cells per chip
+#   n_channels_per_chip: 64       # pixels per chip
+#   # slab_z_mm: [0.0, 11.0, 22.0, ...]   # per-slab z [mm]; usually set via
+#   #                                       geometry/slab_z_positions.yml instead
+
+# --- paths: per-run-list overrides (same role as data_reference main_path) --
+# paths:
+#   main_path: /path/to/your/TB2026CERN/data   # wins over settings.yml data_dir
+#   calibration_dir: ./calibration             # pedestal/MIP text-file directory
+
+# --- calibration: where the pedestal/MIP come from --------------------------
+# calibration:
+#   mode: files                   # files | data | none  (CLI --no-calib/--compute-calib win)
+#   pedestal_file: ./calibration/dummy_pedestal_15_highgain.txt
+#   mip_file: ./calibration/dummy_mip_map_15_highgain.txt
+#   # For mode: data (compute from dedicated runs) instead of files:
+#   # pedestal_run: TB2026CERN_run_000004
+#   # mip_run: TB2026CERN_run_000004
+
+# --- mapping: pad (chip,channel) -> (x,y) position maps ---------------------
+# mapping:
+#   dir: ./geometry               # base dir for the map files below
+#   files:
+#     default: fev10_rotate_chip_channel_x_y_mapping.txt
+#     12: fev11_cob_good_rotate_chip_channel_x_y_mapping.txt   # per-slab override

@@ -108,8 +108,17 @@ def load_reference_config(path=CONFIG_FILE) -> dict:
 
 
 def input_path_for(run_name: str, base_path: str) -> str:
-    """Absolute path of a run's converted input file."""
-    return os.path.join(base_path, run_name, run_name + ".root")
+    """Absolute path of a run's converted input file.
+
+    Resolved under ``base_path`` first; if nothing exists there, fall back to the
+    ``settings.yml`` data roots via :func:`paths.resolve_input`. This mirrors the
+    validation runner / ``run_pid_batch`` behaviour so a stale ``main_path`` in a
+    data-reference YAML can never hide files that live under the configured
+    ``data_dir`` (and the documented multi-root search is honoured).
+    """
+    rel = os.path.join(run_name, run_name + ".root")
+    candidate = os.path.join(base_path, rel)
+    return candidate if os.path.exists(candidate) else paths.resolve_input(rel)
 
 
 def default_output_for(run_name: str, base_path: str, out_dir=None) -> str:
@@ -363,7 +372,11 @@ def main(argv=None) -> None:
     if args.config and os.path.exists(args.config):
         print(f"[Config] Loaded overrides from {args.config}")
 
-    # base_path: data_reference.yml -> config.yml[paths] -> default.
+    # base_path (data root) precedence, highest first:
+    #   config.yml [paths].main_path  ->  data_reference main_path  ->  settings.yml.
+    # The data_reference's main_path is the convenient central override (it already
+    # lists every run), so it WINS over settings.yml when set; input_path_for still
+    # falls back to the settings.yml data roots for any file not found under it.
     base_path = (settings.paths.get("main_path")
                  or reference.get("main_path", BASE_PATH)).rstrip("/")
 

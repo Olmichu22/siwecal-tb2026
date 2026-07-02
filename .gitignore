@@ -31,9 +31,9 @@ results/
 *.log
 _logs/
 
-# --- Local machine config (settings.yml is tracked as a template; uncomment
-#     the next line if your paths are private and you keep only the example) ---
-# settings.yml
+# --- Local machine config: settings.yml holds your private paths, so it is NOT
+#     versioned. Copy settings.example.yml -> settings.yml and edit per machine. ---
+settings.yml
 
 # --- Editor / OS noise ---
 *~
