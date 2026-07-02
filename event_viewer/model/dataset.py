@@ -74,6 +74,8 @@ class EventDataset:
         footprint of, e.g., a cluster. ``chip``/``chan`` are not meaningful for an
         aggregate and are set to ``-1``.
         """
+        from .._timing import timed
+
         hits = self.reader.all_hits()
         indices = list(indices)
         if not indices or "hit_x" not in hits or "hit_y" not in hits:
@@ -82,17 +84,21 @@ class EventDataset:
                          slab=empty.astype(np.int64), chip=empty.astype(np.int64),
                          chan=empty.astype(np.int64), energy=empty,
                          hg=empty, lg=empty, metrics={})
-        slab = np.concatenate([np.asarray(hits["hit_slab"][i]) for i in indices])
-        x = np.concatenate([np.asarray(hits["hit_x"][i]) for i in indices])
-        y = np.concatenate([np.asarray(hits["hit_y"][i]) for i in indices])
-        energy = np.concatenate([np.asarray(hits["hit_energy"][i]) for i in indices])
+        with timed("accumulate (pool + groupby per pad)") as info:
+            slab = np.concatenate([np.asarray(hits["hit_slab"][i]) for i in indices])
+            x = np.concatenate([np.asarray(hits["hit_x"][i]) for i in indices])
+            y = np.concatenate([np.asarray(hits["hit_y"][i]) for i in indices])
+            energy = np.concatenate([np.asarray(hits["hit_energy"][i]) for i in indices])
 
-        pooled = pd.DataFrame({"slab": slab.astype(int),
-                               "xr": np.round(x, 2), "yr": np.round(y, 2),
-                               "e": energy.astype(float)})
-        agg = pooled.groupby(["slab", "xr", "yr"], as_index=False)["e"].sum()
-        agg["e"] /= max(len(indices), 1)
-        slab_g = agg["slab"].to_numpy(dtype=np.int64)
+            pooled = pd.DataFrame({"slab": slab.astype(int),
+                                   "xr": np.round(x, 2), "yr": np.round(y, 2),
+                                   "e": energy.astype(float)})
+            agg = pooled.groupby(["slab", "xr", "yr"], as_index=False)["e"].sum()
+            agg["e"] /= max(len(indices), 1)
+            slab_g = agg["slab"].to_numpy(dtype=np.int64)
+            info["events"] = len(indices)
+            info["hits_pooled"] = int(slab.size)
+            info["pads"] = int(slab_g.size)
         return Event(
             index=-1,
             x=agg["xr"].to_numpy(dtype=float),

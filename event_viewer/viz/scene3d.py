@@ -76,7 +76,7 @@ class DetectorScene3D:
 
     def event_figure(self, event, color_clip: bool = True,
                      threshold=None, show_moliere: bool = False,
-                     show_axis: bool = False) -> go.Figure:
+                     show_axis: bool = False, hover: bool = True) -> go.Figure:
         """Detector geometry + this event's hits coloured by energy.
 
         ``threshold`` (energy, MIP) fades hits *below* it: they are drawn in a
@@ -99,12 +99,14 @@ class DetectorScene3D:
             any_above = bool(above.any())
             if below.any():
                 faint = self._square_mesh(event, below, cmin, cmax,
-                                          opacity=0.06, showscale=not any_above)
+                                          opacity=0.06, showscale=not any_above,
+                                          hover=hover)
                 if faint is not None:
                     traces.append(faint)
             if any_above:
                 strong = self._square_mesh(event, above, cmin, cmax,
-                                           opacity=1.0, showscale=True)
+                                           opacity=1.0, showscale=True,
+                                           hover=hover)
                 if strong is not None:
                     traces.append(strong)
             if show_moliere:
@@ -228,41 +230,70 @@ class DetectorScene3D:
             cmax = cmin + 1.0
         return cmin, cmax
 
-    def _square_mesh(self, event, mask, cmin, cmax, opacity, showscale):
+    def _square_mesh(self, event, mask, cmin, cmax, opacity, showscale,
+                     hover: bool = True):
         """One ``Mesh3d`` of pad-sized squares for the hits selected by ``mask``.
 
         4 vertices + 2 triangles per hit; per-vertex ``intensity`` = hit energy so
         every mesh shares the same energy colour scale regardless of ``opacity``.
+
+        The vertex/index arrays are built vectorised as ``float32``/``int32``
+        ``ndarray``s -- plotly then serialises them as compact binary buffers
+        instead of full-precision JSON text, which matters for the accumulated
+        cluster scenes (thousands of pads per panel).
+
+        ``hover`` picks the tooltip: ``True`` keeps the per-hit
+        ``slab``/``chip``/``chan`` detail (single events); ``False`` emits a light
+        ``hovertemplate`` showing only the energy, for accumulated scenes where
+        ``chip``/``chan`` are the aggregate sentinel ``-1`` and a per-vertex text
+        array would only bloat the payload.
         """
         half = self.detector.pad_pitch / 2.0
-        xs, ys, zs, intensity, hovertext = [], [], [], [], []
-        tri_i, tri_j, tri_k = [], [], []
-        for n in np.flatnonzero(mask):
-            x, y, z, e = event.x[n], event.y[n], event.z[n], event.energy[n]
-            if not (np.isfinite(x) and np.isfinite(y) and np.isfinite(z)):
-                continue
-            base = len(xs)
-            xs += [x - half, x + half, x + half, x - half]
-            ys += [y - half, y - half, y + half, y + half]
-            zs += [z, z, z, z]
-            intensity += [e, e, e, e]
-            label = (f"slab {event.slab[n]}, chip {event.chip[n]}, "
-                     f"chan {event.chan[n]}<br>E = {e:.2f} MIP")
-            hovertext += [label] * 4
-            tri_i += [base, base]
-            tri_j += [base + 1, base + 2]
-            tri_k += [base + 2, base + 3]
-
-        if not xs:
+        sel = np.flatnonzero(mask)
+        if sel.size:
+            x = np.asarray(event.x, dtype=float)[sel]
+            y = np.asarray(event.y, dtype=float)[sel]
+            z = np.asarray(event.z, dtype=float)[sel]
+            e = np.asarray(event.energy, dtype=float)[sel]
+            finite = np.isfinite(x) & np.isfinite(y) & np.isfinite(z)
+            sel, x, y, z, e = sel[finite], x[finite], y[finite], z[finite], e[finite]
+        n = sel.size
+        if n == 0:
             return None
-        return go.Mesh3d(
-            x=xs, y=ys, z=zs, i=tri_i, j=tri_j, k=tri_k,
+
+        # 4 vertices per pad, corner order (--, +-, ++, -+); C-order ravel keeps
+        # each pad's 4 vertices contiguous so index ``4*pad + corner`` is valid.
+        xs = np.empty((n, 4), dtype=np.float32)
+        xs[:, 0] = x - half; xs[:, 1] = x + half
+        xs[:, 2] = x + half; xs[:, 3] = x - half
+        ys = np.empty((n, 4), dtype=np.float32)
+        ys[:, 0] = y - half; ys[:, 1] = y - half
+        ys[:, 2] = y + half; ys[:, 3] = y + half
+        zs = np.repeat(z.astype(np.float32), 4)
+        intensity = np.repeat(e.astype(np.float32), 4)
+
+        # 2 triangles per pad: (0,1,2) and (0,2,3), offset by 4 vertices per pad.
+        base = np.arange(n, dtype=np.int32) * 4
+        tri_i = np.repeat(base, 2)
+        tri_j = np.column_stack([base + 1, base + 2]).ravel()
+        tri_k = np.column_stack([base + 2, base + 3]).ravel()
+
+        kwargs = dict(
+            x=xs.ravel(), y=ys.ravel(), z=zs, i=tri_i, j=tri_j, k=tri_k,
             intensity=intensity, colorscale=self.colorscale,
             cmin=cmin, cmax=cmax, showscale=showscale,
             colorbar=dict(title="E [MIP]", x=1.02) if showscale else None,
             opacity=opacity, flatshading=True, name="hits",
-            hovertext=hovertext, hoverinfo="text",
         )
+        if hover:
+            labels = [f"slab {event.slab[m]}, chip {event.chip[m]}, "
+                      f"chan {event.chan[m]}<br>E = {ev:.2f} MIP"
+                      for m, ev in zip(sel, e)]
+            kwargs["hovertext"] = [lab for lab in labels for _ in range(4)]
+            kwargs["hoverinfo"] = "text"
+        else:
+            kwargs["hovertemplate"] = "E = %{intensity:.2f} MIP<extra></extra>"
+        return go.Mesh3d(**kwargs)
 
     def _wrap(self, traces) -> go.Figure:
         fig = go.Figure(data=traces)

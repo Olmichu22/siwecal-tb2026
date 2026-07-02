@@ -27,6 +27,7 @@ import plotly.graph_objects as go
 from dash import ALL, MATCH, Input, Output, State, ctx, dcc, html, no_update
 from dash.exceptions import PreventUpdate
 
+from .._timing import timed
 from ..analysis.cuts import CutModel
 
 
@@ -393,26 +394,29 @@ def register_callbacks(app, controller) -> None:
         if not cluster or not path:
             return []
         items = []
-        for label, n_events, e_max in controller.cluster_panels(path, cluster):
-            step = e_max / 100 if e_max > 0 else 0.1
-            fig = controller.cluster_scene(path, cluster, label, 0.0)
-            name = "unclustered" if label < 0 else f"cluster {label}"
-            items.append(html.Div(style={"flex": "0 0 480px"}, children=[
-                html.H5(f"{name} — {n_events} events (accumulated)"),
-                html.Div(style={"display": "flex", "gap": "8px",
-                                "alignItems": "center"}, children=[
-                    html.Span("E threshold:"),
-                    html.Div(style={"flex": "1"}, children=[
-                        dcc.Slider(
-                            id={"type": "cluster-thr", "index": label},
-                            min=0, max=e_max, value=0, step=step,
-                            tooltip={"placement": "bottom",
-                                     "always_visible": False}),
+        with timed("update_cluster_examples (all panels)") as info:
+            panels = controller.cluster_panels(path, cluster)
+            for label, n_events, e_max in panels:
+                step = e_max / 100 if e_max > 0 else 0.1
+                fig = controller.cluster_scene(path, cluster, label, 0.0)
+                name = "unclustered" if label < 0 else f"cluster {label}"
+                items.append(html.Div(style={"flex": "0 0 480px"}, children=[
+                    html.H5(f"{name} — {n_events} events (accumulated)"),
+                    html.Div(style={"display": "flex", "gap": "8px",
+                                    "alignItems": "center"}, children=[
+                        html.Span("E threshold:"),
+                        html.Div(style={"flex": "1"}, children=[
+                            dcc.Slider(
+                                id={"type": "cluster-thr", "index": label},
+                                min=0, max=e_max, value=0, step=step,
+                                tooltip={"placement": "bottom",
+                                         "always_visible": False}),
+                        ]),
                     ]),
-                ]),
-                dcc.Graph(id={"type": "cluster-graph", "index": label},
-                          figure=fig, style={"height": "420px"}),
-            ]))
+                    dcc.Graph(id={"type": "cluster-graph", "index": label},
+                              figure=fig, style={"height": "420px"}),
+                ]))
+            info["panels"] = len(panels)
         return items
 
     @app.callback(
