@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import argparse
 
+from ._timing import configure as configure_timing
 from .app import build_app
 from .config import ViewerConfig
 
@@ -35,6 +36,7 @@ def main() -> None:
                         help="Run Dash in debug mode (hot reload).")
     args = parser.parse_args()
 
+    configure_timing()  # stage timings on stderr (EVENT_VIEWER_TIMING=0 to mute)
     config = ViewerConfig()
     if args.data_dir:
         config.data_dir = args.data_dir

@@ -17,6 +17,7 @@ from typing import Dict, List, Optional
 import numpy as np
 import pandas as pd
 
+from ._timing import timed
 from .analysis.clustering import UNCLUSTERED, ClusteringService
 from .analysis.cuts import CutModel
 from .config import ViewerConfig
@@ -225,14 +226,18 @@ class ViewerController:
                        algo: str, n_clusters: int, eps: float, min_samples: int,
                        hit_threshold: float = 0.0):
         """Cluster the passing events; return ``(passing_indices, labels)``."""
-        df = self._filtered_table(path, hit_threshold)
-        if cut_model is None or cut_model.is_empty:
-            keep = np.arange(len(df))
-        else:
-            keep = cut_model.passing_indices(df)
-        sub = df.iloc[keep]
-        labels = self.clustering.fit(sub, features, algo, n_clusters,
-                                     eps, min_samples)
+        with timed("run_clustering (fit)") as info:
+            df = self._filtered_table(path, hit_threshold)
+            if cut_model is None or cut_model.is_empty:
+                keep = np.arange(len(df))
+            else:
+                keep = cut_model.passing_indices(df)
+            sub = df.iloc[keep]
+            labels = self.clustering.fit(sub, features, algo, n_clusters,
+                                         eps, min_samples)
+            info["algo"] = algo
+            info["events"] = len(sub)
+            info["clusters"] = int(len(set(labels.tolist())))
         return keep.tolist(), labels.tolist()
 
     def _accumulated_event(self, path: str, cluster, label: int):
@@ -272,7 +277,15 @@ class ViewerController:
         """Accumulated 3-D scene for one cluster, fading hits below ``threshold``."""
         event = self._accumulated_event(path, cluster, int(label))
         thr = float(threshold) if threshold else None
-        return self.scene3d.event_figure(event, color_clip=True, threshold=thr)
+        # Accumulated scenes: chip/chan are the aggregate sentinel -1, so skip the
+        # per-hit hover text (a light energy-only template is used instead) to keep
+        # these many-pad panels from bloating the payload.
+        with timed("cluster_scene (build figure)") as info:
+            fig = self.scene3d.event_figure(event, color_clip=True, threshold=thr,
+                                            hover=False)
+            info["label"] = int(label)
+            info["pads"] = int(event.energy.size)
+        return fig
 
     def cluster_scatter(self, path: str, xvar: str, yvar: str,
                         passing: Optional[List[int]], labels: Optional[List[int]],
