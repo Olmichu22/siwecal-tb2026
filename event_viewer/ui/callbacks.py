@@ -1,17 +1,21 @@
 """
 Dash callbacks wiring the stores, the controller and the figures together.
 
-Session state lives in four light ``dcc.Store``s:
+Session state lives in light ``dcc.Store``s:
 
-* ``store-file``    : path of the loaded ROOT file.
-* ``store-pos``     : absolute entry index of the shown event (stable across
-                      threshold changes; position in the passing list is derived).
-* ``store-cuts``    : list of ``{variable, lo, hi}`` cut dicts.
-* ``store-cluster`` : ``{passing: [...], labels: [...]}`` from the last run.
+* ``store-file``       : path of the loaded ROOT file.
+* ``store-pos``        : absolute entry index of the shown event (stable across
+                         threshold changes; position in passing list is derived).
+* ``store-event-cuts`` : Event-tab cuts -- limit the one-by-one navigation and
+                         drive that tab's bicolor (kept/removed) histogram.
+* ``store-cuts``       : Clustering-tab cuts -- limit that tab's histogram and the
+                         events entering the clustering fit. Independent from the
+                         Event tab, so the two cut sets never interfere.
+* ``store-cluster``    : ``{passing: [...], labels: [...]}`` from the last run.
 
-To keep a single writer per store, ``store-cuts`` is produced only by the
-pattern-matching slider callback (resetting cut-vars to ``[]`` clears it), and
-``store-pos`` has one primary writer (navigation) plus a reset on file/cut change.
+Each cut store has a single writer: its pattern-matching slider callback (resetting
+the matching cut-vars to ``[]`` clears it). ``store-pos`` has one primary writer
+(navigation) plus a reset on file / event-cut change.
 """
 
 from __future__ import annotations
@@ -23,6 +27,7 @@ import plotly.graph_objects as go
 from dash import ALL, MATCH, Input, Output, State, ctx, dcc, html, no_update
 from dash.exceptions import PreventUpdate
 
+from .._timing import timed
 from ..analysis.cuts import CutModel
 
 
@@ -52,6 +57,8 @@ def register_callbacks(app, controller) -> None:
         Output("file-status", "children"),
         Output("dist-var", "options"), Output("dist-var", "value"),
         Output("cut-vars", "options"), Output("cut-vars", "value"),
+        Output("ev-dist-var", "options"), Output("ev-dist-var", "value"),
+        Output("ev-cut-vars", "options"), Output("ev-cut-vars", "value"),
         Output("cluster-features", "options"), Output("cluster-features", "value"),
         Output("scatter-x", "options"), Output("scatter-x", "value"),
         Output("scatter-y", "options"), Output("scatter-y", "value"),
@@ -72,13 +79,15 @@ def register_callbacks(app, controller) -> None:
         empty = []
         if not path:
             return (None, "Select a .root file", empty, None, empty, [],
-                    empty, [], empty, None, empty, None, None, True, 0)
+                    empty, None, empty, [], empty, [],
+                    empty, None, empty, None, None, True, 0)
         try:
             ds = controller.dataset(path)
         except Exception as error:  # noqa: BLE001 - surface any I/O failure
             return (no_update, f"Error opening: {error}", empty, no_update,
                     empty, no_update, empty, no_update, empty, no_update,
-                    empty, no_update, no_update, no_update, no_update)
+                    empty, no_update, empty, no_update, empty, no_update,
+                    no_update, no_update, no_update)
 
         cols = ds.feature_columns()
         opts = [{"label": c, "value": c} for c in cols]
@@ -96,7 +105,8 @@ def register_callbacks(app, controller) -> None:
                      f"metrics — run validation to build a valcache)")
         status = f"{os.path.basename(path)} — {ds.n_events} events — {flag}"
         slider_value = 0 if block_cut else no_update
-        return (path, status, opts, dist_default, opts, [], opts, [],
+        return (path, status, opts, dist_default, opts, [],
+                opts, dist_default, opts, [], opts, [],
                 opts, x0, opts, y0, None, block_cut, slider_value)
 
     # -------------------------------------------------- hit-energy threshold --
@@ -148,6 +158,47 @@ def register_callbacks(app, controller) -> None:
                          "lo": value[0], "hi": value[1]})
         return cuts
 
+    # ------------------------------------ Event-tab dynamic cut UI (page 1) --
+    # A second, independent copy of the cut widget. It writes ``store-event-cuts``
+    # (which drives the one-by-one navigation and the bicolor histogram) and is
+    # completely decoupled from the clustering tab's ``store-cuts``.
+    @app.callback(
+        Output("ev-cut-sliders", "children"),
+        Input("ev-cut-vars", "value"),
+        State("store-file", "data"),
+        State("store-hit-threshold", "data"),
+    )
+    def build_sliders_event(cut_vars, path, hit_threshold):
+        if not path or not cut_vars:
+            return []
+        thr = float(hit_threshold or 0.0)
+        children = []
+        for var in cut_vars:
+            lo, hi = controller.variable_range(path, var, thr)
+            step = (hi - lo) / 100 if hi > lo else 1.0
+            children.append(html.Div(style={"marginBottom": "14px"}, children=[
+                html.Label(var, style={"fontSize": "13px"}),
+                dcc.RangeSlider(
+                    id={"type": "ev-cut-slider", "index": var},
+                    min=lo, max=hi, value=[lo, hi], step=step, allowCross=False,
+                    tooltip={"placement": "bottom", "always_visible": False}),
+            ]))
+        return children
+
+    @app.callback(
+        Output("store-event-cuts", "data"),
+        Input({"type": "ev-cut-slider", "index": ALL}, "value"),
+        State({"type": "ev-cut-slider", "index": ALL}, "id"),
+    )
+    def update_cuts_event(values, ids):
+        cuts = []
+        for value, ident in zip(values, ids):
+            if value is None:
+                continue
+            cuts.append({"variable": ident["index"],
+                         "lo": value[0], "hi": value[1]})
+        return cuts
+
     # ---------------------------------------------------------- navigation --
     @app.callback(
         Output("store-pos", "data"),
@@ -156,7 +207,7 @@ def register_callbacks(app, controller) -> None:
         Input("event-input", "value"),
         State("store-pos", "data"),
         State("store-file", "data"),
-        State("store-cuts", "data"),
+        State("store-event-cuts", "data"),
         State("store-hit-threshold", "data"),
         prevent_initial_call=True,
     )
@@ -185,7 +236,7 @@ def register_callbacks(app, controller) -> None:
     @app.callback(
         Output("store-pos", "data", allow_duplicate=True),
         Input("store-file", "data"),
-        Input("store-cuts", "data"),
+        Input("store-event-cuts", "data"),
         prevent_initial_call=True,
     )
     def reset_pos(_path, _cuts):
@@ -201,11 +252,12 @@ def register_callbacks(app, controller) -> None:
         Output("event-input", "max"),
         Input("store-file", "data"),
         Input("store-pos", "data"),
-        Input("store-cuts", "data"),
+        Input("store-event-cuts", "data"),
         Input("color-clip", "value"),
         Input("store-hit-threshold", "data"),
+        Input("show-overlays", "value"),
     )
-    def render_event(path, cur_index, cuts, clip, hit_threshold):
+    def render_event(path, cur_index, cuts, clip, hit_threshold, overlays):
         if not path:
             return (_empty_fig("Load a file"), _empty_fig(), [],
                     "no file", None, 1)
@@ -218,7 +270,10 @@ def register_callbacks(app, controller) -> None:
         pos = _pos_of(passing, cur_index)
         index = int(passing[pos])
         color_clip = "clip" in (clip or [])
-        scene, layers, rows = controller.event_figures(path, index, color_clip, thr)
+        overlays = overlays or []
+        scene, layers, rows = controller.event_figures(
+            path, index, color_clip, thr,
+            show_moliere="moliere" in overlays, show_axis="axis" in overlays)
         ds = controller.dataset(path)
         label = (f"event {pos + 1} / {n_pass} passing "
                  f"(entry {index}, {ds.n_events} total)")
@@ -242,6 +297,23 @@ def register_callbacks(app, controller) -> None:
         use_cluster = cluster if (cluster and "stack" in (stack or [])) else None
         return controller.histogram(path, variable, CutModel.from_store(cuts),
                                     int(nbins or 60), use_cluster, thr)
+
+    # -------------------------------------------- Event-tab distribution (bicolor)
+    @app.callback(
+        Output("ev-dist-hist", "figure"),
+        Input("ev-dist-var", "value"),
+        Input("store-event-cuts", "data"),
+        Input("store-file", "data"),
+        Input("ev-dist-nbins", "value"),
+        Input("store-hit-threshold", "data"),
+    )
+    def update_event_histogram(variable, cuts, path, nbins, hit_threshold):
+        if not path or not variable:
+            return _empty_fig("Select a variable")
+        thr = float(hit_threshold or 0.0)
+        return controller.histogram_split(path, variable,
+                                          CutModel.from_store(cuts),
+                                          int(nbins or 60), thr)
 
     # ----------------------------------------------------------- clustering --
     @app.callback(
@@ -322,26 +394,29 @@ def register_callbacks(app, controller) -> None:
         if not cluster or not path:
             return []
         items = []
-        for label, n_events, e_max in controller.cluster_panels(path, cluster):
-            step = e_max / 100 if e_max > 0 else 0.1
-            fig = controller.cluster_scene(path, cluster, label, 0.0)
-            name = "unclustered" if label < 0 else f"cluster {label}"
-            items.append(html.Div(style={"flex": "0 0 480px"}, children=[
-                html.H5(f"{name} — {n_events} events (accumulated)"),
-                html.Div(style={"display": "flex", "gap": "8px",
-                                "alignItems": "center"}, children=[
-                    html.Span("E threshold:"),
-                    html.Div(style={"flex": "1"}, children=[
-                        dcc.Slider(
-                            id={"type": "cluster-thr", "index": label},
-                            min=0, max=e_max, value=0, step=step,
-                            tooltip={"placement": "bottom",
-                                     "always_visible": False}),
+        with timed("update_cluster_examples (all panels)") as info:
+            panels = controller.cluster_panels(path, cluster)
+            for label, n_events, e_max in panels:
+                step = e_max / 100 if e_max > 0 else 0.1
+                fig = controller.cluster_scene(path, cluster, label, 0.0)
+                name = "unclustered" if label < 0 else f"cluster {label}"
+                items.append(html.Div(style={"flex": "0 0 480px"}, children=[
+                    html.H5(f"{name} — {n_events} events (accumulated)"),
+                    html.Div(style={"display": "flex", "gap": "8px",
+                                    "alignItems": "center"}, children=[
+                        html.Span("E threshold:"),
+                        html.Div(style={"flex": "1"}, children=[
+                            dcc.Slider(
+                                id={"type": "cluster-thr", "index": label},
+                                min=0, max=e_max, value=0, step=step,
+                                tooltip={"placement": "bottom",
+                                         "always_visible": False}),
+                        ]),
                     ]),
-                ]),
-                dcc.Graph(id={"type": "cluster-graph", "index": label},
-                          figure=fig, style={"height": "420px"}),
-            ]))
+                    dcc.Graph(id={"type": "cluster-graph", "index": label},
+                              figure=fig, style={"height": "420px"}),
+                ]))
+            info["panels"] = len(panels)
         return items
 
     @app.callback(
