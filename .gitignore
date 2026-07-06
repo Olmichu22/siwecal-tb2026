@@ -31,6 +31,12 @@ results/
 *.log
 _logs/
 
+# --- Generated reports (gaudi_jobs/calibration/list_run_thresholds.py --output) ---
+gaudi_jobs/calibration/run_thresholds*.txt
+
+# --- Generated Condor pipeline artifacts (gaudi_jobs/calibration/condor/generate_*.py) ---
+gaudi_jobs/calibration/condor/generated/
+
 # --- Local machine config (settings.yml is tracked as a template; uncomment
 #     the next line if your paths are private and you keep only the example) ---
 # settings.yml
