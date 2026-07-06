@@ -17,6 +17,7 @@ from typing import Dict, List, Optional
 import numpy as np
 import pandas as pd
 
+from ._timing import timed
 from .analysis.clustering import UNCLUSTERED, ClusteringService
 from .analysis.cuts import CutModel
 from .config import ViewerConfig
@@ -121,7 +122,8 @@ class ViewerController:
 
     # ------------------------------------------------------- event figures --
     def event_figures(self, path: str, index: int, color_clip: bool,
-                      hit_threshold: float = 0.0):
+                      hit_threshold: float = 0.0, show_moliere: bool = False,
+                      show_axis: bool = False):
         """``(scene3d_fig, layers2d_fig, metrics_rows)`` for one event."""
         event = self.dataset(path).get_event(index)
         if hit_threshold > 0.0:
@@ -130,7 +132,8 @@ class ViewerController:
             table = self._filtered_table(path, hit_threshold)
             event.metrics = (table.iloc[index].to_dict()
                              if index < len(table) else {})
-        scene = self.scene3d.event_figure(event, color_clip)
+        scene = self.scene3d.event_figure(
+            event, color_clip, show_moliere=show_moliere, show_axis=show_axis)
         layers = self.layers2d.build(event, color_clip)
         rows = self._metric_rows(event)
         return scene, layers, rows
@@ -188,6 +191,24 @@ class ViewerController:
         values = df.loc[keep, variable].to_numpy(dtype=float)
         return self.distributions.histogram(values, variable, cut_range, nbins)
 
+    def histogram_split(self, path: str, variable: str, cut_model: CutModel,
+                        nbins: int = 60, hit_threshold: float = 0.0):
+        """Full distribution of ``variable`` coloured by the cut decision.
+
+        Drives the Event tab: the whole distribution is shown, with the events
+        passing *every* cut highlighted and the rest muted, so the effect of the
+        cuts (which also limit the one-by-one navigation) is visible without
+        hiding the removed events.
+        """
+        df = self._filtered_table(path, hit_threshold)
+        if variable not in df.columns:
+            return self.distributions.histogram_split(
+                np.empty(0), np.empty(0, bool), variable, nbins)
+        keep = cut_model.mask(df) if cut_model and not cut_model.is_empty \
+            else np.ones(len(df), bool)
+        values = df[variable].to_numpy(dtype=float)
+        return self.distributions.histogram_split(values, keep, variable, nbins)
+
     def variable_range(self, path: str, variable: str,
                        hit_threshold: float = 0.0):
         """``(min, max)`` of a finite variable, for slider bounds."""
@@ -205,14 +226,18 @@ class ViewerController:
                        algo: str, n_clusters: int, eps: float, min_samples: int,
                        hit_threshold: float = 0.0):
         """Cluster the passing events; return ``(passing_indices, labels)``."""
-        df = self._filtered_table(path, hit_threshold)
-        if cut_model is None or cut_model.is_empty:
-            keep = np.arange(len(df))
-        else:
-            keep = cut_model.passing_indices(df)
-        sub = df.iloc[keep]
-        labels = self.clustering.fit(sub, features, algo, n_clusters,
-                                     eps, min_samples)
+        with timed("run_clustering (fit)") as info:
+            df = self._filtered_table(path, hit_threshold)
+            if cut_model is None or cut_model.is_empty:
+                keep = np.arange(len(df))
+            else:
+                keep = cut_model.passing_indices(df)
+            sub = df.iloc[keep]
+            labels = self.clustering.fit(sub, features, algo, n_clusters,
+                                         eps, min_samples)
+            info["algo"] = algo
+            info["events"] = len(sub)
+            info["clusters"] = int(len(set(labels.tolist())))
         return keep.tolist(), labels.tolist()
 
     def _accumulated_event(self, path: str, cluster, label: int):
@@ -252,7 +277,15 @@ class ViewerController:
         """Accumulated 3-D scene for one cluster, fading hits below ``threshold``."""
         event = self._accumulated_event(path, cluster, int(label))
         thr = float(threshold) if threshold else None
-        return self.scene3d.event_figure(event, color_clip=True, threshold=thr)
+        # Accumulated scenes: chip/chan are the aggregate sentinel -1, so skip the
+        # per-hit hover text (a light energy-only template is used instead) to keep
+        # these many-pad panels from bloating the payload.
+        with timed("cluster_scene (build figure)") as info:
+            fig = self.scene3d.event_figure(event, color_clip=True, threshold=thr,
+                                            hover=False)
+            info["label"] = int(label)
+            info["pads"] = int(event.energy.size)
+        return fig
 
     def cluster_scatter(self, path: str, xvar: str, yvar: str,
                         passing: Optional[List[int]], labels: Optional[List[int]],

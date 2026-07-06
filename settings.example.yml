@@ -14,7 +14,7 @@
 # up in each, in order, and the first match wins. Absolute paths written inside
 # the data_reference*.yml files always take precedence and are used verbatim.
 data_dir:
-  - /eos/home-o/oarquero/TB2026CERN
+  - /path/to/your/TB2026CERN/data
   # - /eos/another/place/with/events
 
 # Calibration (pedestal + MIP) files. Defaults to the copies vendored in the
