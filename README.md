@@ -55,13 +55,15 @@ siwecal_validation  ──┼──▶  siwecal_common.paths
 gaudi_source        ──┘
 ```
 
-`metrics.py` is the parity oracle: `gaudi_source` is a C++ port of it, and its
-batch driver (`gaudi_jobs/run_pid_batch.py`) reuses the validation's `CutSet` and
-tree schema so the cut logic and the output branches never drift. `siwecal_validation`
-then reads the metrics back from the `gaudi_source` output (it no longer touches
-the raw `ecal` tree). All modules resolve paths through `siwecal_common.paths`,
-so **no module hard-codes an absolute `/eos` path** — change `settings.yml` and
-everything follows.
+`metrics.py` is the parity oracle: `k4SiWEcalReco` is a C++ port of it, and its
+batch driver reuses the validation's `CutSet` and tree schema so the cut logic
+and the output branches never drift. `siwecal_validation` then reads the metrics
+back from the `k4SiWEcalReco` output (it no longer touches the raw `ecal` tree).
+All modules resolve paths through `siwecal_common.paths`, so **no module
+hard-codes an absolute `/eos` path**. `settings.yml` is the default data root; a
+`data_reference*.yml` may set `main_path` to override it for a whole run list (and
+a per-entry absolute `path:` wins over both), so the run lists stay the single
+convenient place to point the suite at your data.
 
 ### Reconstruction stage (Gaudi): `gaudi_source` + `gaudi_jobs`
 
@@ -82,10 +84,9 @@ blocks that feed the viewer's interactive threshold slider. All cuts are off by
 default except total per-event energy > 0 (always enforced).
 
 ```bash
-source /cvmfs/sw.hsf.org/key4hep/setup.sh -r 2026-04-08
-cmake -S gaudi_source -B gaudi_source/build && cmake --build gaudi_source/build -j4
-export LD_LIBRARY_PATH=$PWD/gaudi_source/build:$LD_LIBRARY_PATH
-export PYTHONPATH=$PWD/gaudi_source/build/genConfDir:$PWD:$PYTHONPATH
+# Build it once (./install.sh does this for you) and load the env:
+./install.sh --no-viewer      # or the manual cmake build, see k4SiWEcalReco/README.md
+source setup.sh               # puts the build on LD_LIBRARY_PATH/PYTHONPATH for k4run
 
 # batch driver, same input options as siwecal_validation (--run/--file/--all/--point/--cfg)
 python gaudi_jobs/run_pid_batch.py --run TB2026CERN_run_000007
@@ -117,6 +118,124 @@ python -m siwecal_validation --run TB2026CERN_run_000007
 
 See [`gaudi_source/README.md`](gaudi_source/README.md) for details.
 
+## Tree schemas
+
+Three on-disk products carry the per-event data, in order of the pipeline:
+
+1. the reconstructed **`ecal`** tree (`ecal_<run>.root`) — raw events, *no metrics*;
+2. the **EDM4hep** PID file (`ecal_<run>.edm4hep.root`) — cut-passing events with metrics;
+3. the **valtree** (`ecal_<run>.valtree.root`) — the same content as a plain TTree.
+
+In both `k4SiWEcalReco` outputs the masked channels are already dropped, so there
+is no `hit_ismasked` branch and the per-event counters/sums are recomputed from
+the surviving hits.
+
+### `ecal` tree — reconstructed events (no metrics)
+
+One entry per BCID window. Per-hit branches are variable-length, counted by
+`nhit_chan` (also named `nhit` downstream).
+
+| Var          | Description                                            |
+| ------------ | ------------------------------------------------------ |
+| run          | run number                                             |
+| event        | event number. `spill_index * 1000 + event_index`       |
+| spill        | spill number                                           |
+| bcid         | bcid id                                                |
+| nhit_slab    | Number of distinct slabs contributing to this window.  |
+| nhit_chip    | Number of distinct ``(slab, chip)`` pairs with hits .  |
+| sum_hg       | Sum of pedestal-subtracted high-gain ADC over all hits |
+| sum_energy   | Sum of calibrated energy over all hits                 |
+| hit_slab     | physical slab slot (ib, 0..14)                         |
+| hit_chip     | hardware chip ID (chipid)                              |
+| hit_chan     | pixel index (ipix, 0..63)                              |
+| hit_sca      | SCA memory cell (isca, 0..14)                          |
+| hit_hg       | high-gain ADC minus pedestal                           |
+| hit_lg       | low-gain ADC minus pedestal                            |
+| hit_energy   | high-gain signal in MIP units                          |
+| hit_x        | transverse position in mm                              |
+| hit_y        | transverse position in mm                              |
+| hit_z        | longitudinal position in mm                            |
+| hit_ismasked | masked in ped or MIP file                              |
+
+### EDM4hep PID file (`ecal_<run>.edm4hep.root`)
+
+One podio `events` frame per cut-passing event. Three collections plus five
+parallel per-hit `UserDataCollection`s. The legacy column each maps to (read back
+by `siwecal_common.edm4hep_pid`) is shown in parentheses.
+
+| Collection / field                        | Description                                                      |
+| ----------------------------------------- | --------------------------------------------------------------- |
+| `EventHeader.runNumber`                   | run number (→ `run`)                                            |
+| `EventHeader.eventNumber`                 | event number (→ `event`)                                        |
+| `EventHeader.weight`                      | spill number (→ `spill`)                                        |
+| `EventHeader.timeStamp`                   | bcid id (→ `bcid`)                                              |
+| `ECalHits` (`CalorimeterHit`) `.type`     | physical slab slot 0..14 (→ `hit_slab`)                         |
+| `ECalHits.position` (x, y, z)             | hit position in mm (→ `hit_x` / `hit_y` / `hit_z`)             |
+| `ECalHits.energy`                         | calibrated hit signal in MIP units (→ `hit_energy`)            |
+| `ECalHitChip` (UserData)                  | hardware chip ID (→ `hit_chip`)                                |
+| `ECalHitChan` (UserData)                  | pixel index 0..63 (→ `hit_chan`)                               |
+| `ECalHitSca` (UserData)                   | SCA memory cell 0..14 (→ `hit_sca`)                            |
+| `ECalHitHG` (UserData)                    | high-gain ADC minus pedestal (→ `hit_hg`)                      |
+| `ECalHitLG` (UserData)                    | low-gain ADC minus pedestal (→ `hit_lg`)                       |
+| `ECalPid` (`Cluster`) `.shapeParameters`  | the per-event metrics, one cluster/event (see table below)      |
+
+The `shapeParameters` floats are stored in a fixed order (names listed once in
+the `metadata` frame parameter `ECalPid_shapeParameterNames`):
+
+| shapeParameter      | Description                                                       |
+| ------------------- | ---------------------------------------------------------------- |
+| nhit                | number of (unmasked) hit channels in the event                   |
+| zbary               | energy-weighted mean slab index (layer units)                    |
+| energy              | summed hit energy (MIP units)                                    |
+| mip_likeness        | inverse-hit-rate MIP-likeness score (Σ 1/hits_layer / n_layers)  |
+| weighte             | tungsten-weighted energy Σ E·W/X0                                |
+| bar_x               | energy-weighted transverse barycenter x (mm)                     |
+| bar_y               | energy-weighted transverse barycenter y (mm)                     |
+| bar_r               | radial barycenter √(bar_x² + bar_y²) (mm)                        |
+| moliere             | 90% transverse containment (Molière) radius in mm (showers; 0 else) |
+| transverse_rms      | energy-weighted RMS hit radius about the shower axis (mm)        |
+| is_shower           | longitudinal shower flag (0/1): rising EM-like edge with a peak  |
+| shower_start        | first shower layer (NaN if not a shower)                         |
+| shower_max          | peak (maximum) layer of the profile                              |
+| shower_end          | last shower layer                                                |
+| shower_start_10     | first layer above 10% of the peak                               |
+| shower_end_10       | last layer above 10% of the peak                                |
+| shower_length       | number of layers above the shower threshold                     |
+| first_layer         | lowest layer with a hit                                         |
+| last_layer          | highest layer with a hit                                        |
+| n_layers_hit        | number of layers with at least one hit                          |
+| e_over_nhit         | energy / nhit (hit energy density)                              |
+| hits_per_layer_0..14    | per-layer hit count (one float per layer)                   |
+| energy_per_layer_0..14  | per-layer Σ E (one float per layer)                         |
+| weighte_per_layer_0..14 | per-layer tungsten-weighted energy (one float per layer)    |
+
+In `--validation` mode the same 21 scalars are appended twice more, recomputed
+after a per-hit cut, under the prefixes `mip05_` (`hit_energy ≥ 0.5`) and `mip1_`
+(`hit_energy ≥ 1.0`) — e.g. `mip05_moliere`, `mip1_is_shower`. These feed the
+viewer's interactive threshold slider; physics mode omits them.
+
+### valtree (`ecal_<run>.valtree.root`)
+
+A plain `ecal` TTree (the valcache schema) carrying exactly the EDM4hep content
+flattened into branches: the event identifiers, the recomputed counters/sums, the
+per-hit arrays, and the per-event metrics.
+
+| Var                     | Description                                                       |
+| ----------------------- | ---------------------------------------------------------------- |
+| run, event, spill, bcid | event identifiers (as in the `ecal` tree)                        |
+| nhit_chan               | number of surviving hit channels (counts the `hit_*` arrays)     |
+| nhit_slab               | number of distinct slabs with hits                              |
+| nhit_chip               | number of distinct `(slab, chip)` pairs with hits               |
+| sum_hg                  | Σ high-gain ADC (pedestal-subtracted) over the surviving hits    |
+| sum_energy              | Σ calibrated energy (MIP units) over the surviving hits          |
+| hit_slab/chip/chan/sca  | per-hit integer arrays, as in the `ecal` tree (masked removed)   |
+| hit_hg/lg               | per-hit high/low-gain ADC minus pedestal                        |
+| hit_energy              | per-hit signal in MIP units                                     |
+| hit_x/y/z               | per-hit position in mm                                          |
+| nhit … e_over_nhit      | the 21 per-event scalar metrics — same as the EDM4hep `shapeParameters` table |
+| hits/energy/weighte_per_layer | the three `[n_layers]` per-layer profiles                  |
+| mip05_*, mip1_*         | per-hit-cut scalar variants (validation mode only, as above)     |
+
 ## The software stack
 
 - **[key4hep](https://key4hep.github.io/)** from CVMFS provides the scientific
@@ -141,23 +260,42 @@ git clone <this-repo> siwecal-tb2026 && cd siwecal-tb2026
 cp settings.example.yml settings.yml
 $EDITOR settings.yml          # set data_dir to your run/event directory
 
-# 3. Load the environment (key4hep + repo on PYTHONPATH + .venv-viewer if present)
+# 3. Install the stack once (key4hep + .venv-viewer + k4SiWEcalReco build)
+./install.sh
+
+# 4. Load the environment in every new shell
 source setup.sh
 ```
 
-### First-time setup of the viewer virtualenv
+### Two scripts: `install.sh` (once) vs `setup.sh` (every shell)
 
-`.venv-viewer` is **not** committed (147 MB, with absolute CVMFS paths baked in).
-Create it once per machine, on top of key4hep:
+The stack has three pieces; `install.sh` performs the one-time, heavy setup of
+all of them and `setup.sh` is the lightweight per-shell environment loader.
+
+| Piece | What it is | `install.sh` does | `setup.sh` does |
+|---|---|---|---|
+| **key4hep** | the cvmfs scientific stack (numpy/scipy/uproot/ROOT…) | sources it | sources it |
+| **`.venv-viewer`** | the viewer's `dash`/`plotly` (not in key4hep, not committed) | creates it + `pip install` | activates it if present |
+| **`k4SiWEcalReco`** | the compiled Gaudi plugin `k4run` loads | builds it (cmake) | puts the build on `LD_LIBRARY_PATH`/`PYTHONPATH` |
 
 ```bash
-source /cvmfs/sw.hsf.org/key4hep/setup.sh -r 2026-04-08
-python -m venv --system-site-packages .venv-viewer
-source .venv-viewer/bin/activate
-pip install -r requirements.txt        # dash + plotly
+./install.sh                 # all three pieces (default)
+./install.sh --no-k4         # skip the C++ build (e.g. viewer-only machine)
+./install.sh --no-viewer     # skip the dash/plotly venv
+./install.sh --force-venv    # recreate .venv-viewer from scratch
+./install.sh -j 8            # build with 8 parallel jobs
+KEY4HEP_RELEASE=2026-02-01 ./install.sh   # pin a different key4hep release
 ```
 
-After that, `source setup.sh` activates it automatically.
+The default key4hep release lives in **`.key4hep-release`** — the single source
+of truth read by both `install.sh` and `setup.sh`. Edit that file to move the
+whole suite to a new release; the `KEY4HEP_RELEASE` env var overrides it per run.
+
+`.venv-viewer` is **not** committed (it bakes in absolute CVMFS paths), and the
+`k4SiWEcalReco/build/` tree is machine-specific — both are recreated by
+`install.sh` per machine. After installing, `source setup.sh` wires everything
+up: it sources key4hep, puts the repo + the `k4SiWEcalReco` build on
+`PYTHONPATH`, and activates `.venv-viewer` automatically.
 
 ## Configuration: `settings.yml`
 
@@ -177,9 +315,12 @@ cache_dir:    null                          # legacy *.valcache.root (null = nex
 
 Notes:
 - `data_dir` may be a **list of search roots**: inputs are looked up in each, in
-  order, and the first match wins. Absolute paths written inside the
-  `data_reference*.yml` files always take precedence.
-- `pid_dir` is where `gaudi_source` writes (and `siwecal_validation` /
+  order, and the first match wins. It is the default data root.
+- A `data_reference*.yml` may set `main_path` to point a whole run list at a
+  specific root; when present it **takes precedence** over `settings.yml`'s
+  `data_dir`. A per-entry absolute `path:` wins over both, and files not found
+  under `main_path` fall back to the `data_dir` roots.
+- `pid_dir` is where `k4SiWEcalReco` writes (and `siwecal_validation` /
   `event_viewer` look for) `ecal_<run>.edm4hep.root` / `ecal_<run>.valtree.root`
   — set it when your data directory is read-only.
 - `cache_dir` is the legacy `*.valcache.root` location (still read by the viewer
@@ -191,7 +332,8 @@ Notes:
 ```
 siwecal-tb2026/
 ├── settings.yml / settings.example.yml   shared configuration
-├── setup.sh                              environment loader
+├── install.sh                           one-time installer (key4hep venv + k4 build)
+├── setup.sh                              per-shell environment loader
 ├── requirements.txt                      dash + plotly (rest from key4hep)
 ├── siwecal_common/                       shared path resolution
 ├── siwecal_eventbuilder/                 event building (+ README)
