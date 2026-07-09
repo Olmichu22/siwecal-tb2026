@@ -6,6 +6,14 @@
 #   RAW2ROOT_OUT=/path/run.root \
 #       k4run gaudi_source/options/run_raw2root.py
 #
+# For runs with many chunks, RAW_FILES (an env var) can exceed the OS
+# execve() argument/environment size limit ("Argument list too long") --
+# use RAW_FILES_LIST instead, pointing at a text file with one chunk path
+# per line:
+#
+#   RAW_FILES_LIST=/path/chunklist.txt RAW2ROOT_OUT=/path/run.root \
+#       k4run gaudi_source/options/run_raw2root.py
+#
 # All work happens in EcalRawDecoder::initialize(); EvtMax=1 is enough since
 # execute() is a no-op (see EcalRawDecoder.cpp for why this isn't a k4FWCore
 # Producer: the output is a fixed-layout legacy ROOT tree, not an EDM4hep
@@ -13,15 +21,20 @@
 # input has been streamed).
 import os
 
+raw_files_list = os.environ.get("RAW_FILES_LIST", "")
+if raw_files_list:
+    with open(raw_files_list) as f:
+        input_files = [line.strip() for line in f if line.strip()]
+else:
+    raw_files = os.environ.get("RAW_FILES", "")
+    if not raw_files:
+        raise SystemExit("Set RAW_FILES (comma list) or RAW_FILES_LIST (path to a newline-separated file)")
+    input_files = [f for f in raw_files.split(",") if f.strip()]
+
 from Gaudi.Configuration import INFO
 from Configurables import EventDataSvc
 from Configurables import EcalRawDecoder
 from k4FWCore import ApplicationMgr
-
-raw_files = os.environ.get("RAW_FILES", "")
-if not raw_files:
-    raise SystemExit("Set RAW_FILES to a comma-separated list of *_raw.bin_NNNN chunk files")
-input_files = [f for f in raw_files.split(",") if f.strip()]
 
 out_file = os.environ.get("RAW2ROOT_OUT", "")
 if not out_file:

@@ -48,10 +48,12 @@ _SIWECALDECODED_IN = os.path.join(_CONVERTED_DIR, f"{_RUN}.root")  # produced by
 _ECAL_OUT = os.path.join(_CONVERTED_DIR, f"ecal_{_RUN}.root")
 _PID_OUT = os.path.join(_CONVERTED_DIR, f"ecal_{_RUN}.edm4hep.root")
 
-# Same reference calibration run (000004) used by the run000013 example: the
-# pedestal/MIP tables are per-threshold, not per-physics-run, so any run
-# taken at th230 can reuse them (see gaudi_jobs/run_calibration_batch.py).
-_CALIB_BASE = os.path.join(paths.calib_dir(), "MuonCalib_it2_corrected")
+# th230 calibration from TB2026CERN_run_000004 alone (the only muon/MIP
+# calibration run at this threshold -- eudaq_255/eudaq_256 are electron runs
+# and must not be used), MaxNhit=2/NSlabsHit=5, chip-fit + global MIP
+# fallback, instead of the old MuonCalib_it2_corrected/run_000004 reference
+# tables.
+_CALIB_BASE = os.path.join(paths.calib_dir(), "MuonCalib_gaudi")
 _PEDESTAL_FILE = os.path.join(_CALIB_BASE, "pedestals", f"th{_TH}", "Pedestal_TB2026CERN_run_000004_highgain.txt")
 _MIP_FILE = os.path.join(_CALIB_BASE, "mips", f"th{_TH}", "MIP_pedestalsubmode1_TB2026CERN_run_000004_highgain.txt")
 
@@ -99,7 +101,7 @@ def main():
         "ECAL_TREE": "ecal",
         "ECAL_PID_OUT": _PID_OUT,
         "ECAL_HIT_MIP_CUT": "0.5",
-        "ECAL_MIP_THRESHOLDS": "",
+        "ECAL_MIP_THRESHOLDS": "0.5,1.0",
     }
     result = subprocess.run(["k4run", _PID_STEERING], env=env)
     if result.returncode != 0:

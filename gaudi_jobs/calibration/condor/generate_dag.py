@@ -103,7 +103,30 @@ set -eo pipefail
 # merge.sh <filelist.txt> <out.root>
 FILELIST="$1"; OUT="$2"
 """ + env_wrapper_preamble() + """
-""" + mkdirs_line('$(dirname "$OUT")') + """hadd -f -n 100 "$OUT" "@$FILELIST"
+""" + mkdirs_line('$(dirname "$OUT")') + """# hadd-ing directly to the EOS (FUSE-mounted) target is what made the
+# th220/th230 merges take the better part of a week in the first place (see
+# the _MERGE_GROUP_SIZE comment above): even with the group-tournament split
+# keeping input counts low, hadd repeatedly re-opening a GROWING target file
+# over the network is slow and can stall for hours on just a handful of
+# large inputs (observed directly: a 20-file merge_run stuck for ~4h with a
+# 0-byte target and eventually killed by the pool's wall-time limit). Merge
+# to local worker-node scratch first -- a single local hadd pass, no
+# regrowth-over-network cost, no -n batching needed -- then copy the
+# finished file over. NOTE: an earlier version of this fix used `xrdcp ...
+# root://eospublic.cern.ch/$OUT` for the final upload (proven to work
+# interactively for the run_000004 calibration merge), but under a Condor
+# job (getenv=False, no forwarded Kerberos/token) it hung for hours with no
+# output at all -- the batch worker has no xrootd auth. `cp` to the same
+# FUSE-mounted /eos path every other job in this pipeline already writes to
+# directly (fill.sh, the merge_group tier) sidesteps that auth entirely and
+# is a single bulk copy of an already-complete local file, not an
+# incremental network write, so it doesn't hit the original growing-target
+# slowness either.
+ulimit -n 524288 || true
+TMP_OUT="$(mktemp --tmpdir="${TMPDIR:-/tmp}" merge_XXXXXX.root)"
+trap 'rm -f "$TMP_OUT"' EXIT
+hadd -f "$TMP_OUT" "@$FILELIST"
+cp -f "$TMP_OUT" "$OUT"
 """
     write_executable(os.path.join(out_dir, "merge.sh"), content)
 
