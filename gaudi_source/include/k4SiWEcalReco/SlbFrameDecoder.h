@@ -1,18 +1,18 @@
 /*
  * SlbFrameDecoder: pure C++ (no ROOT/Gaudi dependency) port of the SLB raw
  * binary decoder from the external reference tool
- * SiWECAL-TB-analysis/converter_SLB/SLBraw2ROOT.cc (A. Irles, 2021). Kept
- * ROOT/Gaudi-independent so it can be unit-tested with synthetic byte
- * sequences, same separation principle as EcalShowerVars.h.
+ * /eos/experiment/drdcalo/siw-ecal/suehara/converter_SLB/SLBraw2ROOT.cc --
+ * the version that actually produced the official `Data/rundata_converted`
+ * files. (Older public checkouts of SiWECAL-TB-analysis carry a
+ * `cycleIDDecoding` that indexes at `2*n+1` instead of `2*n+3`; do not use
+ * them as the reference.) Kept ROOT/Gaudi-independent so it can be
+ * unit-tested with synthetic byte sequences, same separation principle as
+ * EcalShowerVars.h.
  *
  * This is a byte-for-byte-faithful port (same index arithmetic, same bit
  * masks, same channel-order reversal) of a delicate, already-validated
  * bit-level protocol decoder. Do not "clean up" the arithmetic without
- * re-verifying against the reference tool's output on a real raw run --
- * several of the apparent oddities (e.g. `decodeCycleId` reading different
- * byte offsets than the per-frame cycle id recomputed inside `decodeFrame`)
- * are faithfully reproduced quirks of the original protocol handling, not
- * transcription mistakes.
+ * re-verifying against the reference tool's output on a real raw run.
  *
  * One deliberate deviation: the reference's startAcqTimeStamp decode loop
  * (SLBraw2ROOT.cc:291-297) shifts by `(30-2*n)` with `n` running 16..31,
@@ -89,17 +89,19 @@ struct DecodedFrame {
   int hitHigh[kScasInSkiroc][kChannelsInSkiroc] = {{0}};
 };
 
-// Cycle-id key used only to GROUP frames while buffering (SLBraw2ROOT.cc's
+// Cycle-id key used to GROUP frames while buffering (SLBraw2ROOT.cc's
 // cycleIDDecoding, called at ReadFile:570 on the frame bytes BEFORE the
-// 2-byte core/slab prefix is stripped). It intentionally reads a different
-// byte range than `decodeFrame`'s own cycleId (which is computed later, on
-// the prefix-stripped bytes, and is what ends up in the output tree's
-// acqNumber) -- see file header note. `frameBytes` must be the full frame
-// including its 2-byte core/slab prefix, exactly as buffered.
+// 2-byte core/slab prefix is stripped). The `+3` offset skips that prefix, so
+// this reads exactly the same cycleId field `decodeFrame` reads on the
+// prefix-stripped bytes -- reading at `2*n+1` instead would return
+// `cycleId >> 2`, collapsing four consecutive acquisition cycles into one
+// buffered Acquisition (whose per-(slab,chip) slots then overwrite each
+// other). `frameBytes` must be the full frame including its 2-byte prefix,
+// exactly as buffered.
 inline int decodeCycleId(const std::vector<unsigned char>& frameBytes) {
   int result = 0;
   for (int n = 0; n < 16; ++n) {
-    result += static_cast<unsigned int>(((frameBytes.at(2 * n + 1) & 0xC0) >> 6) << (30 - 2 * n));
+    result += static_cast<unsigned int>(((frameBytes.at(2 * n + 3) & 0xC0) >> 6) << (30 - 2 * n));
   }
   return result;
 }
