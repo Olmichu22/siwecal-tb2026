@@ -90,7 +90,10 @@ struct EcalPidTransformer final
 
     const ShowerThresholds thr{static_cast<float>(m_showerEThreshold.value()),
                                static_cast<float>(m_showerMaxMin.value()),
-                               static_cast<float>(m_showerStartFrac.value())};
+                               static_cast<float>(m_showerStartFrac.value()),
+                               static_cast<float>(m_showerCoreRadiusMm.value()),
+                               m_showerCoreMinNhit.value(),
+                               m_showerMinAscendingRatios.value()};
     const EventVars base = computeEventVars(slab, energy, x, y, m_wOverX0, m_nLayers.value(),
                                             m_showerProfile.value(), thr,
                                             m_moliereContainment.value());
@@ -149,6 +152,15 @@ struct EcalPidTransformer final
   Gaudi::Property<float> m_showerEThreshold{this, "ShowerEThreshold", 5.0f, ""};
   Gaudi::Property<float> m_showerMaxMin{this, "ShowerMaxMin", 10.0f, ""};
   Gaudi::Property<float> m_showerStartFrac{this, "ShowerStartFrac", 0.1f, ""};
+  Gaudi::Property<float> m_showerCoreRadiusMm{
+      this, "ShowerCoreRadiusMm", 30.0f,
+      "is_shower: radius around (bar_x,bar_y) hits must fall within to count toward a layer's local density"};
+  Gaudi::Property<int> m_showerCoreMinNhit{
+      this, "ShowerCoreMinNhit", 2,
+      "is_shower: both layers of a pair must exceed this local hit count to be considered"};
+  Gaudi::Property<int> m_showerMinAscendingRatios{
+      this, "ShowerMinAscendingRatios", 2,
+      "is_shower: number of ascending (core-density) layer pairs required"};
   Gaudi::Property<double> m_moliereContainment{this, "MoliereContainment", 0.90, ""};
   Gaudi::Property<std::vector<float>> m_mipThresholds{this, "MipThresholds", {0.5f, 1.0f}, ""};
   Gaudi::Property<std::string> m_cellIDEncoding{

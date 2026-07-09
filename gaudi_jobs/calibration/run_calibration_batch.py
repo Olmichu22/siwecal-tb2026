@@ -111,9 +111,16 @@ def _ensure_siwecaldecoded(run, raw_dir, converted_dir, force):
 
     chunk_files = raw_chunk_files(raw_dir, run)
     print(f"[raw2root] {run}: decoding {len(chunk_files)} chunk file(s) -> {out_file}")
+    # Pass the (potentially huge, e.g. 1369 chunks for run_000004) chunk
+    # list via a file, not the RAW_FILES env var directly -- a long enough
+    # comma-joined list blows the OS execve() argument/environment size
+    # limit ("Argument list too long").
+    file_list_path = os.path.join(converted_dir, f"{run}_raw_files.txt")
+    with open(file_list_path, "w") as f:
+        f.write("\n".join(chunk_files) + "\n")
     env = {
         **os.environ,
-        "RAW_FILES": ",".join(chunk_files),
+        "RAW_FILES_LIST": file_list_path,
         "RAW2ROOT_OUT": out_file,
         # So the decoded tree's thresholdDac/acqWindowMs/... branches are
         # actually populated (see EcalRawDecoder.cpp) instead of left at
