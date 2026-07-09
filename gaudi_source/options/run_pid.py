@@ -50,6 +50,15 @@ source = EcalToEDM4hep("EcalToEDM4hep", InputFile=ecal_file, TreeName=tree_name,
 pid = EcalPidTransformer("EcalPidTransformer",
                          InputCaloHits=["ECalHits"], OutputClusters=["ECalPid"],
                          MipThresholds=mip_thresholds)
+# is_shower core-density criterion overrides (optional; component defaults --
+# ShowerCoreRadiusMm=20.0, ShowerCoreMinNhit=2, ShowerMinAscendingRatios=3 --
+# apply unless set here, same pattern as ECAL_HIT_MIP_CUT above).
+if os.environ.get("ECAL_SHOWER_CORE_RADIUS_MM"):
+    pid.ShowerCoreRadiusMm = float(os.environ["ECAL_SHOWER_CORE_RADIUS_MM"])
+if os.environ.get("ECAL_SHOWER_CORE_MIN_NHIT"):
+    pid.ShowerCoreMinNhit = int(os.environ["ECAL_SHOWER_CORE_MIN_NHIT"])
+if os.environ.get("ECAL_SHOWER_MIN_ASCENDING_RATIOS"):
+    pid.ShowerMinAscendingRatios = int(os.environ["ECAL_SHOWER_MIN_ASCENDING_RATIOS"])
 
 ApplicationMgr(TopAlg=[source, pid],
                EvtSel="NONE",
