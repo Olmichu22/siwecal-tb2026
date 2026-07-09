@@ -15,20 +15,23 @@ find_package(Gaudi REQUIRED)
 find_package(k4FWCore REQUIRED)
 find_package(EDM4HEP REQUIRED)
 find_package(podio REQUIRED)
-find_package(ROOT REQUIRED COMPONENTS Core RIO Tree)
+find_package(ROOT REQUIRED COMPONENTS Core RIO Tree Spectrum)
 find_package(DD4hep REQUIRED COMPONENTS DDCore)
 
 gaudi_add_module(k4SiWEcalRecoPlugins
   SOURCES
     src/components/EcalToEDM4hep.cpp
     src/components/EcalPidTransformer.cpp
+    src/components/EcalRawDecoder.cpp
+    src/components/PedestalMipCalibrator.cpp
+    src/components/EcalEventBuilder.cpp
   LINK
     Gaudi::GaudiKernel
     k4FWCore::k4FWCore
     EDM4HEP::edm4hep
     podio::podio
     podio::podioRootIO
-    ROOT::Core ROOT::RIO ROOT::Tree ROOT::TreePlayer
+    ROOT::Core ROOT::RIO ROOT::Tree ROOT::TreePlayer ROOT::Spectrum
     DD4hep::DDCore
 )
 

@@ -31,6 +31,10 @@ struct ShowerThresholds {
   float e_threshold = 5.0f;   ///< min per-layer activity to count as shower material
   float max_min = 10.0f;      ///< min profile peak for the event to qualify as shower
   float start_frac = 0.1f;    ///< fraction of the peak for the *_10 start/end variants
+  // is_shower core-density criterion (see isShower() below).
+  float core_radius_mm = 30.0f;  ///< radius around (bar_x,bar_y) hits must fall within
+  int core_min_nhit = 2;         ///< both layers of a pair must exceed this local hit count
+  int min_ascending_ratios = 2;  ///< number of ascending layer pairs required
 };
 
 /// One event's worth of derived variables (mirrors EventData fields).
@@ -112,18 +116,44 @@ inline std::vector<double> hitWeights(const std::vector<int>& slab,
   return w;
 }
 
-/// _is_shower: a rising EM-like edge (3 consecutive increasing layers above
-/// threshold) with a peak above max_min.
-inline bool isShower(const std::vector<float>& profile, const ShowerThresholds& thr) {
+/// _is_shower: peak(profile) > max_min (cheap pre-filter), AND at least
+/// min_ascending_ratios layer pairs (i, i+1) where BOTH layers have more
+/// than core_min_nhit hits within core_radius_mm of the event barycenter
+/// (bar_x, bar_y) AND the count rises from i to i+1. Restricting to the
+/// spatial core and requiring both sides of a pair to already be
+/// meaningfully populated avoids the false positives a bare "3 consecutive
+/// raw increasing layers" edge-detector gets from the 0/1/2 layer-to-layer
+/// fluctuation of a genuine low-multiplicity MIP track -- a MIP's compact,
+/// low-occupancy footprint essentially never has more than one layer with
+/// core_min_nhit+ hits at a time, so it produces no candidate pairs at all.
+/// "Ascending" is next>prev (equivalent to a >1 ratio for positive counts,
+/// no division needed); the density filter alone is the safeguard, no
+/// extra ratio-magnitude threshold on top.
+inline bool isShower(const std::vector<float>& profile, const ShowerThresholds& thr,
+                     const std::vector<int>& core_slab, const std::vector<float>& core_x,
+                     const std::vector<float>& core_y, float bar_x, float bar_y, int n_layers) {
   if (profile.empty()) return false;
   const float peak = *std::max_element(profile.begin(), profile.end());
   if (peak <= thr.max_min) return false;
-  for (std::size_t i = 0; i + 2 < profile.size(); ++i) {
-    if (profile[i] > thr.e_threshold && profile[i + 1] > profile[i] &&
-        profile[i + 2] > profile[i + 1])
-      return true;
+
+  std::vector<int> nhitsLocal(n_layers, 0);
+  const float r2max = thr.core_radius_mm * thr.core_radius_mm;
+  for (std::size_t i = 0; i < core_slab.size(); ++i) {
+    const float dx = core_x[i] - bar_x;
+    const float dy = core_y[i] - bar_y;
+    if (dx * dx + dy * dy >= r2max) continue;
+    const int s = core_slab[i];
+    if (s >= 0 && s < n_layers) ++nhitsLocal[s];
   }
-  return false;
+
+  int nAscending = 0;
+  for (int i = 0; i + 1 < n_layers; ++i) {
+    if (nhitsLocal[i] > thr.core_min_nhit && nhitsLocal[i + 1] > thr.core_min_nhit &&
+        nhitsLocal[i + 1] > nhitsLocal[i]) {
+      ++nAscending;
+    }
+  }
+  return nAscending >= thr.min_ascending_ratios;
 }
 
 /// Compute every derived variable for one hit set (already energy-cut if needed).
@@ -184,14 +214,17 @@ inline EventVars computeEventVars(const std::vector<int>& slab,
   // noise has negative energy and would bias the centroid / Molière cumulant).
   std::vector<float> px, py;
   std::vector<double> pw;
+  std::vector<int> pslab;
   px.reserve(n);
   py.reserve(n);
   pw.reserve(n);
+  pslab.reserve(n);
   for (std::size_t i = 0; i < n; ++i)
     if (energy[i] > 0.f) {
       px.push_back(x[i]);
       py.push_back(y[i]);
       pw.push_back(w[i]);
+      pslab.push_back(slab[i]);
     }
   // Keep the barycenter in double for the internal r computations (Molière /
   // RMS), matching metrics.py; only the stored bar_* fields are cast to float.
@@ -227,7 +260,7 @@ inline EventVars computeEventVars(const std::vector<int>& slab,
       (profile_kind == "sume")      ? v.energy_per_layer
       : (profile_kind == "weighte") ? v.weighte_per_layer
                                     : v.hits_per_layer;
-  const bool shower = isShower(profile, thr);
+  const bool shower = isShower(profile, thr, pslab, px, py, v.bar_x, v.bar_y, n_layers);
   v.is_shower = shower ? 1.f : 0.f;
   if (shower) {
     const float peak = *std::max_element(profile.begin(), profile.end());
