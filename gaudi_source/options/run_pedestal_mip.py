@@ -34,10 +34,15 @@
 # not a per-event k4FWCore transform -- see PedestalMipCalibrator.cpp).
 import os
 
-from Gaudi.Configuration import INFO
+import Gaudi.Configuration as _gaudi_cfg
 from Configurables import EventDataSvc
 from Configurables import PedestalMipCalibrator
 from k4FWCore import ApplicationMgr
+
+# Log verbosity: WARNING by default (Condor fill/fit jobs are silent unless
+# something is wrong -- keeps per-job .out logs tiny across thousands of jobs);
+# override with CALIB_OUTPUT_LEVEL=INFO/DEBUG for interactive debugging.
+_output_level = getattr(_gaudi_cfg, os.environ.get("CALIB_OUTPUT_LEVEL", "WARNING"), _gaudi_cfg.WARNING)
 
 mode = os.environ.get("CALIB_MODE", "Pedestal")
 if mode not in ("Pedestal", "Mip", "Fill", "FitPedestal", "FitMip"):
@@ -75,4 +80,4 @@ ApplicationMgr(TopAlg=[calib],
                EvtSel="NONE",
                EvtMax=1,
                ExtSvc=[EventDataSvc("EventDataSvc")],
-               OutputLevel=INFO)
+               OutputLevel=_output_level)

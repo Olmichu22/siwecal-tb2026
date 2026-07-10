@@ -53,6 +53,20 @@ def hist_dir(fill_scratch_dir):
     return os.path.join(fill_scratch_dir, "hist")
 
 
+def condor_log_dir(dag_dir):
+    """Where the Condor per-job log/output/error files go: a ``logs/`` subdir of
+    the (AFS) submit directory.
+
+    They MUST stay on AFS, not EOS: CERN's standard batch schedds reject /eos
+    paths for log/output/error/executable outright ("Standard batch schedds
+    cannot use /eos paths directly within the submit file"). The defence against
+    thousands of logs filling the small AFS home is therefore keeping each log
+    tiny -- Fill/Fit run Gaudi at WARNING and Fill skips already-done chunks, so
+    their .out is a line or two; merges run ``hadd -v 0`` instead of listing
+    every source file (which for a 2000-chunk run was thousands of lines)."""
+    return os.path.join(dag_dir, "logs")
+
+
 def env_wrapper_preamble(repo_root=REPO_ROOT, release=KEY4HEP_RELEASE):
     """Shell snippet every executable wrapper (.sh) sources to set up key4hep
     + LD_LIBRARY_PATH/PYTHONPATH pointing at the already-built gaudi_source/build.

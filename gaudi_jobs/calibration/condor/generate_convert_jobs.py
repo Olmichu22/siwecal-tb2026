@@ -31,8 +31,8 @@ import sys
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."))
 
 from calib_run_utils import parse_run_folder_list, raw_chunk_files
-from condor_common import DEFAULT_FILL_SCRATCH_DIR, OPTIONS_DIR, decoded_dir, env_wrapper_preamble, mkdirs_line, \
-    write_executable, write_text
+from condor_common import DEFAULT_FILL_SCRATCH_DIR, OPTIONS_DIR, condor_log_dir, decoded_dir, env_wrapper_preamble, \
+    mkdirs_line, write_executable, write_text
 
 
 def _convert_sh(out_dir):
@@ -47,13 +47,13 @@ CHUNK="$1"; OUT_DECODED="$2"; RUN_SETTINGS="$3"
     write_executable(os.path.join(out_dir, "convert.sh"), content)
 
 
-def _convert_sub(out_dir, request_memory, job_flavour):
+def _convert_sub(out_dir, log_dir, request_memory, job_flavour):
     content = f"""universe                = vanilla
 executable              = {out_dir}/convert.sh
 arguments               = "$(chunk) $(out_decoded) $(run_settings)"
-log                     = {out_dir}/logs/convert_$(Process).log
-output                  = {out_dir}/logs/convert_$(Process).out
-error                   = {out_dir}/logs/convert_$(Process).err
+log                     = {log_dir}/convert_$(Process).log
+output                  = {log_dir}/convert_$(Process).out
+error                   = {log_dir}/convert_$(Process).err
 request_cpus            = 1
 request_memory          = {request_memory}M
 request_disk            = 4000M
@@ -94,8 +94,11 @@ def main(argv=None):
     run_folders = parse_run_folder_list(args.runs, **kwargs)
 
     decoded_base = decoded_dir(args.fill_scratch_dir)
+    # Condor logs stay on AFS (CERN standard schedds reject /eos log paths);
+    # each convert job's .out is only a handful of lines, so they don't pile up.
+    log_dir = condor_log_dir(args.out_dir)
     os.makedirs(args.out_dir, exist_ok=True)
-    os.makedirs(os.path.join(args.out_dir, "logs"), exist_ok=True)
+    os.makedirs(log_dir, exist_ok=True)
 
     lines = []
     n_chunks = 0
@@ -115,7 +118,7 @@ def main(argv=None):
 
     write_text(os.path.join(args.out_dir, "chunklist.txt"), "\n".join(lines) + "\n")
     _convert_sh(args.out_dir)
-    _convert_sub(args.out_dir, args.request_memory, args.job_flavour)
+    _convert_sub(args.out_dir, log_dir, args.request_memory, args.job_flavour)
 
     print(f"\n[convert] {len(run_folders)} run(s), {n_chunks} chunk(s) total -> {n_chunks} Condor job(s)")
     print(f"[convert] Wrote {args.out_dir}/convert.sub (+ convert.sh, chunklist.txt, logs/)")
