@@ -32,13 +32,18 @@ from .root_io import AcquisitionReader
 class Calibration:
     """Holds pedestal and MIP look-up tables and applies them to channels."""
 
-    def __init__(self, config: BuilderConfig, pedestal_map=None,
-                 mip_map=None, default_mip: float = 1.0,
+    def __init__(self, config: BuilderConfig, pedestal_map_hg=None,
+                 mip_map_hg=None, default_mip_hg: float = 1.0,
+                 pedestal_map_lg=None,
+                 mip_map_lg=None, default_mip_lg: float = 1.0,
                  masked_channels=None):
         self._config = config
-        self._pedestal_map = pedestal_map      # None => raw mode
-        self._mip_map = mip_map                # None => raw mode
-        self._default_mip = default_mip
+        self._pedestal_map_hg = pedestal_map_hg      # None => raw mode
+        self._mip_map_hg = mip_map_hg                # None => raw mode
+        self._default_mip_hg = default_mip_hg
+        self._pedestal_map_lg = pedestal_map_lg      # None => raw mode
+        self._mip_map_lg = mip_map_lg                # None => raw mode
+        self._default_mip_lg = default_mip_lg
         self._masked_channels = masked_channels or set()
 
     # ----------------------------------------------------------- accessors ---
@@ -46,21 +51,35 @@ class Calibration:
     @property
     def enabled(self) -> bool:
         """``True`` unless this is a raw-ADC (disabled) calibration."""
-        return self._pedestal_map is not None
+        return self._pedestal_map_hg is not None
 
+    # TODO FIX THE NAME
     def pedestal(self, slab_id: int, chip_id: int, channel: int, sca: int) -> float:
         """Pedestal for a channel/SCA (0 in raw mode, fallback if unknown)."""
         if not self.enabled:
             return 0.0
-        return self._pedestal_map.get(
+        return self._pedestal_map_hg.get(
             (slab_id, chip_id, channel, sca), self._config.pedestal_fallback)
-
+    
+    def pedestal_lg(self, slab_id: int, chip_id: int, channel: int, sca: int) -> float:
+        """Pedestal for a channel/SCA (0 in raw mode, fallback if unknown)."""
+        if not self.enabled:
+            return 0.0
+        return self._pedestal_map_lg.get(
+            (slab_id, chip_id, channel, sca), self._config.pedestal_fallback)
+        
     def mip(self, slab_id: int, chip_id: int, channel: int) -> float:
         """MIP scale for a channel (1 in raw mode, default if uncalibrated)."""
         if not self.enabled:
             return 1.0
-        return self._mip_map.get((slab_id, chip_id, channel), self._default_mip)
+        return self._mip_map_hg.get((slab_id, chip_id, channel), self._default_mip_hg)
 
+    def mip_lg(self, slab_id: int, chip_id: int, channel: int) -> float:
+        """MIP scale for a channel (1 in raw mode, default if uncalibrated)."""
+        if not self.enabled:
+            return 1.0
+        return self._mip_map_lg.get((slab_id, chip_id, channel), self._default_mip_lg)
+    
     def is_masked(self, slab_id: int, chip_id: int, channel: int) -> bool:
         """True for channels masked in *either* the pedestal or MIP file.
 
@@ -78,7 +97,8 @@ class Calibration:
 
     @classmethod
     def from_files(cls, config: BuilderConfig,
-                   pedestal_path: str, mip_path: str) -> "Calibration":
+                   pedestal_path_hg: str, mip_path_hg: str,
+                   pedestal_path_lg: str, mip_path_lg: str) -> "Calibration":
         """Load pedestals and MIPs from the standard text tables.
 
         The pedestal and MIP files each yield their own masked-channel set
@@ -86,10 +106,14 @@ class Calibration:
         the final calibration if it is masked in *either* set -- the union
         (logical OR) of the two masks.
         """
-        pedestal_map, ped_masked = cls._read_pedestal_file(config, pedestal_path)
-        mip_map, default_mip, mip_masked = cls._read_mip_file(config, mip_path)
-        return cls(config, pedestal_map, mip_map, default_mip,
-                   masked_channels=ped_masked | mip_masked)
+        pedestal_map_hg, ped_masked_hg = cls._read_pedestal_file(config, pedestal_path_hg)
+        mip_map_hg, default_mip_hg, mip_masked_hg = cls._read_mip_file(config, mip_path_hg)
+        
+        pedestal_map_lg, ped_masked_lg = cls._read_pedestal_file(config, pedestal_path_lg)
+        mip_map_lg, default_mip_lg, mip_masked_lg = cls._read_mip_file(config, mip_path_lg)
+        return cls(config, pedestal_map_hg, mip_map_hg, default_mip_hg,
+                   pedestal_map_lg, mip_map_lg, default_mip_lg,
+                   masked_channels=ped_masked_hg | mip_masked_hg | ped_masked_lg | mip_masked_lg)
 
     @classmethod
     def from_data(cls, config: BuilderConfig, geometry: DetectorGeometry,
