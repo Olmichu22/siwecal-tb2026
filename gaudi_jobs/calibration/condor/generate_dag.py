@@ -34,7 +34,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."
 from siwecal_common import paths
 
 from calib_run_utils import parse_run_folder_list, raw_chunk_files
-from condor_common import DEFAULT_FILL_SCRATCH_DIR, OPTIONS_DIR, decoded_dir, env_wrapper_preamble, \
+from condor_common import DEFAULT_FILL_SCRATCH_DIR, OPTIONS_DIR, condor_log_dir, decoded_dir, env_wrapper_preamble, \
     hist_dir, mkdirs_line, write_executable, write_text
 from run_calibration_batch import _check_threshold_consistency, _combined_label  # noqa: E402
 
@@ -91,6 +91,15 @@ set -eo pipefail
 # fill.sh <decoded_chunk> <out_hist>
 DECODED_CHUNK="$1"; OUT_HIST="$2"
 """ + env_wrapper_preamble() + f"""
+# Idempotent: if a VALID histogram already exists (a previous submission of
+# this DAG that got as far as this chunk), skip -- makes relaunching the whole
+# DAG cheap without re-filling everything. Validity is checked by actually
+# opening the ROOT file (non-empty + not a zombie + has keys), so a partial
+# file left by a killed job is NOT trusted and gets refilled.
+if [ -s "$OUT_HIST" ] && python3 -c "import ROOT,sys; f=ROOT.TFile.Open(sys.argv[1]); sys.exit(0 if f and not f.IsZombie() and f.GetListOfKeys().GetSize()>0 else 1)" "$OUT_HIST" >/dev/null 2>&1; then
+  echo "[fill] $OUT_HIST already valid -- skipping"
+  exit 0
+fi
 """ + mkdirs_line('$(dirname "$OUT_HIST")') + f"""CALIB_INPUT_FILES="$DECODED_CHUNK" CALIB_MODE=Fill CALIB_OUTPUT_HISTOGRAM_FILE="$OUT_HIST" \\
   k4run "{OPTIONS_DIR}/run_pedestal_mip.py"
 """
@@ -125,7 +134,9 @@ FILELIST="$1"; OUT="$2"
 ulimit -n 524288 || true
 TMP_OUT="$(mktemp --tmpdir="${TMPDIR:-/tmp}" merge_XXXXXX.root)"
 trap 'rm -f "$TMP_OUT"' EXIT
-hadd -f "$TMP_OUT" "@$FILELIST"
+# -v 0: silence hadd's per-source-file listing -- for a run with thousands of
+# chunks it prints one "Source file N: ..." line per input, dominating the log.
+hadd -v 0 -f "$TMP_OUT" "@$FILELIST"
 cp -f "$TMP_OUT" "$OUT"
 """
     write_executable(os.path.join(out_dir, "merge.sh"), content)
@@ -144,15 +155,15 @@ CALIB_INPUT_HISTOGRAM_FILE="$IN_HIST" CALIB_MODE="$MODE" CALIB_GAIN="$GAIN" CALI
     write_executable(os.path.join(out_dir, "fit.sh"), content)
 
 
-def _write_subs(out_dir, fill_mem, fill_flavour, merge_mem, merge_flavour, fit_mem, fit_flavour):
+def _write_subs(out_dir, log_dir, fill_mem, fill_flavour, merge_mem, merge_flavour, fit_mem, fit_flavour):
     common = """universe                = vanilla
 should_transfer_files   = NO
 getenv                  = False
-log                     = {out_dir}/logs/$(JOB).log
-output                  = {out_dir}/logs/$(JOB).out
-error                   = {out_dir}/logs/$(JOB).err
-"""
-    fill_sub = common.format(out_dir=out_dir) + f"""executable              = {out_dir}/fill.sh
+log                     = {log_dir}/$(JOB).log
+output                  = {log_dir}/$(JOB).out
+error                   = {log_dir}/$(JOB).err
+""".replace("{log_dir}", log_dir)
+    fill_sub = common + f"""executable              = {out_dir}/fill.sh
 arguments               = "$(in_decoded) $(out_hist)"
 request_cpus            = 1
 request_memory          = {fill_mem}M
@@ -205,6 +216,10 @@ def main(argv=None):
     p.add_argument("--th", default=None, help="Override the output th<N> label instead of auto-deriving it.")
     p.add_argument("--fill-scratch-dir", default=DEFAULT_FILL_SCRATCH_DIR,
                    help=f"EOS scratch area (decoded/ and hist/ live under it). Default: {DEFAULT_FILL_SCRATCH_DIR}")
+    p.add_argument("--log-dir", default=None,
+                   help="Directory for Condor per-job log/output/error files. Default: <dag-dir>/logs (AFS -- "
+                        "CERN standard schedds reject /eos log paths). Logs are kept tiny via Gaudi WARNING, the "
+                        "Fill skip-if-done check, and hadd -v 0, so they don't fill AFS.")
     p.add_argument("--outdir", default=None,
                    help="Calibration table output base directory. Default: settings.yml calib_dir()/MuonCalib_gaudi")
     p.add_argument("--gain", choices=("high", "low", "both"), default="high")
@@ -244,13 +259,15 @@ def main(argv=None):
     out_base = args.outdir or os.path.join(paths.calib_dir(), "MuonCalib_gaudi")
     gains = ["high", "low"] if args.gain == "both" else [args.gain]
 
+    log_dir = args.log_dir or condor_log_dir(args.dag_dir)
+
     os.makedirs(args.dag_dir, exist_ok=True)
-    os.makedirs(os.path.join(args.dag_dir, "logs"), exist_ok=True)
+    os.makedirs(log_dir, exist_ok=True)
 
     _fill_sh(args.dag_dir)
     _merge_sh(args.dag_dir)
     _fit_sh(args.dag_dir)
-    _write_subs(args.dag_dir, args.fill_request_memory, args.fill_job_flavour, args.merge_request_memory,
+    _write_subs(args.dag_dir, log_dir, args.fill_request_memory, args.fill_job_flavour, args.merge_request_memory,
                 args.merge_job_flavour, args.fit_request_memory, args.fit_job_flavour)
 
     dag_lines = []
