@@ -31,8 +31,10 @@ from .settings import AppSettings
 # override these at runtime (see main()).
 BASE_PATH = paths.data_dir()
 CALIB_DIR_DEFAULT = paths.calib_dir()
-CALIB_PEDESTAL_NAME = "dummy_pedestal_15_highgain.txt"
-CALIB_MIP_NAME = "dummy_mip_map_15_highgain.txt"
+CALIB_PEDESTAL_NAME_HG = "dummy_pedestal_15_highgain.txt"
+CALIB_PEDESTAL_NAME_LG = "dummy_pedestal_15_lowgain.txt"
+CALIB_MIP_NAME_HG = "dummy_mip_map_15_highgain.txt"
+CALIB_MIP_NAME_LG = "dummy_mip_map_15_lowgain.txt"
 MUON_CALIB_DIR = os.path.join(paths.calib_dir(), "MuonCalib_it2_corrected")
 MIP_RUN_DEFAULT = "TB2026CERN_run_000004"
 DEFAULT_RUN = "TB2026CERN_run_000013"
@@ -74,15 +76,23 @@ def resolve_muon_calib_files(th: str):
     Pedestal file: the lexicographically latest Pedestal_*_highgain.txt in
     pedestals/th{th} (run numbers are zero-padded so sort order = numeric order).
     """
-    mip_path = os.path.join(
+    mip_path_hg = os.path.join(
         MUON_CALIB_DIR, "mips", f"th{th}",
         f"MIP_pedestalsubmode1_TB2026CERN_run_000th{th}_highgain.txt",
     )
-    if not os.path.exists(mip_path):
-        print(f"ERROR: cumulative MIP file not found for --th {th}: {mip_path}",
+    mip_path_lg = os.path.join(
+        MUON_CALIB_DIR, "mips", f"th{th}",
+        f"MIP_pedestalsubmode1_TB2026CERN_run_000th{th}_lowgain.txt",
+    )
+    if not os.path.exists(mip_path_hg):
+        print(f"ERROR: cumulative MIP file not found for --th {th}: {mip_path_hg}",
               file=sys.stderr)
         sys.exit(1)
-
+    if not os.path.exists(mip_path_lg):
+        print(f"ERROR: cumulative MIP file not found for --th {th}: {mip_path_lg}",
+              file=sys.stderr)
+        sys.exit(1)
+    
     ped_pattern = os.path.join(
         MUON_CALIB_DIR, "pedestals", f"th{th}", "Pedestal_*_highgain.txt"
     )
@@ -91,8 +101,19 @@ def resolve_muon_calib_files(th: str):
         print(f"ERROR: no pedestal files found for --th {th} in "
               f"{os.path.dirname(ped_pattern)}", file=sys.stderr)
         sys.exit(1)
-    pedestal_path = ped_candidates[-1]
-    return pedestal_path, mip_path
+    pedestal_path_hg = ped_candidates[-1]
+    
+    ped_pattern = os.path.join(
+        MUON_CALIB_DIR, "pedestals", f"th{th}", "Pedestal_*_lowgain.txt"
+    )
+    ped_candidates = sorted(glob.glob(ped_pattern))
+    if not ped_candidates:
+        print(f"ERROR: no pedestal files found for --th {th} in "
+              f"{os.path.dirname(ped_pattern)}", file=sys.stderr)
+        sys.exit(1)
+    pedestal_path_lg = ped_candidates[-1]
+    
+    return pedestal_path_hg, pedestal_path_lg, mip_path_hg, mip_path_lg
 
 
 # ----------------------------------------------------- config / path helpers --
@@ -296,19 +317,26 @@ def build_calibration(args, config: BuilderConfig, geometry: DetectorGeometry,
             mip_max_entries=args.mip_max_entries)
 
     if args.th and not (args.ped_file or args.mip_file):
-        pedestal_file, mip_file = resolve_muon_calib_files(args.th)
+        pedestal_file_hg, pedestal_file_lg, mip_file_hg, mip_file_lg = resolve_muon_calib_files(args.th)
     else:
-        pedestal_file = (args.ped_file or calib_settings.get("pedestal_file")
-                         or os.path.join(calib_dir, CALIB_PEDESTAL_NAME))
-        mip_file = (args.mip_file or calib_settings.get("mip_file")
-                    or os.path.join(calib_dir, CALIB_MIP_NAME))
-    for path in (pedestal_file, mip_file):
+        pedestal_file_hg = (args.ped_file or calib_settings.get("pedestal_file")
+                         or os.path.join(calib_dir, CALIB_PEDESTAL_NAME_HG))
+        pedestal_file_lg = (args.ped_file or calib_settings.get("pedestal_file")
+                         or os.path.join(calib_dir, CALIB_PEDESTAL_NAME_LG))
+        mip_file_hg = (args.mip_file or calib_settings.get("mip_file")
+                    or os.path.join(calib_dir, CALIB_MIP_NAME_HG))
+        mip_file_lg = (args.mip_file or calib_settings.get("mip_file")
+                    or os.path.join(calib_dir, CALIB_MIP_NAME_LG))
+    for path in (pedestal_file_hg, pedestal_file_lg, mip_file_hg, mip_file_lg):
         if not os.path.exists(path):
             print(f"ERROR: calibration file not found: {path}", file=sys.stderr)
             sys.exit(1)
-    print(f"[Calib] Pedestals : {pedestal_file}")
-    print(f"[Calib] MIP       : {mip_file}")
-    return Calibration.from_files(config, pedestal_file, mip_file)
+    print(f"[Calib] Pedestals HG: {pedestal_file_hg}")
+    print(f"[Calib] MIP       HG: {mip_file_hg}")
+    print(f"[Calib] Pedestals LG: {pedestal_file_lg}")
+    print(f"[Calib] MIP       LG: {mip_file_lg}")
+    return Calibration.from_files(config, pedestal_file_hg, mip_file_hg,
+                                  pedestal_file_lg, mip_file_lg)
 
 
 # ----------------------------------------------------------- pad-map set-up --

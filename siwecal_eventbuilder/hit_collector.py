@@ -75,15 +75,22 @@ class HitCollector:
             return None
         adc_low = acquisition.adc_low(slab, chip, sca, channel)
 
-        pedestal = self._calibration.pedestal(slab_id, chip_id, channel, sca)
-        mip = self._calibration.mip(slab_id, chip_id, channel)
+        pedestal_hg = self._calibration.pedestal(slab_id, chip_id, channel, sca)
+        mip_hg = self._calibration.mip(slab_id, chip_id, channel)
 
-        adc_high_pedsub = adc_high - pedestal
+        pedestal_lg = self._calibration.pedestal_lg(slab_id, chip_id, channel, sca)
+        mip_lg = self._calibration.mip_lg(slab_id, chip_id, channel)
+        
+        adc_high_pedsub = adc_high - pedestal_hg
+        adc_low_pedsub = adc_low - pedestal_lg
+        
         is_masked = self._calibration.is_masked(slab_id, chip_id, channel)
         if is_masked:
             energy_mip = 0.0
+        elif adc_high < 1200:
+            energy_mip = adc_high_pedsub / mip_hg if mip_hg > 0 else 0.0
         else:
-            energy_mip = adc_high_pedsub / mip if mip > 0 else 0.0
+            energy_mip = adc_low_pedsub / mip_lg if mip_lg > 0 else 0.0
         # Transverse position from the pad map (keyed by the *geometric* chip
         # index, 0..15); longitudinal position is fixed by the slab.
         if self._pad_map is not None:
@@ -96,7 +103,7 @@ class HitCollector:
             channel=channel,
             sca=sca,
             adc_high_pedsub=adc_high_pedsub,
-            adc_low_pedsub=float(adc_low - pedestal),
+            adc_low_pedsub=adc_low_pedsub,
             energy_mip=energy_mip,
             x=x,
             y=y,
