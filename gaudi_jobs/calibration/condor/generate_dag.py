@@ -39,6 +39,7 @@ from condor_common import DEFAULT_FILL_SCRATCH_DIR, OPTIONS_DIR, condor_log_dir,
 from run_calibration_batch import _check_threshold_consistency, _combined_label  # noqa: E402
 
 _CHECK_SCRIPT = os.path.join(os.path.dirname(os.path.abspath(__file__)), "check_merged_histograms.sh")
+_CLEANUP_SCRIPT = os.path.join(os.path.dirname(os.path.abspath(__file__)), "cleanup_job_logs.sh")
 
 # A single merge_run job hadd-ing thousands of per-chunk histogram files
 # serially is what made the th220/th230 merges take the better part of a
@@ -156,17 +157,30 @@ CALIB_INPUT_HISTOGRAM_FILE="$IN_HIST" CALIB_MODE="$MODE" CALIB_GAIN="$GAIN" CALI
 
 
 def _write_subs(out_dir, log_dir, fill_mem, fill_flavour, merge_mem, merge_flavour, fit_mem, fit_flavour):
+    # request_memory GROWS with each attempt and a memory-limit HOLD is auto-
+    # released: a job that OOMs is put on HOLD by the startd (HoldReasonCode
+    # 34) -- and a held job is NOT retried by DAGMan's RETRY, so the DAG would
+    # stall (observed on th220/th230 merges, ~11.8 GB used vs a 4 GB request).
+    # `request_memory = base*(NumJobStarts+1)` asks for `base` on the first
+    # start and `2*base, 3*base, ...` on each subsequent one; `periodic_release`
+    # re-runs the held job (up to 5 starts) so it comes back with more memory
+    # and self-heals. NumJobStarts is undefined before the first start, hence
+    # the ifthenelse guard. Value is in MB (numeric request_memory is MB).
+    def _mem(base):
+        return f"ifthenelse(NumJobStarts <= 0, {base}, {base} * (NumJobStarts + 1))"
+
     common = """universe                = vanilla
 should_transfer_files   = NO
 getenv                  = False
 log                     = {log_dir}/$(JOB).log
 output                  = {log_dir}/$(JOB).out
 error                   = {log_dir}/$(JOB).err
+periodic_release        = (JobStatus == 5) && (HoldReasonCode == 34) && (NumJobStarts < 5)
 """.replace("{log_dir}", log_dir)
     fill_sub = common + f"""executable              = {out_dir}/fill.sh
 arguments               = "$(in_decoded) $(out_hist)"
 request_cpus            = 1
-request_memory          = {fill_mem}M
+request_memory          = {_mem(fill_mem)}
 request_disk            = 2000M
 +JobFlavour             = "{fill_flavour}"
 queue
@@ -174,7 +188,7 @@ queue
     merge_sub = common.format(out_dir=out_dir) + f"""executable              = {out_dir}/merge.sh
 arguments               = "$(filelist) $(out)"
 request_cpus            = 1
-request_memory          = {merge_mem}M
+request_memory          = {_mem(merge_mem)}
 request_disk            = 8000M
 +JobFlavour             = "{merge_flavour}"
 queue
@@ -182,7 +196,7 @@ queue
     fit_sub = common.format(out_dir=out_dir) + f"""executable              = {out_dir}/fit.sh
 arguments               = "$(mode) $(gain) $(in_hist) $(out_path) $(diag_path)"
 request_cpus            = 1
-request_memory          = {fit_mem}M
+request_memory          = {_mem(fit_mem)}
 request_disk            = 1000M
 +JobFlavour             = "{fit_flavour}"
 queue
@@ -190,6 +204,14 @@ queue
     write_text(os.path.join(out_dir, "fill.sub"), fill_sub)
     write_text(os.path.join(out_dir, "merge.sub"), merge_sub)
     write_text(os.path.join(out_dir, "fit.sub"), fit_sub)
+
+
+def _cleanup_post(dag_lines, job_name, log_dir):
+    # SCRIPT POST that deletes this node's .out/.err once it succeeds (keeps
+    # the AFS logs/ dir under its entry limit). The helper propagates the
+    # node's real return code, so RETRY semantics are unchanged. Not emitted
+    # for merge_threshold, which already carries its own POST (check_merged).
+    dag_lines.append(f"SCRIPT POST {job_name} {_CLEANUP_SCRIPT} $RETURN {os.path.join(log_dir, job_name)}")
 
 
 def _emit_parent_child(dag_lines, parent_names, child_name, batch_size=200):
@@ -219,7 +241,8 @@ def main(argv=None):
     p.add_argument("--log-dir", default=None,
                    help="Directory for Condor per-job log/output/error files. Default: <dag-dir>/logs (AFS -- "
                         "CERN standard schedds reject /eos log paths). Logs are kept tiny via Gaudi WARNING, the "
-                        "Fill skip-if-done check, and hadd -v 0, so they don't fill AFS.")
+                        "Fill skip-if-done check, and hadd -v 0; and each node's .out/.err are deleted once the "
+                        "node succeeds (see --keep-job-logs) so the dir doesn't hit AFS's entry limit.")
     p.add_argument("--outdir", default=None,
                    help="Calibration table output base directory. Default: settings.yml calib_dir()/MuonCalib_gaudi")
     p.add_argument("--gain", choices=("high", "low", "both"), default="high")
@@ -227,10 +250,16 @@ def main(argv=None):
                    help="Directory to write the .dag/.sub/.sh/file-lists/logs/ into.")
     p.add_argument("--diagnostics", action="store_true",
                     help="Also write a <output>.diagnostics.root cross-check file per Fit job.")
+    p.add_argument("--keep-job-logs", action="store_true",
+                   help="Keep every job's .out/.err. Default: a SCRIPT POST deletes each node's .out/.err "
+                        "once it succeeds (failed nodes keep theirs) to protect the AFS logs/ dir from its "
+                        "directory-entry limit. Pass this for small test DAGs where you want all logs.")
     p.add_argument("--fill-request-memory", type=int, default=5000,
                    help="Fill job request_memory in MB (default 5000: ~3.3GB for the 4 histogram grids + margin).")
     p.add_argument("--fill-job-flavour", default="microcentury")
-    p.add_argument("--merge-request-memory", type=int, default=4000)
+    p.add_argument("--merge-request-memory", type=int, default=8000,
+                   help="Merge job base request_memory in MB (default 8000; grows per retry, see _write_subs -- "
+                        "large hadd merges were observed using ~11.8 GB).")
     p.add_argument("--merge-job-flavour", default="workday")
     p.add_argument("--fit-request-memory", type=int, default=4000)
     p.add_argument("--fit-job-flavour", default="workday")
@@ -260,6 +289,7 @@ def main(argv=None):
     gains = ["high", "low"] if args.gain == "both" else [args.gain]
 
     log_dir = args.log_dir or condor_log_dir(args.dag_dir)
+    emit_cleanup = not args.keep_job_logs
 
     os.makedirs(args.dag_dir, exist_ok=True)
     os.makedirs(log_dir, exist_ok=True)
@@ -287,6 +317,8 @@ def main(argv=None):
             dag_lines.append(f'VARS {job_name} in_decoded="{in_decoded}" out_hist="{out_hist}"')
             dag_lines.append(f"RETRY {job_name} 2")
             dag_lines.append(f"CATEGORY {job_name} FillJobs")
+            if emit_cleanup:
+                _cleanup_post(dag_lines, job_name, log_dir)
             fill_job_names.append(job_name)
             chunk_paths.append(out_hist)
 
@@ -311,6 +343,8 @@ def main(argv=None):
                 dag_lines.append(f'VARS {group_name} filelist="{group_filelist}" out="{group_out}"')
                 dag_lines.append(f"RETRY {group_name} 2")
                 dag_lines.append(f"CATEGORY {group_name} MergeGroupJobs")
+                if emit_cleanup:
+                    _cleanup_post(dag_lines, group_name, log_dir)
                 _emit_parent_child(dag_lines, group_fill_jobs, group_name)
                 group_out_paths.append(group_out)
                 merge_run_parents.append(group_name)
@@ -321,6 +355,8 @@ def main(argv=None):
         dag_lines.append(f"JOB {merge_run_name} {args.dag_dir}/merge.sub")
         dag_lines.append(f'VARS {merge_run_name} filelist="{run_filelist}" out="{merge_run_out}"')
         dag_lines.append(f"RETRY {merge_run_name} 2")
+        if emit_cleanup:
+            _cleanup_post(dag_lines, merge_run_name, log_dir)
         _emit_parent_child(dag_lines, merge_run_parents, merge_run_name)
         merge_run_names.append(merge_run_name)
 
@@ -349,6 +385,8 @@ def main(argv=None):
             dag_lines.append(f"JOB {job_name} {args.dag_dir}/fit.sub")
             dag_lines.append(f'VARS {job_name} mode="{mode}" gain="{gain}" in_hist="{merge_th_out}" '
                               f'out_path="{out_path}" diag_path="{diag_path}"')
+            if emit_cleanup:
+                _cleanup_post(dag_lines, job_name, log_dir)
             fit_job_names.append(job_name)
     dag_lines.append(f"PARENT {merge_th_name} CHILD {' '.join(fit_job_names)}")
 

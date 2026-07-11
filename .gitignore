@@ -51,3 +51,6 @@ settings.yml
 # build artifacts
 build/
 k4SiWEcalReco/build/
+
+# local diagnostic plots (not versioned)
+diagnostics/
