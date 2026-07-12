@@ -59,8 +59,17 @@ struct BuilderConfig {
   int adcUnderflowThreshold = 11;
   // Raw (NOT pedestal-subtracted) high-gain ADC at/above which the high-gain
   // preamp is taken to be saturated, so the hit energy is computed from the
-  // low-gain branch instead. Matches hit_collector.py's `adc_high < 1200`.
-  int adcSaturationThreshold = 1200;
+  // low-gain branch instead.
+  //
+  // 1900, not the 1200 hit_collector.py uses: correlating adc_high against
+  // adc_low hit by hit on run_000013, the high gain stays linear all the way to
+  // adc_high ~= 1950 and only bends over there (see diagnostics/
+  // saturation_hg_vs_lg.png). At 1200 about 2% of hits -- most of them still
+  // perfectly linear in the high gain -- were being handed to the low gain,
+  // whose MIP is only ~4 ADC and is therefore far coarser; that LOWERED
+  // run_000013's mean energy by 1.3%, the opposite of what recovering saturated
+  // hits can do.
+  int adcSaturationThreshold = 1900;
   double maxHitsPerSca = 1.0e18;  // math.inf equivalent; see EcalEventBuilder.cpp for why not literal infinity
   int maxHitsPerEvent = 15360;  // 15 slabs * 16 chips * 64 channels
 };

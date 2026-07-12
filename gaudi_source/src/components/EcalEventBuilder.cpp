@@ -237,7 +237,7 @@ struct EcalEventBuilder final : Gaudi::Algorithm {
   Gaudi::Property<int> m_badValue{this, "BadValue", -999, ""};
   Gaudi::Property<int> m_adcUnderflowThreshold{this, "AdcUnderflowThreshold", 11, ""};
   Gaudi::Property<int> m_adcSaturationThreshold{
-      this, "AdcSaturationThreshold", 1200,
+      this, "AdcSaturationThreshold", 1900,
       "Raw (not pedestal-subtracted) high-gain ADC at/above which the high-gain preamp is taken to be "
       "saturated and the energy is read from the low-gain branch instead. Only has an effect when the "
       "low-gain tables are loaded."};
