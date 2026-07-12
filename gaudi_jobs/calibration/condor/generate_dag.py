@@ -34,7 +34,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."
 from siwecal_common import paths
 
 from calib_run_utils import parse_run_folder_list, raw_chunk_files
-from condor_common import DEFAULT_FILL_SCRATCH_DIR, OPTIONS_DIR, condor_log_dir, decoded_dir, env_wrapper_preamble, \
+from condor_common import DEFAULT_CONVERTED_DIR, DEFAULT_FILL_SCRATCH_DIR, OPTIONS_DIR, chunks_dir, condor_log_dir, env_wrapper_preamble, \
     hist_dir, mkdirs_line, write_executable, write_text
 from run_calibration_batch import _check_threshold_consistency, _combined_label  # noqa: E402
 
@@ -64,21 +64,21 @@ def _expected_chunks(run_folders):
     return expected
 
 
-def _check_decoded_chunks(run_folders, decoded_base):
+def _check_decoded_chunks(run_folders, converted_dir):
     """Aborts with a clear message if generate_convert_jobs.py's CONVERT
     stage hasn't (fully) run yet for the requested runs."""
     expected = _expected_chunks(run_folders)
     missing = []
     for run_name, chunk_names in expected.items():
         for chunk_name in chunk_names:
-            path = os.path.join(decoded_base, run_name, chunk_name)
+            path = os.path.join(chunks_dir(converted_dir, run_name), chunk_name)
             if not os.path.exists(path):
                 missing.append(path)
     if missing:
         preview = "\n".join(f"  {m}" for m in missing[:20])
         more = f"\n  ... and {len(missing) - 20} more" if len(missing) > 20 else ""
         raise SystemExit(
-            f"ERROR: {len(missing)} decoded chunk(s) missing under {decoded_base} -- run CONVERT first:\n"
+            f"ERROR: {len(missing)} decoded chunk(s) missing under {converted_dir} -- run CONVERT first:\n"
             f"  python gaudi_jobs/calibration/condor/generate_convert_jobs.py --runs ... --out-dir ...\n"
             f"  condor_submit <out-dir>/convert.sub\n"
             f"Missing:\n{preview}{more}"
@@ -262,6 +262,9 @@ def main(argv=None):
                         "run_calibration_batch.py --runs. No auto-discovery by threshold.")
     p.add_argument("--raw-base", default=None, help="Base directory to resolve bare run names in --runs against.")
     p.add_argument("--th", default=None, help="Override the output th<N> label instead of auto-deriving it.")
+    p.add_argument("--converted-dir", default=DEFAULT_CONVERTED_DIR,
+                   help=f"Where CONVERT put the decoded chunks (<converted-dir>/<RUN>/chunks/). "
+                        f"Default: {DEFAULT_CONVERTED_DIR}")
     p.add_argument("--fill-scratch-dir", default=DEFAULT_FILL_SCRATCH_DIR,
                    help=f"EOS scratch area (decoded/ and hist/ live under it). Default: {DEFAULT_FILL_SCRATCH_DIR}")
     p.add_argument("--log-dir", default=None,
@@ -304,8 +307,7 @@ def main(argv=None):
     kwargs = {"default_base": args.raw_base} if args.raw_base else {}
     run_folders = parse_run_folder_list(args.runs, **kwargs)
 
-    decoded_base = decoded_dir(args.fill_scratch_dir)
-    expected_chunks = _check_decoded_chunks(run_folders, decoded_base)
+    expected_chunks = _check_decoded_chunks(run_folders, args.converted_dir)
 
     th = _check_threshold_consistency(run_folders, args.th)
     label = _combined_label(run_folders, th)
@@ -337,7 +339,7 @@ def main(argv=None):
         os.makedirs(run_hist_dir, exist_ok=True)
         for idx, chunk_name in enumerate(chunk_names):
             job_name = f"fill_{run_name}_{idx:04d}"
-            in_decoded = os.path.join(decoded_base, run_name, chunk_name)
+            in_decoded = os.path.join(chunks_dir(args.converted_dir, run_name), chunk_name)
             out_hist = os.path.join(run_hist_dir, chunk_name)
             dag_lines.append(f"JOB {job_name} {args.dag_dir}/fill.sub")
             dag_lines.append(f'VARS {job_name} in_decoded="{in_decoded}" out_hist="{out_hist}"')
