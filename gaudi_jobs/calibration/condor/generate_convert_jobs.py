@@ -31,8 +31,8 @@ import sys
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."))
 
 from calib_run_utils import parse_run_folder_list, raw_chunk_files
-from condor_common import DEFAULT_FILL_SCRATCH_DIR, OPTIONS_DIR, condor_log_dir, decoded_dir, env_wrapper_preamble, \
-    mkdirs_line, write_executable, write_text
+from condor_common import DEFAULT_CONVERTED_DIR, OPTIONS_DIR, chunks_dir, condor_log_dir, \
+    env_wrapper_preamble, mkdirs_line, write_executable, write_text
 
 
 def _convert_sh(out_dir):
@@ -73,8 +73,8 @@ def main(argv=None):
     p.add_argument("--raw-base", default=None,
                    help="Base directory to resolve bare run names in --runs against. "
                         "Default: calib_run_utils.DEFAULT_RAW_BASE")
-    p.add_argument("--fill-scratch-dir", default=DEFAULT_FILL_SCRATCH_DIR,
-                   help=f"EOS scratch area (decoded/ and hist/ live under it). Default: {DEFAULT_FILL_SCRATCH_DIR}")
+    p.add_argument("--converted-dir", default=DEFAULT_CONVERTED_DIR,
+                   help=f"Decoded chunks go to <converted-dir>/<RUN>/chunks/. Default: {DEFAULT_CONVERTED_DIR}")
     p.add_argument("--out-dir", required=True,
                    help="Directory to write convert.sub/convert.sh/chunklist.txt/logs/ into.")
     p.add_argument("--request-memory", type=int, default=7000,
@@ -93,7 +93,6 @@ def main(argv=None):
     kwargs = {"default_base": args.raw_base} if args.raw_base else {}
     run_folders = parse_run_folder_list(args.runs, **kwargs)
 
-    decoded_base = decoded_dir(args.fill_scratch_dir)
     # Condor logs stay on AFS (CERN standard schedds reject /eos log paths);
     # each convert job's .out is only a handful of lines, so they don't pile up.
     log_dir = condor_log_dir(args.out_dir)
@@ -109,12 +108,13 @@ def main(argv=None):
         # fine on the EOS FUSE mount; shell `mkdir -p` on the worker node
         # does not -- see condor_common.py) so convert.sh never needs to
         # create more than the leaf itself.
-        os.makedirs(os.path.join(decoded_base, run_name), exist_ok=True)
+        run_chunks = chunks_dir(args.converted_dir, run_name)
+        os.makedirs(run_chunks, exist_ok=True)
         for idx, chunk in enumerate(chunks):
-            out_decoded = os.path.join(decoded_base, run_name, f"chunk_{idx:04d}.root")
+            out_decoded = os.path.join(run_chunks, f"chunk_{idx:04d}.root")
             lines.append(f"{chunk},{out_decoded},{run_settings}")
             n_chunks += 1
-        print(f"[convert] {run_name}: {len(chunks)} chunk(s) -> {os.path.join(decoded_base, run_name)}/")
+        print(f"[convert] {run_name}: {len(chunks)} chunk(s) -> {run_chunks}/")
 
     write_text(os.path.join(args.out_dir, "chunklist.txt"), "\n".join(lines) + "\n")
     _convert_sh(args.out_dir)

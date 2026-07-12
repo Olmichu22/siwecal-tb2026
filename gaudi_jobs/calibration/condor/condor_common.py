@@ -61,15 +61,22 @@ def converted_run_file(converted_dir, run):
     return os.path.join(converted_dir, run, f"{run}.root")
 
 
-def decoded_dir(fill_scratch_dir):
-    """Where CONVERT (D.1) writes per-chunk decoded siwecaldecoded ROOT files.
+def chunks_dir(converted_dir, run):
+    """Where CONVERT writes a run's decoded siwecaldecoded chunks:
+    <converted_dir>/<RUN>/chunks/.
 
-    These per-chunk files are an artefact of parallelising the decode across
-    Condor jobs, NOT the converted run itself: the canonical converted run is
-    the single <RUN>.root that generate_publish_converted_jobs.py hadds out of
-    them into DEFAULT_CONVERTED_DIR.
+    ONE decoded area, shared by every consumer: the calibration Fill reads these
+    chunks, and so does the event builder (EcalEventBuilder's InputFiles chains
+    them). They used to live off in the calibration Condor scratch, which made
+    the decoded data look like a calibration by-product -- it is not, it is the
+    run's converted data, and it belongs next to the run's reconstructed output.
+
+    There is deliberately no merged per-run siwecaldecoded file. Nothing needs
+    one: it would duplicate ~390 GB across the calibration runs for something no
+    analysis opens, and for run_000004 (~176 GB of chunks) it cannot even exist,
+    since that crosses ROOT's 100 GB TTree::fgMaxTreeSize.
     """
-    return os.path.join(fill_scratch_dir, "decoded")
+    return os.path.join(converted_dir, run, "chunks")
 
 
 def hist_dir(fill_scratch_dir):

@@ -51,13 +51,17 @@ def test_layer_extent():
 
 
 def test_weighte():
-    slab = np.array([0, 8], dtype=np.int32)        # W/X0 = 0.8 and 1.6
+    # The real stack: 2.8 mm of W in front of slab 0, 4.2 mm for slabs 1-8 and
+    # 5.6 mm for slabs 9-14; over X0(W)=3.5 mm that is 0.8 / 1.2 / 1.6.
+    # Slab 8 is 1.2, NOT 1.6 -- this fixture used to say otherwise, matching a
+    # wrong Tungsten_thickness.yml.
+    slab = np.array([0, 9], dtype=np.int32)        # W/X0 = 0.8 and 1.6
     energy = np.array([1.0, 1.0], dtype=float)
-    w_over_x0 = np.array([0.8] + [1.2] * 7 + [1.6] * 7)
+    w_over_x0 = np.array([0.8] + [1.2] * 8 + [1.6] * 6)
     # 1*0.8 + 1*1.6 = 2.4
     assert abs(m.weighte_total(slab, energy, w_over_x0) - 2.4) < 1e-9
     wpl = m.weighte_per_layer(slab, energy, w_over_x0, 15)
-    assert abs(wpl[0] - 0.8) < 1e-9 and abs(wpl[8] - 1.6) < 1e-9
+    assert abs(wpl[0] - 0.8) < 1e-9 and abs(wpl[9] - 1.6) < 1e-9
 
 
 def test_barycenter_and_rms():
