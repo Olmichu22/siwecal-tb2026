@@ -113,31 +113,50 @@ set -eo pipefail
 # merge.sh <filelist.txt> <out.root>
 FILELIST="$1"; OUT="$2"
 """ + env_wrapper_preamble() + """
-""" + mkdirs_line('$(dirname "$OUT")') + """# hadd-ing directly to the EOS (FUSE-mounted) target is what made the
-# th220/th230 merges take the better part of a week in the first place (see
-# the _MERGE_GROUP_SIZE comment above): even with the group-tournament split
-# keeping input counts low, hadd repeatedly re-opening a GROWING target file
-# over the network is slow and can stall for hours on just a handful of
-# large inputs (observed directly: a 20-file merge_run stuck for ~4h with a
-# 0-byte target and eventually killed by the pool's wall-time limit). Merge
-# to local worker-node scratch first -- a single local hadd pass, no
-# regrowth-over-network cost, no -n batching needed -- then copy the
-# finished file over. NOTE: an earlier version of this fix used `xrdcp ...
-# root://eospublic.cern.ch/$OUT` for the final upload (proven to work
-# interactively for the run_000004 calibration merge), but under a Condor
-# job (getenv=False, no forwarded Kerberos/token) it hung for hours with no
-# output at all -- the batch worker has no xrootd auth. `cp` to the same
-# FUSE-mounted /eos path every other job in this pipeline already writes to
-# directly (fill.sh, the merge_group tier) sidesteps that auth entirely and
-# is a single bulk copy of an already-complete local file, not an
-# incremental network write, so it doesn't hit the original growing-target
-# slowness either.
+""" + mkdirs_line('$(dirname "$OUT")') + """# Two separate EOS/hadd hazards, both fixed here:
+#
+# 1) Writing the GROWING target over EOS FUSE (the original "merges took a
+#    week" bug): hadd re-opening a growing file over the network stalls for
+#    hours. Fixed by merging to LOCAL worker scratch (TMP_OUT) and copying the
+#    finished file over once. (`cp` to the FUSE /eos path, not `xrdcp` -- a
+#    getenv=False Condor job has no xrootd auth and xrdcp hangs.)
+#
+# 2) READING the inputs over EOS FUSE (what hung the run_000085/000089
+#    merge_group jobs for 7+ h): each per-chunk histogram file is ~145 MB with
+#    ~365k histograms, and hadd reads every one of those objects as a separate
+#    FUSE round-trip -- measured, hadd of just 3 chunks direct from EOS did not
+#    finish in 100 s, while a local bulk copy is seconds and the local hadd is
+#    CPU-bound and finite. So COPY each input to local scratch first, then hadd
+#    locally. Done in batches of STAGE_BATCH (hadd a batch into a partial,
+#    delete the batch's inputs) so peak local disk stays bounded regardless of
+#    how many inputs the group has; a final hadd combines the partials.
 ulimit -n 524288 || true
+STAGE="$(mktemp -d --tmpdir="${TMPDIR:-/tmp}" mergein_XXXXXX)"
 TMP_OUT="$(mktemp --tmpdir="${TMPDIR:-/tmp}" merge_XXXXXX.root)"
-trap 'rm -f "$TMP_OUT"' EXIT
-# -v 0: silence hadd's per-source-file listing -- for a run with thousands of
-# chunks it prints one "Source file N: ..." line per input, dominating the log.
-hadd -v 0 -f "$TMP_OUT" "@$FILELIST"
+trap 'rm -rf "$STAGE" "$TMP_OUT"' EXIT
+STAGE_BATCH=25
+# -v 0: silence hadd's per-source-file listing (one line per input otherwise).
+partials=(); batch=(); pidx=0
+flush_batch() {
+  [ "${#batch[@]}" -eq 0 ] && return 0
+  local part="$STAGE/part_${pidx}.root"
+  hadd -v 0 -f "$part" "${batch[@]}"
+  rm -f "${batch[@]}"
+  partials+=("$part"); batch=(); pidx=$((pidx + 1))
+}
+while IFS= read -r infile; do
+  [ -z "$infile" ] && continue
+  in_local="$STAGE/$(basename "$infile")"
+  cp "$infile" "$in_local"
+  batch+=("$in_local")
+  [ "${#batch[@]}" -ge "$STAGE_BATCH" ] && flush_batch
+done < "$FILELIST"
+flush_batch
+if [ "${#partials[@]}" -eq 1 ]; then
+  cp -f "${partials[0]}" "$TMP_OUT"
+else
+  hadd -v 0 -f "$TMP_OUT" "${partials[@]}"
+fi
 cp -f "$TMP_OUT" "$OUT"
 """
     write_executable(os.path.join(out_dir, "merge.sh"), content)
