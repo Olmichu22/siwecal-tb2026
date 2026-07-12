@@ -85,6 +85,7 @@ struct Hit {
   float adcHighPedsub = 0.f;  // -> hit_hg
   float adcLowPedsub = 0.f;   // -> hit_lg
   float energyMip = 0.f;      // -> hit_energy
+  float wEnergy = 0.f;        // -> hit_w_energy (sampling-corrected: energyMip * W[slab]/X0)
   float x = std::numeric_limits<float>::quiet_NaN();   // -> hit_x
   float y = std::numeric_limits<float>::quiet_NaN();   // -> hit_y
   float z = std::numeric_limits<float>::quiet_NaN();   // -> hit_z
@@ -124,6 +125,11 @@ struct ReconstructedEvent {
   double sumEnergy() const {
     double s = 0.0;
     for (const auto& h : hits) s += h.energyMip;
+    return s;
+  }
+  double sumWEnergy() const {
+    double s = 0.0;
+    for (const auto& h : hits) s += h.wEnergy;
     return s;
   }
 };
@@ -453,6 +459,11 @@ class HitCollector {
     hit.y = y;
     hit.z = static_cast<float>(m_geom.slabZ(slab));
     hit.x0 = static_cast<float>(m_geom.slabX0(slab));
+    // Sampling correction: layers do not all sit behind the same amount of
+    // tungsten (2.8mm / 4.2mm / 5.6mm here), so a MIP deposited in a thick-
+    // absorber layer stands for more incident energy than one in a thin layer.
+    // Same weight EcalShowerVars.h::hitWeights applies when it forms `weighte`.
+    hit.wEnergy = static_cast<float>(energyMip * m_geom.slabWOverX0(slab));
     hit.isMasked = isMasked;
     return hit;
   }
