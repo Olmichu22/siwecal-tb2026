@@ -56,6 +56,10 @@ _PID_OUT = os.path.join(_CONVERTED_DIR, f"ecal_{_RUN}.edm4hep.root")
 _CALIB_BASE = os.path.join(paths.calib_dir(), "MuonCalib_gaudi")
 _PEDESTAL_FILE = os.path.join(_CALIB_BASE, "pedestals", f"th{_TH}", "Pedestal_TB2026CERN_run_000004_highgain.txt")
 _MIP_FILE = os.path.join(_CALIB_BASE, "mips", f"th{_TH}", "MIP_pedestalsubmode1_TB2026CERN_run_000004_highgain.txt")
+# Low-gain pair: hits whose raw adc_high saturates the high-gain preamp take their
+# energy from the low-gain branch instead (see EventBuilder.h::buildHit).
+_PEDESTAL_FILE_LG = os.path.join(_CALIB_BASE, "pedestals", f"th{_TH}", "Pedestal_TB2026CERN_run_000004_lowgain.txt")
+_MIP_FILE_LG = os.path.join(_CALIB_BASE, "mips", f"th{_TH}", "MIP_pedestalsubmode1_TB2026CERN_run_000004_lowgain.txt")
 
 _MAPPINGS_DIR = paths.geometry_dir()
 _PADMAP_DEFAULT = os.path.join(_MAPPINGS_DIR, "fev10_rotate_chip_channel_x_y_mapping.txt")
@@ -81,6 +85,8 @@ def main():
         "EVBLD_RUN_ID": "12",
         "EVBLD_PEDESTAL_FILE": _PEDESTAL_FILE,
         "EVBLD_MIP_FILE": _MIP_FILE,
+        "EVBLD_PEDESTAL_FILE_LOWGAIN": _PEDESTAL_FILE_LG,
+        "EVBLD_MIP_FILE_LOWGAIN": _MIP_FILE_LG,
         "EVBLD_PADMAP_DEFAULT": _PADMAP_DEFAULT,
         "EVBLD_PADMAP_SLAB_OVERRIDES": f"12:{_PADMAP_SLAB12}",
         "EVBLD_SLAB_Z_FILE": _SLAB_Z_FILE,
