@@ -115,7 +115,7 @@ class EventBuildingPipeline:
 
         print(f"[Build] {n_total} acquisitions -> {n_workers} workers "
               f"(~{n_total // n_workers} acq/worker)")
-        for _input, tmp_path, start, end, worker_id, _run in chunk_args:
+        for _input, tmp_path, start, end, worker_id, _run, thrs_arg in chunk_args:
             print(f"  W{worker_id}: [{start}, {end})  ->  {os.path.basename(tmp_path)}")
 
         # Publish components to the workers via fork-inherited globals.
