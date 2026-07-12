@@ -48,8 +48,27 @@ def mkdirs_line(dir_expr):
     return f'python3 -c "import os, sys; os.makedirs(sys.argv[1], exist_ok=True)" "{dir_expr}"\n'
 
 
+# Where a fully converted run is PUBLISHED, one directory per run holding one
+# ROOT file named after it: <converted_dir>/<RUN>/<RUN>.root. This is the
+# collaboration's own layout (cf. rundata_converted_old/, and the runs written
+# by gaudi_jobs/run000012, run000013 and run_calibration_batch.py) -- calibration
+# runs follow it too, they are not a special case.
+DEFAULT_CONVERTED_DIR = "/eos/experiment/drdcalo/siw-ecal/TB2026-06/Data/rundata_converted_gaudi"
+
+
+def converted_run_file(converted_dir, run):
+    """The published converted file for `run`: <converted_dir>/<RUN>/<RUN>.root."""
+    return os.path.join(converted_dir, run, f"{run}.root")
+
+
 def decoded_dir(fill_scratch_dir):
-    """Where CONVERT (D.1) writes per-chunk decoded siwecaldecoded ROOT files."""
+    """Where CONVERT (D.1) writes per-chunk decoded siwecaldecoded ROOT files.
+
+    These per-chunk files are an artefact of parallelising the decode across
+    Condor jobs, NOT the converted run itself: the canonical converted run is
+    the single <RUN>.root that generate_publish_converted_jobs.py hadds out of
+    them into DEFAULT_CONVERTED_DIR.
+    """
     return os.path.join(fill_scratch_dir, "decoded")
 
 
