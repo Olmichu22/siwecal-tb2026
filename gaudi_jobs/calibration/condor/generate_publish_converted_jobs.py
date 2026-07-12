@@ -60,7 +60,16 @@ def _publish_sh(out_dir):
     # Idempotent: an existing, valid output is left alone, so a partially
     # completed submit can simply be resubmitted.
     # The skip-check must come AFTER the preamble: it needs key4hep's ROOT, and
-    # a bare system python3 would just fail the import and re-hadd every time.
+    # a bare system python3 would just fail the import and re-merge every time.
+    # It also rejects a kRecovered file: a merge killed partway leaves a readable
+    # but truncated tree behind, and skipping on that would silently publish it.
+    #
+    # NOT `hadd`: a run whose merged tree exceeds ROOT's 100 GB TTree::fgMaxTreeSize
+    # makes the TTree roll over to a second file mid-merge, which hadd cannot do --
+    # it dies with "output TTree must be associated with a writable file" after
+    # having already written tens of GB (this is exactly what happened to
+    # TB2026CERN_run_000004, ~176 GB of decoded chunks). TFileMerger with the limit
+    # raised keeps the run in a single file, which is what the layout requires.
     content = f"""#!/bin/bash
 set -eo pipefail
 # publish.sh <run> <out_file> <decoded_run_dir>
@@ -70,13 +79,26 @@ RUN="$1"; OUT_FILE="$2"; DECODED_DIR="$3"
 if [ -f "$OUT_FILE" ] && python3 -c "
 import ROOT, sys
 f = ROOT.TFile.Open(sys.argv[1])
-sys.exit(0 if f and not f.IsZombie() and f.Get('siwecaldecoded') else 1)" "$OUT_FILE" 2>/dev/null; then
+ok = bool(f) and not f.IsZombie() and bool(f.Get('siwecaldecoded')) \\
+     and not f.TestBit(ROOT.TFile.kRecovered)
+sys.exit(0 if ok else 1)" "$OUT_FILE" 2>/dev/null; then
   echo "$RUN: already published, skipping"
   exit 0
 fi
 
 """ + mkdirs_line('$(dirname "$OUT_FILE")') + f"""
-hadd -f -v 0 "$OUT_FILE" "$DECODED_DIR"/*.root
+python3 -c "
+import glob, sys, ROOT
+out, src = sys.argv[1], sys.argv[2]
+ROOT.TTree.SetMaxTreeSize(500 * 1000 * 1000 * 1000)   # 500 GB; default 100 GB rolls the file over
+m = ROOT.TFileMerger(False)
+m.SetFastMethod(True)
+if not m.OutputFile(out, 'RECREATE'):
+    sys.exit('cannot open output: ' + out)
+for f in sorted(glob.glob(src + '/*.root')):
+    if not m.AddFile(f):
+        sys.exit('cannot add: ' + f)
+sys.exit(0 if m.Merge() else 'merge failed')" "$OUT_FILE" "$DECODED_DIR"
 echo "$RUN: published -> $OUT_FILE"
 """
     write_executable(os.path.join(out_dir, "publish.sh"), content)
