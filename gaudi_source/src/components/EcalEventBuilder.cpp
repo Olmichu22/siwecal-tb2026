@@ -28,6 +28,7 @@
 #include "Gaudi/Algorithm.h"
 #include "Gaudi/Property.h"
 
+#include "TChain.h"
 #include "TFile.h"
 #include "TTree.h"
 
@@ -61,22 +62,43 @@ struct EcalEventBuilder final : Gaudi::Algorithm {
   using Gaudi::Algorithm::Algorithm;
 
   StatusCode initialize() override {
-    if (m_inputFile.value().empty()) {
-      return error() << "InputFile not set" << endmsg, StatusCode::FAILURE;
+    // InputFiles (a list) or InputFile (one path) -- a run that was decoded in
+    // parallel exists only as per-chunk files, and CONVERT's chunking is a
+    // parallelisation detail, not a property of the data. Chaining them here is
+    // what the calibrator's InputFiles already does, and it means a run never
+    // has to be merged into one file first: TB2026CERN_run_000004's 1369 chunks
+    // come to ~176 GB, which crosses ROOT's 100 GB TTree::fgMaxTreeSize and so
+    // cannot even be held in a single tree. The OUTPUT is one `ecal` file either
+    // way -- only the input side is chained.
+    std::vector<std::string> inputs = m_inputFiles.value();
+    if (inputs.empty() && !m_inputFile.value().empty()) inputs.push_back(m_inputFile.value());
+    if (inputs.empty()) {
+      return error() << "Set InputFiles (list) or InputFile (single path)" << endmsg, StatusCode::FAILURE;
     }
     if (m_outputFile.value().empty()) {
       return error() << "OutputFile not set" << endmsg, StatusCode::FAILURE;
     }
 
-    std::unique_ptr<TFile> fin(TFile::Open(m_inputFile.value().c_str(), "READ"));
-    if (!fin || fin->IsZombie()) {
-      return error() << "Cannot open input file: " << m_inputFile.value() << endmsg, StatusCode::FAILURE;
+    // TChain IS a TTree, so everything downstream (bindReadBranches, GetEntry,
+    // GetEntries) works unchanged; the chain just rolls over files for us.
+    auto chain = std::make_unique<TChain>(m_treeName.value().c_str());
+    for (const auto& path : inputs) {
+      if (chain->AddFile(path.c_str()) == 0) {
+        return error() << "Cannot add input file (missing, or holds no '" << m_treeName.value()
+                       << "' tree): " << path << endmsg,
+               StatusCode::FAILURE;
+      }
     }
-    auto* tree = dynamic_cast<TTree*>(fin->Get(m_treeName.value().c_str()));
-    if (!tree) {
-      return error() << "Tree '" << m_treeName.value() << "' not found in " << m_inputFile.value() << endmsg,
+    if (chain->GetEntries() <= 0) {
+      return error() << "No entries in '" << m_treeName.value() << "' across the " << inputs.size()
+                     << " input file(s)" << endmsg,
              StatusCode::FAILURE;
     }
+    if (inputs.size() > 1) {
+      info() << "Chained " << inputs.size() << " input file(s), " << chain->GetEntries() << " acquisitions"
+             << endmsg;
+    }
+    TTree* tree = chain.get();
 
     // TreeBuffers is ~2.8MB (three [15][16][15][64] int arrays) -- too large
     // for a stack frame on the smaller worker-thread stacks Gaudi/k4run can
@@ -157,7 +179,9 @@ struct EcalEventBuilder final : Gaudi::Algorithm {
     const k4siwecal::EventBuilder builder(cfg, calib, geom, padMap.get());
 
     int runId = m_runId.value();
-    if (runId < 0) runId = parseRunIdFromPath(m_inputFile.value());
+    // Chunk files are named chunk_NNNN.root, so the run number is only in their
+    // directory -- parse the full path, not the basename.
+    if (runId < 0) runId = parseRunIdFromPath(inputs.front());
 
     int thresholdDac = m_thresholdDacOverride.value();
     if (thresholdDac < 0 && tree->GetBranch("thresholdDac") != nullptr && tree->GetEntries() > 0) {
@@ -199,10 +223,14 @@ struct EcalEventBuilder final : Gaudi::Algorithm {
   StatusCode execute(const EventContext&) const override { return StatusCode::SUCCESS; }
 
   // I/O
-  Gaudi::Property<std::string> m_inputFile{this, "InputFile", "", "siwecaldecoded ROOT file"};
+  Gaudi::Property<std::string> m_inputFile{this, "InputFile", "", "siwecaldecoded ROOT file (single)"};
+  Gaudi::Property<std::vector<std::string>> m_inputFiles{
+      this, "InputFiles", {},
+      "siwecaldecoded ROOT files to chain, in order. Takes precedence over InputFile. Lets a run be event-built "
+      "straight from its decoded chunks, with no merge step."};
   Gaudi::Property<std::string> m_treeName{this, "TreeName", "siwecaldecoded", "Input TTree name"};
   Gaudi::Property<std::string> m_outputFile{this, "OutputFile", "", "Output ecal ROOT file"};
-  Gaudi::Property<int> m_runId{this, "RunId", -1, "-1 = parse from InputFile basename (..._run_<N>...)"};
+  Gaudi::Property<int> m_runId{this, "RunId", -1, "-1 = parse from the first input path (..._run_<N>...)"};
   Gaudi::Property<int> m_thresholdDacOverride{
       this, "ThresholdDacOverride", -1,
       "-1 = read from siwecaldecoded's thresholdDac branch (written by EcalRawDecoder from Run_Settings.txt); "
