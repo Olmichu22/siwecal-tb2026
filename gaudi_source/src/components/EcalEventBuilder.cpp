@@ -291,6 +291,7 @@ struct EcalEventBuilder final : Gaudi::Algorithm {
       m_hitHg.resize(maxHitsPerEvent);
       m_hitLg.resize(maxHitsPerEvent);
       m_hitEnergy.resize(maxHitsPerEvent);
+      m_hitWEnergy.resize(maxHitsPerEvent);
       m_hitX.resize(maxHitsPerEvent);
       m_hitY.resize(maxHitsPerEvent);
       m_hitZ.resize(maxHitsPerEvent);
@@ -307,6 +308,7 @@ struct EcalEventBuilder final : Gaudi::Algorithm {
       m_tree->Branch("nhit_chan", &m_nChan, "nhit_chan/I");
       m_tree->Branch("sum_hg", &m_sumHg, "sum_hg/F");
       m_tree->Branch("sum_energy", &m_sumEnergy, "sum_energy/F");
+      m_tree->Branch("sum_w_energy", &m_sumWEnergy, "sum_w_energy/F");
       m_tree->Branch("hit_slab", m_hitSlab.data(), "hit_slab[nhit_chan]/I");
       m_tree->Branch("hit_chip", m_hitChip.data(), "hit_chip[nhit_chan]/I");
       m_tree->Branch("hit_chan", m_hitChan.data(), "hit_chan[nhit_chan]/I");
@@ -314,6 +316,7 @@ struct EcalEventBuilder final : Gaudi::Algorithm {
       m_tree->Branch("hit_hg", m_hitHg.data(), "hit_hg[nhit_chan]/F");
       m_tree->Branch("hit_lg", m_hitLg.data(), "hit_lg[nhit_chan]/F");
       m_tree->Branch("hit_energy", m_hitEnergy.data(), "hit_energy[nhit_chan]/F");
+      m_tree->Branch("hit_w_energy", m_hitWEnergy.data(), "hit_w_energy[nhit_chan]/F");
       m_tree->Branch("hit_x", m_hitX.data(), "hit_x[nhit_chan]/F");
       m_tree->Branch("hit_y", m_hitY.data(), "hit_y[nhit_chan]/F");
       m_tree->Branch("hit_z", m_hitZ.data(), "hit_z[nhit_chan]/F");
@@ -334,6 +337,7 @@ struct EcalEventBuilder final : Gaudi::Algorithm {
       m_nChip = event.nChips();
       m_sumHg = static_cast<float>(event.sumAdcHigh());
       m_sumEnergy = static_cast<float>(event.sumEnergy());
+      m_sumWEnergy = static_cast<float>(event.sumWEnergy());
 
       for (int i = 0; i < event.nChannels(); ++i) {
         const auto& hit = event.hits[i];
@@ -344,6 +348,7 @@ struct EcalEventBuilder final : Gaudi::Algorithm {
         m_hitHg[i] = hit.adcHighPedsub;
         m_hitLg[i] = hit.adcLowPedsub;
         m_hitEnergy[i] = hit.energyMip;
+        m_hitWEnergy[i] = hit.wEnergy;
         m_hitX[i] = hit.x;
         m_hitY[i] = hit.y;
         m_hitZ[i] = hit.z;
@@ -358,9 +363,9 @@ struct EcalEventBuilder final : Gaudi::Algorithm {
     TTree* m_tree = nullptr;
     int m_run = -1, m_thresholdDac = -1, m_event = 0, m_spill = 0, m_bcid = 0;
     int m_nSlab = 0, m_nChip = 0, m_nChan = 0;
-    float m_sumHg = 0.f, m_sumEnergy = 0.f;
+    float m_sumHg = 0.f, m_sumEnergy = 0.f, m_sumWEnergy = 0.f;
     std::vector<int> m_hitSlab, m_hitChip, m_hitChan, m_hitSca, m_hitIsMasked;
-    std::vector<float> m_hitHg, m_hitLg, m_hitEnergy, m_hitX, m_hitY, m_hitZ, m_hitX0;
+    std::vector<float> m_hitHg, m_hitLg, m_hitEnergy, m_hitWEnergy, m_hitX, m_hitY, m_hitZ, m_hitX0;
   };
 };
 
