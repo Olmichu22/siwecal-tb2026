@@ -267,7 +267,7 @@ specific run — `PedestalMaxMeanAdc`, `MipFallbackMaxAdc`).
 
 **SAFETY**: run folders under `--raw-base` (default `.../Data/rundata/`) are
 read-only; decoded `siwecaldecoded.root` files always go to
-`--converted-dir` (default `.../Data/rundata_converted_test/`), enforced by
+`--converted-dir` (default `.../Data/rundata_converted_gaudi/`), enforced by
 an `_assert_not_under()` guard that refuses to write inside a run's raw
 folder. `list_run_thresholds.py` is read-only (only opens `Run_Settings.txt`
 files, never touches raw binaries or calls `k4run`).

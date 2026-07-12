@@ -56,7 +56,7 @@ _PID_STEERING = os.path.join(_OPTIONS_DIR, "run_pid.py")
 
 _RAW_DIR = os.path.join("/eos/experiment/drdcalo/siw-ecal/TB2026-06/Data/rundata", _RUN)  # READ-ONLY
 _RUN_SETTINGS_FILE = os.path.join(_RAW_DIR, "Run_Settings.txt")
-_CONVERTED_DIR = os.path.join("/eos/experiment/drdcalo/siw-ecal/TB2026-06/Data/rundata_converted_test", _RUN)
+_CONVERTED_DIR = os.path.join("/eos/experiment/drdcalo/siw-ecal/TB2026-06/Data/rundata_converted_gaudi", _RUN)
 _SIWECALDECODED_OUT = os.path.join(_CONVERTED_DIR, f"{_RUN}.root")
 _ECAL_OUT = os.path.join(_CONVERTED_DIR, f"ecal_{_RUN}.root")
 _PID_OUT = os.path.join(_CONVERTED_DIR, f"ecal_{_RUN}.edm4hep.root")

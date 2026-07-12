@@ -20,11 +20,16 @@ OPTIONS_DIR = os.path.join(REPO_ROOT, "gaudi_source", "options")
 # release so the AFS-resident gaudi_source/build is ABI-compatible.
 KEY4HEP_RELEASE = "2026-04-08"
 
-# EOS scratch area for the Condor pipeline's intermediate files. Lives
-# INSIDE rundata_converted_test/ (already proven writable all session)
-# rather than as its own top-level sibling under .../Data/. NEVER
-# auto-deleted by any script here (see the repo-wide "never delete
-# anything under /Data/" rule).
+# EOS scratch area for the Condor pipeline's intermediate files. NEVER
+# auto-deleted by any script here (see the repo-wide "never delete anything
+# under /Data/" rule).
+#
+# Deliberately still under rundata_converted_test/ even though converted
+# events now go to rundata_converted_gaudi/: this holds ~1.1 TB of already
+# validated per-chunk/per-run/per-threshold histograms (incl. the merged
+# merged_th220/th230.root the current calibration tables were fitted from).
+# It is calibration scratch, not converted events, and repointing it would
+# orphan all of it and force a full re-fill for no gain.
 DEFAULT_FILL_SCRATCH_DIR = "/eos/experiment/drdcalo/siw-ecal/TB2026-06/Data/rundata_converted_test/calib_fill_scratch"
 
 # IMPORTANT: shell `mkdir -p` reproducibly FAILS on this EOS FUSE mount --

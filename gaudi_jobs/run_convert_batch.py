@@ -46,7 +46,7 @@ from calib_run_utils import DEFAULT_RAW_BASE, raw_chunk_files  # noqa: E402
 _OPTIONS_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "gaudi_source", "options")
 _RAW2ROOT_STEERING = os.path.join(_OPTIONS_DIR, "run_raw2root.py")
 
-_DEFAULT_CONVERTED_DIR = "/eos/experiment/drdcalo/siw-ecal/TB2026-06/Data/rundata_converted_test"
+_DEFAULT_CONVERTED_DIR = "/eos/experiment/drdcalo/siw-ecal/TB2026-06/Data/rundata_converted_gaudi"
 
 _RANGE_RE = re.compile(r"^(\d+)-(\d+)$")
 
