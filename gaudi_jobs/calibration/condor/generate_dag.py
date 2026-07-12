@@ -136,7 +136,7 @@ TMP_OUT="$(mktemp --tmpdir="${TMPDIR:-/tmp}" merge_XXXXXX.root)"
 trap 'rm -rf "$STAGE" "$TMP_OUT"' EXIT
 STAGE_BATCH=25
 # -v 0: silence hadd's per-source-file listing (one line per input otherwise).
-partials=(); batch=(); pidx=0
+partials=(); batch=(); pidx=0; iidx=0
 flush_batch() {
   [ "${#batch[@]}" -eq 0 ] && return 0
   local part="$STAGE/part_${pidx}.root"
@@ -146,7 +146,14 @@ flush_batch() {
 }
 while IFS= read -r infile; do
   [ -z "$infile" ] && continue
-  in_local="$STAGE/$(basename "$infile")"
+  # Unique local name per input (numbered): inputs routinely SHARE a basename
+  # -- every run's per-run merge is "merged_run.root", every run's groups are
+  # "merged_group_NNNN.root" -- so copying by basename alone would collide, the
+  # copies overwriting one another and the batch then hadd-ing the lone
+  # survivor once per collided entry (silent data loss + N-fold count
+  # inflation). Numbering the local copies keeps every input distinct.
+  in_local="$STAGE/in_${iidx}_$(basename "$infile")"
+  iidx=$((iidx + 1))
   cp "$infile" "$in_local"
   batch+=("$in_local")
   [ "${#batch[@]}" -ge "$STAGE_BATCH" ] && flush_batch
