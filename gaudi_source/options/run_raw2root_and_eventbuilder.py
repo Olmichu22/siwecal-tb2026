@@ -21,6 +21,8 @@
 #   EVBLD_OUTPUT=/path/ecal_run.root \
 #   EVBLD_PEDESTAL_FILE=/path/Pedestal_..._highgain.txt \
 #   EVBLD_MIP_FILE=/path/MIP_pedestalsubmode1_..._highgain.txt \
+#   EVBLD_PEDESTAL_FILE_LOWGAIN=/path/Pedestal_..._lowgain.txt \
+#   EVBLD_MIP_FILE_LOWGAIN=/path/MIP_pedestalsubmode1_..._lowgain.txt \
 #       k4run gaudi_source/options/run_raw2root_and_eventbuilder.py
 #
 import os
@@ -46,6 +48,12 @@ if not evbld_out:
 no_calibration = os.environ.get("EVBLD_NO_CALIBRATION", "0") == "1"
 pedestal_file = os.environ.get("EVBLD_PEDESTAL_FILE", "")
 mip_file = os.environ.get("EVBLD_MIP_FILE", "")
+# Low-gain tables: optional, but only useful as a pair. With both set, a hit whose
+# raw adc_high >= AdcSaturationThreshold takes its energy from the low-gain branch
+# (the high-gain preamp is saturated there); with neither, the energy always comes
+# from the high gain, as before low-gain support existed.
+pedestal_file_lg = os.environ.get("EVBLD_PEDESTAL_FILE_LOWGAIN", "")
+mip_file_lg = os.environ.get("EVBLD_MIP_FILE_LOWGAIN", "")
 if not no_calibration and (not pedestal_file or not mip_file):
     raise SystemExit("Set EVBLD_PEDESTAL_FILE and EVBLD_MIP_FILE, or EVBLD_NO_CALIBRATION=1 for raw-ADC mode")
 
@@ -75,6 +83,9 @@ builder = EcalEventBuilder(
     NoCalibration=no_calibration,
     PedestalFile=pedestal_file,
     MipFile=mip_file,
+    PedestalFileLowGain=pedestal_file_lg,
+    MipFileLowGain=mip_file_lg,
+    AdcSaturationThreshold=int(os.environ.get("EVBLD_ADC_SATURATION", "1200")),
     PadMapDefaultFile=os.environ.get("EVBLD_PADMAP_DEFAULT", ""),
     PadMapSlabOverrides=pad_map_overrides,
     SlabZFile=os.environ.get("EVBLD_SLAB_Z_FILE", ""),

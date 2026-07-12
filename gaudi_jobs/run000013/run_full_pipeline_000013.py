@@ -73,10 +73,12 @@ def main():
     threshold_dac = read_threshold_dac(_RUN_SETTINGS_FILE)
     if threshold_dac < 0:
         raise SystemExit(f"ERROR: cannot read ThresholdDAC from {_RUN_SETTINGS_FILE}")
-    pedestal_file, mip_file = resolve_gaudi_calib_files(threshold_dac)
+    pedestal_file, mip_file, pedestal_file_lg, mip_file_lg = resolve_gaudi_calib_files(threshold_dac)
     print(f"[calib] {_RUN}: ThresholdDAC={threshold_dac} (from {_RUN_SETTINGS_FILE})")
     print(f"[calib] {_RUN}: pedestal={pedestal_file}")
     print(f"[calib] {_RUN}: mip={mip_file}")
+    print(f"[calib] {_RUN}: pedestal_lg={pedestal_file_lg or '(none -- no saturation recovery)'}")
+    print(f"[calib] {_RUN}: mip_lg={mip_file_lg or '(none -- no saturation recovery)'}")
 
     # Stage 1: raw2root + event building, one k4run process.
     raw_files = sorted(glob.glob(os.path.join(_RAW_DIR, f"{_RUN}_raw.bin*")))
@@ -92,6 +94,8 @@ def main():
         "EVBLD_RUN_ID": "13",
         "EVBLD_PEDESTAL_FILE": pedestal_file,
         "EVBLD_MIP_FILE": mip_file,
+        "EVBLD_PEDESTAL_FILE_LOWGAIN": pedestal_file_lg,
+        "EVBLD_MIP_FILE_LOWGAIN": mip_file_lg,
         "EVBLD_PADMAP_DEFAULT": _PADMAP_DEFAULT,
         "EVBLD_PADMAP_SLAB_OVERRIDES": f"12:{_PADMAP_SLAB12}",
         "EVBLD_SLAB_Z_FILE": _SLAB_Z_FILE,

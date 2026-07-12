@@ -42,35 +42,66 @@ class CalibrationTables {
   // calibration.py::_read_pedestal_file raises ValueError in that case
   // rather than silently substituting a value, and this port preserves that
   // hard-failure behaviour (the caller should fail the Gaudi component).
+  //
+  // The low-gain paths are OPTIONAL: pass them empty and hasLowGain() stays
+  // false, pedestalLg()/mipLg() are never consulted, and the hit energy is
+  // computed from the high gain exactly as before low-gain support existed.
+  // A threshold whose low-gain tables have not been produced therefore keeps
+  // working instead of silently reconstructing against absent calibration.
   static CalibrationTables fromFiles(const std::string& pedestalPath, const std::string& mipPath,
                                       double pedestalFallback, double defaultMipFallback, bool& ok,
-                                      std::string& error) {
+                                      std::string& error, const std::string& pedestalPathLg = "",
+                                      const std::string& mipPathLg = "") {
     CalibrationTables t;
     t.m_enabled = true;
     t.m_pedestalFallback = pedestalFallback;
 
     std::set<std::tuple<int, int, int>> pedMasked;
-    if (!t.readPedestalFile(pedestalPath, pedMasked, error)) {
+    if (!t.readPedestalFile(pedestalPath, t.m_pedestalMap, pedMasked, error)) {
       ok = false;
       return t;
     }
 
     std::set<std::tuple<int, int, int>> mipMasked;
-    t.readMipFile(mipPath, defaultMipFallback, mipMasked);
+    t.readMipFile(mipPath, defaultMipFallback, t.m_mipMap, t.m_defaultMip, mipMasked);
 
     t.m_masked = pedMasked;
     t.m_masked.insert(mipMasked.begin(), mipMasked.end());
+
+    if (!pedestalPathLg.empty() && !mipPathLg.empty()) {
+      std::set<std::tuple<int, int, int>> pedMaskedLg;
+      if (!t.readPedestalFile(pedestalPathLg, t.m_pedestalMapLg, pedMaskedLg, error)) {
+        ok = false;
+        return t;
+      }
+      std::set<std::tuple<int, int, int>> mipMaskedLg;
+      t.readMipFile(mipPathLg, defaultMipFallback, t.m_mipMapLg, t.m_defaultMipLg, mipMaskedLg);
+      t.m_maskedLg = pedMaskedLg;
+      t.m_maskedLg.insert(mipMaskedLg.begin(), mipMaskedLg.end());
+      t.m_hasLowGain = true;
+    }
+
     ok = true;
     return t;
   }
 
   bool enabled() const { return m_enabled; }
 
+  // True once low-gain tables were loaded; false keeps the pre-low-gain
+  // behaviour (energy always from the high gain).
+  bool hasLowGain() const { return m_hasLowGain; }
+
   // Pedestal for a channel/SCA (0 in raw mode, fallback if unknown).
   double pedestal(int slabId, int chipId, int channel, int sca) const {
     if (!m_enabled) return 0.0;
     auto it = m_pedestalMap.find({slabId, chipId, channel, sca});
     return it != m_pedestalMap.end() ? it->second : m_pedestalFallback;
+  }
+
+  double pedestalLg(int slabId, int chipId, int channel, int sca) const {
+    if (!m_enabled || !m_hasLowGain) return 0.0;
+    auto it = m_pedestalMapLg.find({slabId, chipId, channel, sca});
+    return it != m_pedestalMapLg.end() ? it->second : m_pedestalFallback;
   }
 
   // MIP scale for a channel (1 in raw mode, default-median if uncalibrated).
@@ -80,10 +111,28 @@ class CalibrationTables {
     return it != m_mipMap.end() ? it->second : m_defaultMip;
   }
 
-  // True for channels masked in EITHER the pedestal or MIP file.
+  double mipLg(int slabId, int chipId, int channel) const {
+    if (!m_enabled || !m_hasLowGain) return 1.0;
+    auto it = m_mipMapLg.find({slabId, chipId, channel});
+    return it != m_mipMapLg.end() ? it->second : m_defaultMipLg;
+  }
+
+  // True for channels masked in EITHER the pedestal or MIP file of the HIGH
+  // gain. Deliberately NOT unioned with the low-gain masks (which is what
+  // calibration.py does): a channel whose low-gain MIP fit failed is still a
+  // perfectly good high-gain channel, and unioning would zero out its energy
+  // for every unsaturated hit -- i.e. the overwhelming majority of them.
+  // Saturated hits on a low-gain-masked channel are handled in buildHit().
   bool isMasked(int slabId, int chipId, int channel) const {
     if (!m_enabled) return false;
     return m_masked.count({slabId, chipId, channel}) > 0;
+  }
+
+  // True when the LOW gain has no usable calibration for this channel, so a
+  // saturated hit there cannot be recovered.
+  bool isMaskedLg(int slabId, int chipId, int channel) const {
+    if (!m_enabled || !m_hasLowGain) return false;
+    return m_maskedLg.count({slabId, chipId, channel}) > 0;
   }
 
  private:
@@ -93,8 +142,8 @@ class CalibrationTables {
   // pad's 15 means must be either all-zero (masked) or all finite+nonzero
   // (calibrated) -- anything else is a hard error, matching Python's
   // ValueError (no silent substitution for a malformed pad).
-  bool readPedestalFile(const std::string& path, std::set<std::tuple<int, int, int>>& masked,
-                        std::string& error) {
+  bool readPedestalFile(const std::string& path, std::map<std::tuple<int, int, int, int>, double>& out,
+                        std::set<std::tuple<int, int, int>>& masked, std::string& error) {
     std::ifstream fin(path);
     if (!fin.is_open()) {
       error = "Cannot open pedestal file: " + path;
@@ -125,7 +174,7 @@ class CalibrationTables {
           std::all_of(means.begin(), means.end(), [](double m) { return std::isfinite(m) && m != 0.0; });
       if (allValid) {
         for (std::size_t sca = 0; sca < means.size(); ++sca) {
-          m_pedestalMap[{layer, chip, channel, static_cast<int>(sca)}] = means[sca];
+          out[{layer, chip, channel, static_cast<int>(sca)}] = means[sca];
         }
         continue;
       }
@@ -142,10 +191,11 @@ class CalibrationTables {
   // semantics: average the two middle values for an even count), or
   // defaultMipFallback if no channel was calibrated at all.
   void readMipFile(const std::string& path, double defaultMipFallback,
+                    std::map<std::tuple<int, int, int>, double>& out, double& defaultMipOut,
                     std::set<std::tuple<int, int, int>>& masked) {
     std::ifstream fin(path);
     if (!fin.is_open()) {
-      m_defaultMip = defaultMipFallback;
+      defaultMipOut = defaultMipFallback;
       return;
     }
     std::string line;
@@ -157,13 +207,13 @@ class CalibrationTables {
       double mpv;
       if (!(iss >> layer >> chip >> channel >> mpv)) continue;
       if (mpv > 0) {
-        m_mipMap[{layer, chip, channel}] = mpv;
+        out[{layer, chip, channel}] = mpv;
         mpvValues.push_back(mpv);
       } else {
         masked.insert({layer, chip, channel});
       }
     }
-    m_defaultMip = mpvValues.empty() ? defaultMipFallback : median(mpvValues);
+    defaultMipOut = mpvValues.empty() ? defaultMipFallback : median(mpvValues);
   }
 
   static double median(std::vector<double> values) {
@@ -174,11 +224,13 @@ class CalibrationTables {
   }
 
   bool m_enabled = false;
+  bool m_hasLowGain = false;
   double m_pedestalFallback = 250.0;
   double m_defaultMip = 1.0;
-  std::map<std::tuple<int, int, int, int>, double> m_pedestalMap;
-  std::map<std::tuple<int, int, int>, double> m_mipMap;
-  std::set<std::tuple<int, int, int>> m_masked;
+  double m_defaultMipLg = 1.0;
+  std::map<std::tuple<int, int, int, int>, double> m_pedestalMap, m_pedestalMapLg;
+  std::map<std::tuple<int, int, int>, double> m_mipMap, m_mipMapLg;
+  std::set<std::tuple<int, int, int>> m_masked, m_maskedLg;
 };
 
 }  // namespace k4siwecal

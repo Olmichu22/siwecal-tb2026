@@ -90,6 +90,7 @@ def main(argv=None):
 
     run_settings_file = os.path.join(raw_dir, "Run_Settings.txt")
 
+    pedestal_file_lg, mip_file_lg = "", ""
     if args.no_calibration:
         pedestal_file, mip_file = "", ""
     else:
@@ -105,10 +106,14 @@ def main(argv=None):
                 print(f"[calib] {run}: ThresholdDAC={th} (from {run_settings_file})")
             else:
                 print(f"[calib] {run}: ThresholdDAC={th} (forced via --th)")
-            auto_pedestal, auto_mip = resolve_gaudi_calib_files(th)
+            auto_pedestal, auto_mip, auto_pedestal_lg, auto_mip_lg = resolve_gaudi_calib_files(th)
             pedestal_file = pedestal_file or auto_pedestal
             mip_file = mip_file or auto_mip
+            pedestal_file_lg = pedestal_file_lg or auto_pedestal_lg
+            mip_file_lg = mip_file_lg or auto_mip_lg
         print(f"[calib] {run}: pedestal={pedestal_file}\n[calib] {run}: mip={mip_file}")
+        print(f"[calib] {run}: pedestal_lg={pedestal_file_lg or '(none -- no saturation recovery)'}\n"
+              f"[calib] {run}: mip_lg={mip_file_lg or '(none -- no saturation recovery)'}")
 
     run_id = args.run_id
     if run_id is None:
@@ -128,6 +133,8 @@ def main(argv=None):
         "EVBLD_OUTPUT": ecal_out,
         "EVBLD_RUN_ID": str(run_id),
         "EVBLD_NO_CALIBRATION": "1" if args.no_calibration else "0",
+        "EVBLD_PEDESTAL_FILE_LOWGAIN": pedestal_file_lg,
+        "EVBLD_MIP_FILE_LOWGAIN": mip_file_lg,
         "EVBLD_PEDESTAL_FILE": pedestal_file,
         "EVBLD_MIP_FILE": mip_file,
         "EVBLD_PADMAP_DEFAULT": padmap_default,

@@ -93,13 +93,33 @@ struct EcalEventBuilder final : Gaudi::Algorithm {
         return error() << "PedestalFile and MipFile must both be set unless NoCalibration=true" << endmsg,
                StatusCode::FAILURE;
       }
+      // Low-gain tables are optional but must be given as a PAIR: one without
+      // the other would silently reconstruct saturated hits against a missing
+      // pedestal or MIP scale.
+      const bool hasPedLg = !m_pedestalFileLowGain.value().empty();
+      const bool hasMipLg = !m_mipFileLowGain.value().empty();
+      if (hasPedLg != hasMipLg) {
+        return error() << "PedestalFileLowGain and MipFileLowGain must be set together (or both left empty "
+                          "to disable the low-gain saturation recovery)"
+                       << endmsg,
+               StatusCode::FAILURE;
+      }
       bool ok = false;
       std::string calibError;
       calib = k4siwecal::CalibrationTables::fromFiles(m_pedestalFile.value(), m_mipFile.value(),
                                                        m_pedestalFallback.value(), m_defaultMipFallback.value(), ok,
-                                                       calibError);
+                                                       calibError, m_pedestalFileLowGain.value(),
+                                                       m_mipFileLowGain.value());
       if (!ok) {
         return error() << calibError << endmsg, StatusCode::FAILURE;
+      }
+      if (calib.hasLowGain()) {
+        info() << "Low-gain calibration loaded: hits with raw adc_high >= " << m_adcSaturationThreshold.value()
+               << " take their energy from the low-gain branch" << endmsg;
+      } else {
+        warning() << "No low-gain calibration given: saturated high-gain hits will be under-read "
+                     "(set PedestalFileLowGain/MipFileLowGain to enable saturation recovery)"
+                  << endmsg;
       }
     }
 
@@ -130,6 +150,7 @@ struct EcalEventBuilder final : Gaudi::Algorithm {
     cfg.bcidOverflow = m_bcidOverflow.value();
     cfg.badValue = m_badValue.value();
     cfg.adcUnderflowThreshold = m_adcUnderflowThreshold.value();
+    cfg.adcSaturationThreshold = m_adcSaturationThreshold.value();
     cfg.maxHitsPerSca = m_maxHitsPerSca.value();
     cfg.maxHitsPerEvent = m_maxHitsPerEvent.value();
 
@@ -190,6 +211,11 @@ struct EcalEventBuilder final : Gaudi::Algorithm {
   // Calibration
   Gaudi::Property<std::string> m_pedestalFile{this, "PedestalFile", "", "Pedestal calibration text table"};
   Gaudi::Property<std::string> m_mipFile{this, "MipFile", "", "MIP calibration text table"};
+  Gaudi::Property<std::string> m_pedestalFileLowGain{
+      this, "PedestalFileLowGain", "",
+      "Low-gain pedestal table. Optional, but must be set together with MipFileLowGain; both empty disables "
+      "the low-gain saturation recovery and hit energy always comes from the high gain."};
+  Gaudi::Property<std::string> m_mipFileLowGain{this, "MipFileLowGain", "", "Low-gain MIP calibration text table"};
   Gaudi::Property<bool> m_noCalibration{this, "NoCalibration", false, "Raw-ADC mode: pedestal=0, mip=1"};
   Gaudi::Property<double> m_pedestalFallback{this, "PedestalFallback", 250.0, ""};
   Gaudi::Property<double> m_defaultMipFallback{this, "DefaultMipFallback", 20.0, ""};
@@ -210,6 +236,11 @@ struct EcalEventBuilder final : Gaudi::Algorithm {
   Gaudi::Property<int> m_bcidOverflow{this, "BcidOverflow", 4096, ""};
   Gaudi::Property<int> m_badValue{this, "BadValue", -999, ""};
   Gaudi::Property<int> m_adcUnderflowThreshold{this, "AdcUnderflowThreshold", 11, ""};
+  Gaudi::Property<int> m_adcSaturationThreshold{
+      this, "AdcSaturationThreshold", 1200,
+      "Raw (not pedestal-subtracted) high-gain ADC at/above which the high-gain preamp is taken to be "
+      "saturated and the energy is read from the low-gain branch instead. Only has an effect when the "
+      "low-gain tables are loaded."};
   // config.py's BuilderConfig.max_hits_per_sca defaults to math.inf ("disabled"),
   // but Gaudi's confdb2 generator can't serialize an infinite double property
   // default (emits invalid Python "inf.0" and fails the build) -- use a huge

@@ -57,6 +57,10 @@ struct BuilderConfig {
   long long bcidOverflow = 4096;
   long long badValue = -999;
   int adcUnderflowThreshold = 11;
+  // Raw (NOT pedestal-subtracted) high-gain ADC at/above which the high-gain
+  // preamp is taken to be saturated, so the hit energy is computed from the
+  // low-gain branch instead. Matches hit_collector.py's `adc_high < 1200`.
+  int adcSaturationThreshold = 1200;
   double maxHitsPerSca = 1.0e18;  // math.inf equivalent; see EcalEventBuilder.cpp for why not literal infinity
   int maxHitsPerEvent = 15360;  // 15 slabs * 16 chips * 64 channels
 };
@@ -389,12 +393,37 @@ class HitCollector {
     if (adcHigh <= m_cfg.adcUnderflowThreshold) return std::nullopt;
     const int adcLow = acq.adcLow(slab, chip, sca, channel);
 
-    const double pedestal = m_calib.pedestal(slabId, chipId, channel, sca);
-    const double mip = m_calib.mip(slabId, chipId, channel);
+    const double pedestalHg = m_calib.pedestal(slabId, chipId, channel, sca);
+    const double mipHg = m_calib.mip(slabId, chipId, channel);
+    // Low-gain pedestal, NOT the high-gain one: the two branches have their own
+    // baselines, so subtracting the high-gain pedestal from adc_low (as this
+    // did before low-gain support) yields a meaningless hit_lg. Without low-gain
+    // tables there is nothing better to subtract, so that old behaviour is kept
+    // rather than silently turning hit_lg into an unsubtracted raw ADC.
+    const double pedestalLg =
+        m_calib.hasLowGain() ? m_calib.pedestalLg(slabId, chipId, channel, sca) : pedestalHg;
+    const double mipLg = m_calib.mipLg(slabId, chipId, channel);
 
-    const double adcHighPedsub = adcHigh - pedestal;
+    const double adcHighPedsub = adcHigh - pedestalHg;
+    const double adcLowPedsub = adcLow - pedestalLg;
+
+    // The high-gain preamp saturates on large deposits, flattening adc_high and
+    // so under-reading the energy; above the saturation threshold the low-gain
+    // branch (which is still linear there) is used instead, with its own
+    // pedestal and MIP scale. Port of hit_collector.py:78-93.
     const bool isMasked = m_calib.isMasked(slabId, chipId, channel);
-    const double energyMip = isMasked ? 0.0 : ((mip > 0) ? (adcHighPedsub / mip) : 0.0);
+    const bool saturated = m_calib.hasLowGain() && adcHigh >= m_cfg.adcSaturationThreshold;
+    double energyMip = 0.0;
+    if (isMasked) {
+      energyMip = 0.0;
+    } else if (!saturated) {
+      energyMip = (mipHg > 0) ? (adcHighPedsub / mipHg) : 0.0;
+    } else if (!m_calib.isMaskedLg(slabId, chipId, channel) && mipLg > 0) {
+      energyMip = adcLowPedsub / mipLg;
+    }
+    // else: saturated in high gain AND unusable in low gain -> no energy can be
+    // assigned, so it stays 0 rather than being silently under-read from the
+    // flattened high-gain ADC.
 
     float x = std::numeric_limits<float>::quiet_NaN();
     float y = std::numeric_limits<float>::quiet_NaN();
@@ -409,7 +438,7 @@ class HitCollector {
     hit.channel = channel;
     hit.sca = sca;
     hit.adcHighPedsub = static_cast<float>(adcHighPedsub);
-    hit.adcLowPedsub = static_cast<float>(adcLow - pedestal);
+    hit.adcLowPedsub = static_cast<float>(adcLowPedsub);
     hit.energyMip = static_cast<float>(energyMip);
     hit.x = x;
     hit.y = y;
