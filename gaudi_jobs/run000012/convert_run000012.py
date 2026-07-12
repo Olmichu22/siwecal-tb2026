@@ -23,7 +23,7 @@ from k4FWCore import ApplicationMgr
 _RUN = "TB2026CERN_run_000012"
 
 _RAW_DIR = os.path.join("/eos/experiment/drdcalo/siw-ecal/TB2026-06/Data/rundata", _RUN)  # READ-ONLY
-_CONVERTED_DIR = os.path.join("/eos/experiment/drdcalo/siw-ecal/TB2026-06/Data/rundata_converted_test", _RUN)
+_CONVERTED_DIR = os.path.join("/eos/experiment/drdcalo/siw-ecal/TB2026-06/Data/rundata_converted_gaudi", _RUN)
 _SIWECALDECODED_OUT = os.path.join(_CONVERTED_DIR, f"{_RUN}.root")
 
 os.makedirs(_CONVERTED_DIR, exist_ok=True)

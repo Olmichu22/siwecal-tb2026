@@ -43,7 +43,7 @@ _OPTIONS_DIR = os.path.join(os.path.dirname(__file__), "..", "..", "gaudi_source
 _EVENT_BUILDER_STEERING = os.path.join(_OPTIONS_DIR, "run_event_builder.py")
 _PID_STEERING = os.path.join(_OPTIONS_DIR, "run_pid.py")
 
-_CONVERTED_DIR = os.path.join("/eos/experiment/drdcalo/siw-ecal/TB2026-06/Data/rundata_converted_test", _RUN)
+_CONVERTED_DIR = os.path.join("/eos/experiment/drdcalo/siw-ecal/TB2026-06/Data/rundata_converted_gaudi", _RUN)
 _SIWECALDECODED_IN = os.path.join(_CONVERTED_DIR, f"{_RUN}.root")  # produced by convert_run000012.py
 _ECAL_OUT = os.path.join(_CONVERTED_DIR, f"ecal_{_RUN}.root")
 _PID_OUT = os.path.join(_CONVERTED_DIR, f"ecal_{_RUN}.edm4hep.root")

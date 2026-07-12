@@ -40,7 +40,7 @@ _PID_STEERING = os.path.join(_OPTIONS_DIR, "run_pid.py")
 # Read-only source of raw DAQ chunk files (per-run subdirectories). NEVER
 # write or delete anything here. Matches run_calibration_batch.py.
 _DEFAULT_RAW_BASE = "/eos/experiment/drdcalo/siw-ecal/TB2026-06/Data/rundata"
-_DEFAULT_CONVERTED_DIR = "/eos/experiment/drdcalo/siw-ecal/TB2026-06/Data/rundata_converted_test"
+_DEFAULT_CONVERTED_DIR = "/eos/experiment/drdcalo/siw-ecal/TB2026-06/Data/rundata_converted_gaudi"
 
 
 def _assert_not_under(path, readonly_root):
