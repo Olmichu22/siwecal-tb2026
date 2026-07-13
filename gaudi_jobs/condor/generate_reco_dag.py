@@ -72,22 +72,44 @@ _CLEANUP = os.path.join(_REPO, "gaudi_jobs", "calibration", "condor", "cleanup_j
 
 
 def _convert_sh(out_dir):
+    # A job decodes a GROUP of chunks, each in its own k4run process.
+    #
+    # Why a group and not one chunk per job: a Condor job costs ~14 s of fixed
+    # overhead (slot, CVMFS, sourcing key4hep) to do ~1.5 s of decoding. At one
+    # chunk per job that overhead is paid 11,432 times for a campaign, and 11k
+    # queued jobs are themselves the bottleneck -- most sit idle waiting for a
+    # slot. Twenty chunks per job pays it 572 times instead, and each job still
+    # finishes in under a minute.
+    #
+    # Why still one k4run PER CHUNK inside the job, rather than handing all
+    # twenty to one decoder: it keeps the output exactly one chunk_NNNN.root per
+    # raw chunk, so nothing downstream (the event builder's glob, the calibration
+    # Fill) changes. Feeding several raw files to a single decoder does work --
+    # verified, it is not the data-loss risk it was once thought to be -- but it
+    # would collapse the output into one file per group for a couple of seconds
+    # per chunk, which is not worth the churn.
     content = f"""#!/bin/bash
 set -eo pipefail
-# convert.sh <chunk> <out_decoded> <run_settings>
-CHUNK="$1"; OUT_DECODED="$2"; RUN_SETTINGS="$3"
-
-# Idempotent: a chunk already decoded is left alone, so a partially completed
-# submit can simply be resubmitted (and a DAG rescue re-runs only what is missing).
-if [ -s "$OUT_DECODED" ]; then
-  echo "already decoded, skipping: $OUT_DECODED"
-  exit 0
-fi
+# convert.sh <grouplist> <run_settings>
+#   grouplist: text file, one "<raw_chunk> <out_decoded>" pair per line
+GROUPLIST="$1"; RUN_SETTINGS="$2"
 
 """ + env_wrapper_preamble() + f"""
-""" + mkdirs_line('$(dirname "$OUT_DECODED")') + f"""
-RAW_FILES="$CHUNK" RAW2ROOT_OUT="$OUT_DECODED" RAW2ROOT_RUN_SETTINGS_FILE="$RUN_SETTINGS" \\
-  k4run "{OPTIONS_DIR}/run_raw2root.py"
+N=0; SKIPPED=0
+while read -r CHUNK OUT_DECODED; do
+  [ -z "$CHUNK" ] && continue
+  # Idempotent: a chunk already decoded is left alone, so a partial submit can
+  # simply be resubmitted (and a DAG rescue re-runs only what is missing).
+  if [ -s "$OUT_DECODED" ]; then
+    SKIPPED=$((SKIPPED+1))
+    continue
+  fi
+""" + "  " + mkdirs_line('$(dirname "$OUT_DECODED")') + f"""
+  RAW_FILES="$CHUNK" RAW2ROOT_OUT="$OUT_DECODED" RAW2ROOT_RUN_SETTINGS_FILE="$RUN_SETTINGS" \\
+    k4run "{OPTIONS_DIR}/run_raw2root.py"
+  N=$((N+1))
+done < "$GROUPLIST"
+echo "decoded $N chunk(s), skipped $SKIPPED already done"
 """
     write_executable(os.path.join(out_dir, "convert.sh"), content)
 
@@ -168,7 +190,7 @@ queue
 def _convert_sub(out_dir, log_dir, run, request_memory, job_flavour):
     content = f"""universe                = vanilla
 executable              = {out_dir}/convert.sh
-arguments               = "$(chunk) $(out_decoded) $(run_settings)"
+arguments               = "$(grouplist) $(run_settings)"
 log                     = {log_dir}/convert_{run}_$(Process).log
 output                  = {log_dir}/convert_{run}_$(Process).out
 error                   = {log_dir}/convert_{run}_$(Process).err
@@ -179,7 +201,7 @@ should_transfer_files   = NO
 getenv                  = False
 periodic_release        = (JobStatus == 5) && (HoldReasonCode == 34) && (NumJobStarts < 5)
 +JobFlavour             = "{job_flavour}"
-queue chunk,out_decoded,run_settings from {out_dir}/chunklist_{run}.txt
+queue grouplist,run_settings from {out_dir}/grouplist_{run}.txt
 """
     write_text(os.path.join(out_dir, f"convert_{run}.sub"), content)
 
@@ -214,6 +236,11 @@ def main(argv=None):
                    help=f"Where <RUN>/ecal_*.root go (outside Data/). "
                         f"Default: {paths.reconstruction_dir()}")
     p.add_argument("--out-dir", required=True, help="Directory to write the DAG, subs, wrappers and logs into.")
+    p.add_argument("--chunks-per-job", type=int, default=20,
+                   help="Raw chunks decoded by ONE Condor job, each in its own k4run (default 20). "
+                        "A job costs ~14s of fixed overhead (slot, CVMFS, key4hep) for ~1.5s of "
+                        "decoding, so one chunk per job wastes ~90%% of the farm time it uses and "
+                        "floods the schedd; 20 keeps jobs under a minute and cuts both by ~8x.")
     p.add_argument("--convert-request-memory", type=int, default=7000,
                    help="request_memory in MB for a CONVERT (one-chunk decode) job. Default 7000; see "
                         "generate_convert_jobs.py for why it is this high.")
@@ -221,6 +248,11 @@ def main(argv=None):
                    help="request_memory in MB for a RECO job (event building holds a run's events in memory).")
     p.add_argument("--convert-job-flavour", default="microcentury", help="+JobFlavour for CONVERT (default 1h).")
     p.add_argument("--reco-job-flavour", default="workday", help="+JobFlavour for RECO (default 8h).")
+    p.add_argument("--convert-only", action="store_true",
+                   help="Only decode the raw chunks; no RECO, no VALIDATE. Use this to convert a "
+                        "whole campaign up front (the calibration Fill needs nothing else), then "
+                        "run the per-threshold reco DAGs afterwards -- their CONVERT nodes find the "
+                        "chunks already decoded and fall straight through to RECO.")
     p.add_argument("--no-validation", action="store_true",
                    help="Stop after RECO; do not run the validation stage.")
     p.add_argument("--validate-request-memory", type=int, default=6000,
@@ -256,13 +288,28 @@ def main(argv=None):
         if th < 0:
             print(f"ERROR: cannot read ThresholdDAC from {run_settings}", file=sys.stderr)
             return 1
-        ped, mip, ped_lg, mip_lg = resolve_gaudi_calib_files(th)
+        # In --convert-only mode the calibration tables need not exist yet: that is
+        # the whole point of converting first and calibrating (e.g. th210) after.
+        if args.convert_only:
+            ped = mip = ped_lg = mip_lg = ""
+        else:
+            ped, mip, ped_lg, mip_lg = resolve_gaudi_calib_files(th)
 
         cdir = chunks_dir(args.converted_dir, run)
         os.makedirs(cdir, exist_ok=True)
-        rows = [f"{c},{os.path.join(cdir, f'chunk_{i:04d}.root')},{run_settings}"
-                for i, c in enumerate(raw_chunks)]
-        write_text(os.path.join(out_dir, f"chunklist_{run}.txt"), "\n".join(rows) + "\n")
+        # One file per GROUP of chunks-per-job, each listing "<raw> <decoded>"
+        # pairs; the .sub queues one job per group file.
+        groups_dir = os.path.join(out_dir, "groups")
+        os.makedirs(groups_dir, exist_ok=True)
+        pairs = [(c, os.path.join(cdir, f"chunk_{i:04d}.root")) for i, c in enumerate(raw_chunks)]
+        rows = []
+        for g, start in enumerate(range(0, len(pairs), args.chunks_per_job)):
+            group = pairs[start:start + args.chunks_per_job]
+            gpath = os.path.join(groups_dir, f"{run}_g{g:04d}.txt")
+            write_text(gpath, "\n".join(f"{raw} {out}" for raw, out in group) + "\n")
+            rows.append(f"{gpath},{run_settings}")
+        write_text(os.path.join(out_dir, f"grouplist_{run}.txt"), "\n".join(rows) + "\n")
+        n_jobs = len(rows)
         _convert_sub(out_dir, log_dir, run, args.convert_request_memory, args.convert_job_flavour)
 
         digits = "".join(ch for ch in run.split("_")[-1] if ch.isdigit())
@@ -274,6 +321,10 @@ def main(argv=None):
 
         dag.append(f"JOB convert_{run} {out_dir}/convert_{run}.sub")
         dag.append(f"RETRY convert_{run} 3")
+        if args.convert_only:
+            dag.append("")
+            print(f"[{run}] th={th}  {len(raw_chunks)} chunk(s) in {n_jobs} job(s) -> {cdir}/   (convert only)")
+            continue
         dag.append(f"JOB reco_{run} {out_dir}/reco.sub")
         dag.append(
             f'VARS reco_{run} run="{run}" chunks="{os.path.join(cdir, "chunk_*.root")}" '
@@ -296,17 +347,20 @@ def main(argv=None):
                            f"{os.path.join(log_dir, f'validate_{run}')}")
         dag.append("")
 
-        print(f"[{run}] th={th}  {len(raw_chunks)} chunk(s) -> {cdir}/  reco -> {rdir}/")
+        print(f"[{run}] th={th}  {len(raw_chunks)} chunk(s) in {n_jobs} job(s) -> {cdir}/  reco -> {rdir}/")
         print(f"          calib: {os.path.basename(ped)} / {os.path.basename(mip)}"
               f"{'' if ped_lg else '   (no low-gain tables: no saturation recovery)'}")
 
     _convert_sh(out_dir)
-    _reco_sh(out_dir)
-    _reco_sub(out_dir, log_dir, args.reco_request_memory, args.reco_job_flavour)
-    if not args.no_validation:
+    if not args.convert_only:
+        _reco_sh(out_dir)
+        _reco_sub(out_dir, log_dir, args.reco_request_memory, args.reco_job_flavour)
+    if not args.convert_only and not args.no_validation:
         _validate_sh(out_dir)
         _validate_sub(out_dir, log_dir, args.validate_request_memory, args.validate_job_flavour)
-    dag_path = os.path.join(out_dir, "reco.dag")
+    # convert-only and the full pipeline coexist in one per-threshold folder, so
+    # they must not write the same file name.
+    dag_path = os.path.join(out_dir, "convert.dag" if args.convert_only else "reco.dag")
     write_text(dag_path, "\n".join(dag) + "\n")
     print(f"\n{len(run_folders)} run(s). Submit with:\n  condor_submit_dag {dag_path}")
     return 0
