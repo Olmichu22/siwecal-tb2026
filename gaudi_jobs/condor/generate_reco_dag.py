@@ -241,9 +241,14 @@ def main(argv=None):
                         "A job costs ~14s of fixed overhead (slot, CVMFS, key4hep) for ~1.5s of "
                         "decoding, so one chunk per job wastes ~90%% of the farm time it uses and "
                         "floods the schedd; 20 keeps jobs under a minute and cuts both by ~8x.")
-    p.add_argument("--convert-request-memory", type=int, default=7000,
-                   help="request_memory in MB for a CONVERT (one-chunk decode) job. Default 7000; see "
-                        "generate_convert_jobs.py for why it is this high.")
+    p.add_argument("--convert-request-memory", type=int, default=2000,
+                   help="request_memory in MB for a CONVERT job (default 2000). Measured peak RSS of a "
+                        "chunk decode is ~790 MB -- including run_000004's chunk 0100, the sparse muon "
+                        "chunk that used to peak at 22.7 GB and OOM-kill the job. That is what the old "
+                        "7000 was sized for; e74be8b made the decoder stream acquisitions into the tree "
+                        "instead of buffering a whole file, and the request was never brought back down. "
+                        "Asking 9x what you use does not just waste the farm -- it starves you of slots: "
+                        "few machines have 7 GB free per core, so 532 queued jobs were getting 12.")
     p.add_argument("--reco-request-memory", type=int, default=8000,
                    help="request_memory in MB for a RECO job (event building holds a run's events in memory).")
     p.add_argument("--convert-job-flavour", default="microcentury", help="+JobFlavour for CONVERT (default 1h).")
