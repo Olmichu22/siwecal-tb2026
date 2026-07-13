@@ -4,9 +4,13 @@ Batch driver for the Gaudi raw2root + pedestal/MIP calibration stages.
 
 Chains three ``k4run`` invocations per request:
 
-1. ``options/run_raw2root.py`` (skipped if the output siwecaldecoded ROOT
-   file already exists and ``--force-raw2root`` isn't given): decodes the raw
-   ``<run>_raw.bin_NNNN`` chunk files into ``<run>.root`` next to them.
+1. ``options/run_raw2root.py``, ONE k4run per raw chunk (skipped for chunks
+   already decoded, unless ``--force-raw2root``): decodes the raw
+   ``<run>_raw.bin_NNNN`` files into ``<converted-dir>/<run>/chunks/``, then
+   checks the acquisitions add up. It used to decode the whole run in a single
+   process, which silently lost ~75% of the acquisitions on some runs -- and a
+   calibration fitted on a quarter of the muons is not obviously wrong, just
+   quietly noisier. See gaudi_jobs/decode_chunks.py.
 2. ``options/run_pedestal_mip.py`` in ``Mode=Pedestal``.
 3. ``options/run_pedestal_mip.py`` in ``Mode=Mip`` (self-contained: it
    recomputes its own on-the-fly pedestal internally, see
@@ -72,10 +76,15 @@ import sys
 from siwecal_common import paths
 
 from calib_run_utils import DEFAULT_RAW_BASE as _DEFAULT_RAW_BASE
-from calib_run_utils import parse_run_folder_list, raw_chunk_files, run_threshold
+from calib_run_utils import parse_run_folder_list, run_threshold
+
+# decode_chunks lives one level up, in gaudi_jobs/: the "how to decode a run"
+# logic is shared with run_convert_batch.py / run_full_pipeline_batch.py so the
+# single-process decode bug cannot come back in one driver but not the others.
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."))
+from decode_chunks import assert_healthy, chunk_files, chunks_dir, decode_run  # noqa: E402
 
 _OPTIONS_DIR = os.path.join(os.path.dirname(__file__), "..", "..", "gaudi_source", "options")
-_RAW2ROOT_STEERING = os.path.join(_OPTIONS_DIR, "run_raw2root.py")
 _CALIB_STEERING = os.path.join(_OPTIONS_DIR, "run_pedestal_mip.py")
 
 # Where decoded siwecaldecoded ROOT files are written. Separate from
@@ -89,48 +98,21 @@ _DEFAULT_CONVERTED_DIR = "/eos/experiment/drdcalo/siw-ecal/TB2026-06/Data/rundat
 _CUMULATIVE_LABEL_PREFIX = "TB2026CERN_run_000th"
 
 
-def _assert_not_under(path, readonly_root):
-    """Refuse to write `path` if it resolves inside `readonly_root`."""
-    real_path = os.path.realpath(path)
-    real_root = os.path.realpath(readonly_root)
-    if real_path == real_root or real_path.startswith(real_root + os.sep):
-        raise SystemExit(
-            f"REFUSING to write inside the read-only raw data directory: {path} is under {readonly_root}"
-        )
+def _ensure_chunks(run, raw_dir, converted_dir, force):
+    """Decode `run` into <converted_dir>/<run>/chunks/, one k4run per raw chunk.
 
+    This used to decode the whole run in ONE k4run process, into a single
+    <run>.root. That silently dropped ~75% of the acquisitions on some runs (see
+    gaudi_jobs/decode_chunks.py) -- and a calibration fitted on a quarter of the
+    muons is not obviously wrong, just quietly noisier. Now it decodes per chunk
+    and verifies the acquisitions add up before anything is fitted.
 
-def _ensure_siwecaldecoded(run, raw_dir, converted_dir, force):
-    # SAFETY: raw_dir is read-only; the decoded output always goes to
-    # converted_dir, which must not be (or be under) raw_dir.
-    _assert_not_under(converted_dir, raw_dir)
-    os.makedirs(converted_dir, exist_ok=True)
-    out_file = os.path.join(converted_dir, f"{run}.root")
-    if os.path.exists(out_file) and not force:
-        print(f"[raw2root] {run}: using existing {out_file}")
-        return out_file
-
-    chunk_files = raw_chunk_files(raw_dir, run)
-    print(f"[raw2root] {run}: decoding {len(chunk_files)} chunk file(s) -> {out_file}")
-    # Pass the (potentially huge, e.g. 1369 chunks for run_000004) chunk
-    # list via a file, not the RAW_FILES env var directly -- a long enough
-    # comma-joined list blows the OS execve() argument/environment size
-    # limit ("Argument list too long").
-    file_list_path = os.path.join(converted_dir, f"{run}_raw_files.txt")
-    with open(file_list_path, "w") as f:
-        f.write("\n".join(chunk_files) + "\n")
-    env = {
-        **os.environ,
-        "RAW_FILES_LIST": file_list_path,
-        "RAW2ROOT_OUT": out_file,
-        # So the decoded tree's thresholdDac/acqWindowMs/... branches are
-        # actually populated (see EcalRawDecoder.cpp) instead of left at
-        # their -1 sentinel defaults.
-        "RAW2ROOT_RUN_SETTINGS_FILE": os.path.join(raw_dir, "Run_Settings.txt"),
-    }
-    result = subprocess.run(["k4run", _RAW2ROOT_STEERING], env=env)
-    if result.returncode != 0:
-        raise SystemExit(f"ERROR: raw2root k4run failed for {run}")
-    return out_file
+    Same layout the Condor DAGs write, so an already-decoded run is reused
+    instead of decoded a second time.
+    """
+    chunks = decode_run(run, raw_dir, converted_dir, force=force)
+    assert_healthy(chunks, run)
+    return chunks
 
 
 def _run_calibration(mode, input_files, gain, out_path, max_nhit, nslabs_hit, diagnostics):
@@ -162,15 +144,19 @@ def _run_calibration(mode, input_files, gain, out_path, max_nhit, nslabs_hit, di
 
 
 def _resolve_siwecaldecoded_files(run_folders, converted_dir, no_raw2root, force_raw2root):
+    """Every run's decoded chunks, flattened into one list for CALIB_INPUT_FILES
+    (the calibrator chains them, exactly as the Fill stage on Condor does)."""
     files = []
     for run_name, raw_dir in run_folders:
         if no_raw2root:
-            candidate = os.path.join(converted_dir, f"{run_name}.root")
-            if not os.path.exists(candidate):
-                raise SystemExit(f"ERROR: --no-raw2root but {candidate} does not exist")
-            files.append(candidate)
+            existing = chunk_files(converted_dir, run_name)
+            if not existing:
+                raise SystemExit(f"ERROR: --no-raw2root but no decoded chunks in "
+                                 f"{chunks_dir(converted_dir, run_name)}")
+            assert_healthy(existing, run_name)
+            files.extend(existing)
         else:
-            files.append(_ensure_siwecaldecoded(run_name, raw_dir, converted_dir, force_raw2root))
+            files.extend(_ensure_chunks(run_name, raw_dir, converted_dir, force_raw2root))
     return files
 
 
@@ -250,16 +236,16 @@ def main(argv=None):
                    help="Base directory used to resolve bare run names given in --runs "
                         f"(<raw-base>/<run>/). Default: {_DEFAULT_RAW_BASE}")
     p.add_argument("--converted-dir", default=_DEFAULT_CONVERTED_DIR,
-                   help="Where decoded siwecaldecoded <run>.root files are written "
+                   help="Where the decoded chunks are written: <converted-dir>/<run>/chunks/ "
                         f"(separate from the raw run folders). Default: {_DEFAULT_CONVERTED_DIR}")
     p.add_argument("--outdir", default=None,
                    help="Calibration output base directory. "
                         "Default: settings.yml calib_dir()/MuonCalib_gaudi")
     p.add_argument("--gain", choices=("high", "low", "both"), default="high")
     p.add_argument("--no-raw2root", action="store_true",
-                   help="Never decode raw binaries; the siwecaldecoded ROOT file(s) must already exist")
+                   help="Never decode raw binaries; the decoded chunks must already exist")
     p.add_argument("--force-raw2root", action="store_true",
-                   help="Re-decode raw binaries even if the siwecaldecoded ROOT file already exists")
+                   help="Re-decode every raw chunk, even those already decoded")
     stage = p.add_mutually_exclusive_group()
     stage.add_argument("--pedestal-only", action="store_true")
     stage.add_argument("--mip-only", action="store_true")

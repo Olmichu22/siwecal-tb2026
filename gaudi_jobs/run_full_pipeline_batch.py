@@ -1,10 +1,26 @@
 #!/usr/bin/env python
 """
-Generic/batch version of gaudi_jobs/run000013/run_full_pipeline_000013.py:
-raw2root -> event building -> PID/EDM4hep for any run, entirely in Gaudi/C++
-(except the thin Python subprocess orchestration between the two k4run
-processes -- see that script's module docstring for why two processes are
-needed).
+raw2root -> event building -> PID/EDM4hep for one run, locally.
+
+Three stages, not two:
+
+    1. decode   one k4run per RAW CHUNK -> <converted-dir>/<run>/chunks/
+                (+ a health check that the acquisitions add up)
+    2. build    one k4run chaining those chunks -> <reco-dir>/<run>/ecal_<run>.root
+    3. PID      one k4run -> <reco-dir>/<run>/ecal_<run>.edm4hep.root
+
+Stages 2 and 3 are separate processes because k4FWCore needs EvtMax fixed before
+the process starts, and the event count is only known once the event builder has
+run (run_pid.py reads it back from the ecal file).
+
+Stage 1 used to be folded into stage 2 -- a single k4run decoding every chunk of
+the run at once. That silently dropped ~75% of the acquisitions on some runs (see
+gaudi_jobs/decode_chunks.py). It is now one process per chunk, and the decode is
+verified before anything is reconstructed from it.
+
+For a whole campaign, do not use this: gaudi_jobs/condor/generate_reco_dag.py
+runs the same three stages with the chunks decoded in parallel on the farm. This
+script is the interactive path for one run.
 
 Calibration files come from ``MuonCalib_gaudi/{pedestals,mips}/th<N>/`` via
 siwecal_eventbuilder.cli.resolve_gaudi_calib_files(th). The threshold itself is
@@ -13,16 +29,15 @@ overrides it, so a run can no longer be reconstructed against another
 threshold's pedestals by accident. A threshold with no calibration folder stops
 the job.
 
-SAFETY: the raw data directory is READ-ONLY -- this script never writes
-there; decoded/reconstructed outputs go to --converted-dir, and this script
-never deletes anything.
+SAFETY: the raw data directory is READ-ONLY -- this script never writes there,
+and it never deletes anything. Decoded chunks go to --converted-dir (they are
+data); everything the reconstruction produces goes to --reco-dir, outside Data/.
 
 Example::
 
     python gaudi_jobs/run_full_pipeline_batch.py --run TB2026CERN_run_000013
 """
 import argparse
-import glob
 import os
 import subprocess
 import sys
@@ -33,21 +48,17 @@ from siwecal_common import paths
 from siwecal_eventbuilder.cli import resolve_gaudi_calib_files
 from siwecal_eventbuilder.run_settings import read_threshold_dac
 
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from decode_chunks import assert_healthy, chunks_dir, decode_run  # noqa: E402
+
 _OPTIONS_DIR = os.path.join(os.path.dirname(__file__), "..", "gaudi_source", "options")
-_RAW2ROOT_AND_EVBLD_STEERING = os.path.join(_OPTIONS_DIR, "run_raw2root_and_eventbuilder.py")
+_EVBLD_STEERING = os.path.join(_OPTIONS_DIR, "run_event_builder.py")
 _PID_STEERING = os.path.join(_OPTIONS_DIR, "run_pid.py")
 
 # Read-only source of raw DAQ chunk files (per-run subdirectories). NEVER
 # write or delete anything here. Matches run_calibration_batch.py.
 _DEFAULT_RAW_BASE = "/eos/experiment/drdcalo/siw-ecal/TB2026-06/Data/rundata"
 _DEFAULT_CONVERTED_DIR = "/eos/experiment/drdcalo/siw-ecal/TB2026-06/Data/rundata_converted_gaudi"
-
-
-def _assert_not_under(path, readonly_root):
-    real_path = os.path.realpath(path)
-    real_root = os.path.realpath(readonly_root)
-    if real_path == real_root or real_path.startswith(real_root + os.sep):
-        raise SystemExit(f"REFUSING to write inside the read-only raw data directory: {path} is under {readonly_root}")
 
 
 def main(argv=None):
@@ -60,8 +71,14 @@ def main(argv=None):
                                                               "(default: parsed from the run name)")
     p.add_argument("--raw-dir", default=None,
                    help=f"Directory with <run>_raw.bin_NNNN chunk files (READ-ONLY). Default: {_DEFAULT_RAW_BASE}/<run>/")
-    p.add_argument("--converted-dir", default=None,
-                   help=f"Output base directory (separate from --raw-dir). Default: {_DEFAULT_CONVERTED_DIR}/<run>/")
+    p.add_argument("--converted-dir", default=_DEFAULT_CONVERTED_DIR,
+                   help=f"Where the decoded chunks go: <converted-dir>/<run>/chunks/. "
+                        f"Default: {_DEFAULT_CONVERTED_DIR}")
+    p.add_argument("--reco-dir", default=paths.reconstruction_dir(),
+                   help=f"Where the reconstruction goes: <reco-dir>/<run>/ecal_<run>.root (outside Data/). "
+                        f"Default: {paths.reconstruction_dir()}")
+    p.add_argument("--force-decode", action="store_true",
+                   help="Re-decode chunks that already exist (default: reuse them)")
     p.add_argument("--pedestal-file", default=None, help="Override the auto-resolved pedestal calibration file")
     p.add_argument("--mip-file", default=None, help="Override the auto-resolved MIP calibration file")
     p.add_argument("--no-calibration", action="store_true", help="Raw-ADC mode: pedestal=0, mip=1")
@@ -75,13 +92,11 @@ def main(argv=None):
 
     run = args.run
     raw_dir = args.raw_dir or os.path.join(_DEFAULT_RAW_BASE, run)
-    converted_dir = args.converted_dir or os.path.join(_DEFAULT_CONVERTED_DIR, run)
-    _assert_not_under(converted_dir, raw_dir)
-    os.makedirs(converted_dir, exist_ok=True)
 
-    siwecaldecoded_out = os.path.join(converted_dir, f"{run}.root")
-    ecal_out = os.path.join(converted_dir, f"ecal_{run}.root")
-    pid_out = os.path.join(converted_dir, f"ecal_{run}.edm4hep.root")
+    reco_dir = os.path.join(args.reco_dir, run)
+    os.makedirs(reco_dir, exist_ok=True)
+    ecal_out = os.path.join(reco_dir, f"ecal_{run}.root")
+    pid_out = os.path.join(reco_dir, f"ecal_{run}.edm4hep.root")
 
     mappings_dir = paths.geometry_dir()
     padmap_default = args.padmap_default or os.path.join(mappings_dir, "fev10_rotate_chip_channel_x_y_mapping.txt")
@@ -120,16 +135,17 @@ def main(argv=None):
         digits = "".join(c for c in run.split("_")[-1] if c.isdigit())
         run_id = int(digits) if digits else -1
 
-    # Stage 1: raw2root + event building, one k4run process.
-    raw_files = sorted(glob.glob(os.path.join(raw_dir, f"{run}_raw.bin*")))
-    if not raw_files:
-        raise SystemExit(f"ERROR: no raw chunk files found in {raw_dir}")
-    print(f"[stage1] {run}: {len(raw_files)} raw chunk file(s) -> {siwecaldecoded_out} -> {ecal_out}")
+    # Stage 1: decode, one k4run per raw chunk. assert_healthy() refuses to go on
+    # if the acquisitions do not add up -- the check whose absence let a
+    # 75%-truncated run_000012 be reconstructed and believed.
+    chunks = decode_run(run, raw_dir, args.converted_dir, force=args.force_decode)
+    assert_healthy(chunks, run)
+
+    # Stage 2: event building, chaining those chunks (EcalEventBuilder's InputFiles).
+    print(f"[stage2] {run}: event building from {len(chunks)} chunk(s) -> {ecal_out}")
     env = {
         **os.environ,
-        "RAW_FILES": ",".join(raw_files),
-        "RAW2ROOT_OUT": siwecaldecoded_out,
-        "RAW2ROOT_RUN_SETTINGS_FILE": run_settings_file,
+        "EVBLD_INPUT_FILES": os.path.join(chunks_dir(args.converted_dir, run), "chunk_*.root"),
         "EVBLD_OUTPUT": ecal_out,
         "EVBLD_RUN_ID": str(run_id),
         "EVBLD_NO_CALIBRATION": "1" if args.no_calibration else "0",
@@ -141,15 +157,15 @@ def main(argv=None):
         "EVBLD_PADMAP_SLAB_OVERRIDES": f"12:{padmap_slab12}",
         "EVBLD_SLAB_Z_FILE": slab_z_file,
     }
-    result = subprocess.run(["k4run", _RAW2ROOT_AND_EVBLD_STEERING], env=env)
+    result = subprocess.run(["k4run", _EVBLD_STEERING], env=env)
     if result.returncode != 0:
-        raise SystemExit(f"ERROR: stage1 (raw2root + event building) k4run failed for {run}")
+        raise SystemExit(f"ERROR: stage2 (event building) k4run failed for {run}")
 
-    # Stage 2: PID/EDM4hep -- separate k4run process, see module docstring.
+    # Stage 3: PID/EDM4hep -- separate k4run process, see module docstring.
     f = ROOT.TFile.Open(ecal_out)
     n_events = int(f.Get("ecal").GetEntries())
     f.Close()
-    print(f"[stage2] {run}: {n_events} reconstructed event(s) -> {pid_out}")
+    print(f"[stage3] {run}: {n_events} reconstructed event(s) -> {pid_out}")
     env = {
         **os.environ,
         "ECAL_FILE": ecal_out,
@@ -160,7 +176,7 @@ def main(argv=None):
     }
     result = subprocess.run(["k4run", _PID_STEERING], env=env)
     if result.returncode != 0:
-        raise SystemExit(f"ERROR: stage2 (PID/EDM4hep) k4run failed for {run}")
+        raise SystemExit(f"ERROR: stage3 (PID/EDM4hep) k4run failed for {run}")
 
     print(f"\n[Done] {pid_out}")
     return 0
