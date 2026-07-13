@@ -24,10 +24,10 @@ same pattern already used by gaudi_jobs/run_calibration_batch.py's two-stage
 chaining and gaudi_jobs/run_pid_batch.py).
 
 SAFETY: the raw data directory is READ-ONLY -- this script never writes
-there. The pedestal/MIP calibration tables used below (th230,
-MuonCalib_it2_corrected run_000004) come from a DIFFERENT data-taking run
-than the electron physics run being converted (000013), matching how
-pedestal/MIP calibration is generated in practice (see
+there. The pedestal/MIP calibration tables are resolved from MuonCalib_gaudi
+for the run's own ThresholdDAC (read from its Run_Settings.txt), and come from
+a DIFFERENT data-taking run than the electron physics run being converted
+(000013), matching how pedestal/MIP calibration is generated in practice (see
 gaudi_jobs/run_calibration_batch.py).
 
 Usage::
@@ -45,28 +45,21 @@ import sys
 import ROOT
 
 from siwecal_common import paths
+from siwecal_eventbuilder.cli import resolve_gaudi_calib_files
+from siwecal_eventbuilder.run_settings import read_threshold_dac
 
 _RUN = "TB2026CERN_run_000013"
-_TH = "230"
 
 _OPTIONS_DIR = os.path.join(os.path.dirname(__file__), "..", "..", "gaudi_source", "options")
 _RAW2ROOT_AND_EVBLD_STEERING = os.path.join(_OPTIONS_DIR, "run_raw2root_and_eventbuilder.py")
 _PID_STEERING = os.path.join(_OPTIONS_DIR, "run_pid.py")
 
 _RAW_DIR = os.path.join("/eos/experiment/drdcalo/siw-ecal/TB2026-06/Data/rundata", _RUN)  # READ-ONLY
-_CONVERTED_DIR = os.path.join("/eos/experiment/drdcalo/siw-ecal/TB2026-06/Data/rundata_converted_test", _RUN)
+_RUN_SETTINGS_FILE = os.path.join(_RAW_DIR, "Run_Settings.txt")
+_CONVERTED_DIR = os.path.join("/eos/experiment/drdcalo/siw-ecal/TB2026-06/Data/rundata_converted_gaudi", _RUN)
 _SIWECALDECODED_OUT = os.path.join(_CONVERTED_DIR, f"{_RUN}.root")
 _ECAL_OUT = os.path.join(_CONVERTED_DIR, f"ecal_{_RUN}.root")
 _PID_OUT = os.path.join(_CONVERTED_DIR, f"ecal_{_RUN}.edm4hep.root")
-
-# th230 calibration from TB2026CERN_run_000004 alone (the only muon/MIP
-# calibration run at this threshold -- eudaq_255/eudaq_256 are electron runs
-# and must not be used), MaxNhit=2/NSlabsHit=5, chip-fit + global MIP
-# fallback, instead of the old MuonCalib_it2_corrected/run_000004 reference
-# tables.
-_CALIB_BASE = os.path.join(paths.calib_dir(), "MuonCalib_gaudi")
-_PEDESTAL_FILE = os.path.join(_CALIB_BASE, "pedestals", f"th{_TH}", "Pedestal_TB2026CERN_run_000004_highgain.txt")
-_MIP_FILE = os.path.join(_CALIB_BASE, "mips", f"th{_TH}", "MIP_pedestalsubmode1_TB2026CERN_run_000004_highgain.txt")
 
 _MAPPINGS_DIR = paths.geometry_dir()
 _PADMAP_DEFAULT = os.path.join(_MAPPINGS_DIR, "fev10_rotate_chip_channel_x_y_mapping.txt")
@@ -77,6 +70,16 @@ _SLAB_Z_FILE = os.path.join(_MAPPINGS_DIR, "slab_z_positions.yml")
 def main():
     os.makedirs(_CONVERTED_DIR, exist_ok=True)
 
+    threshold_dac = read_threshold_dac(_RUN_SETTINGS_FILE)
+    if threshold_dac < 0:
+        raise SystemExit(f"ERROR: cannot read ThresholdDAC from {_RUN_SETTINGS_FILE}")
+    pedestal_file, mip_file, pedestal_file_lg, mip_file_lg = resolve_gaudi_calib_files(threshold_dac)
+    print(f"[calib] {_RUN}: ThresholdDAC={threshold_dac} (from {_RUN_SETTINGS_FILE})")
+    print(f"[calib] {_RUN}: pedestal={pedestal_file}")
+    print(f"[calib] {_RUN}: mip={mip_file}")
+    print(f"[calib] {_RUN}: pedestal_lg={pedestal_file_lg or '(none -- no saturation recovery)'}")
+    print(f"[calib] {_RUN}: mip_lg={mip_file_lg or '(none -- no saturation recovery)'}")
+
     # Stage 1: raw2root + event building, one k4run process.
     raw_files = sorted(glob.glob(os.path.join(_RAW_DIR, f"{_RUN}_raw.bin*")))
     if not raw_files:
@@ -86,11 +89,13 @@ def main():
         **os.environ,
         "RAW_FILES": ",".join(raw_files),
         "RAW2ROOT_OUT": _SIWECALDECODED_OUT,
-        "RAW2ROOT_RUN_SETTINGS_FILE": os.path.join(_RAW_DIR, "Run_Settings.txt"),
+        "RAW2ROOT_RUN_SETTINGS_FILE": _RUN_SETTINGS_FILE,
         "EVBLD_OUTPUT": _ECAL_OUT,
         "EVBLD_RUN_ID": "13",
-        "EVBLD_PEDESTAL_FILE": _PEDESTAL_FILE,
-        "EVBLD_MIP_FILE": _MIP_FILE,
+        "EVBLD_PEDESTAL_FILE": pedestal_file,
+        "EVBLD_MIP_FILE": mip_file,
+        "EVBLD_PEDESTAL_FILE_LOWGAIN": pedestal_file_lg,
+        "EVBLD_MIP_FILE_LOWGAIN": mip_file_lg,
         "EVBLD_PADMAP_DEFAULT": _PADMAP_DEFAULT,
         "EVBLD_PADMAP_SLAB_OVERRIDES": f"12:{_PADMAP_SLAB12}",
         "EVBLD_SLAB_Z_FILE": _SLAB_Z_FILE,

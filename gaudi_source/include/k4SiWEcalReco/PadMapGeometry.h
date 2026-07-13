@@ -163,6 +163,16 @@ class SlabGeometry {
     return std::numeric_limits<double>::quiet_NaN();
   }
 
+  // Radiation lengths of W in THIS slab's absorber alone -- the sampling weight
+  // w_over_x0[slab] of EcalShowerVars.h::hitWeights. NOT slabX0(), which is the
+  // cumulative depth up to and including `slab` (that one is what hit_X0 holds).
+  double slabWOverX0(int slab) const {
+    if (slab < 0 || static_cast<std::size_t>(slab) >= m_slabWThicknessMm.size()) {
+      return 0.0;
+    }
+    return m_slabWThicknessMm[slab] / kWX0Mm;
+  }
+
   // Cumulative radiation lengths of W traversed up to and including `slab`.
   double slabX0(int slab) const {
     if (slab < 0 || static_cast<std::size_t>(slab) >= m_slabWThicknessMm.size()) {

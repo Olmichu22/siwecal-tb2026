@@ -145,21 +145,24 @@ One entry per BCID window. Per-hit branches are variable-length, counted by
 | nhit_chip    | Number of distinct ``(slab, chip)`` pairs with hits .  |
 | sum_hg       | Sum of pedestal-subtracted high-gain ADC over all hits |
 | sum_energy   | Sum of calibrated energy over all hits                 |
+| sum_w_energy | Sum of `hit_w_energy` over all hits                     |
 | hit_slab     | physical slab slot (ib, 0..14)                         |
 | hit_chip     | hardware chip ID (chipid)                              |
 | hit_chan     | pixel index (ipix, 0..63)                              |
 | hit_sca      | SCA memory cell (isca, 0..14)                          |
-| hit_hg       | high-gain ADC minus pedestal                           |
-| hit_lg       | low-gain ADC minus pedestal                            |
-| hit_energy   | high-gain signal in MIP units                          |
+| hit_hg       | high-gain ADC minus the high-gain pedestal            |
+| hit_lg       | low-gain ADC minus the low-gain pedestal              |
+| hit_energy   | signal in MIP units. From the high gain, except on a hit whose raw `adc_high` saturates the preamp (`AdcSaturationThreshold`, 1900), where it comes from the low gain with its own pedestal and MIP scale |
+| hit_w_energy | `hit_energy * W[slab] / X0`: the sampling correction. The layers do not all sit behind the same absorber (2.8 / 4.2 / 5.6 mm of W), so a MIP in a thick-absorber layer stands for more incident energy than one in a thin layer. Summing it over an event gives the same quantity as the PID's `weighte` |
 | hit_x        | transverse position in mm                              |
 | hit_y        | transverse position in mm                              |
 | hit_z        | longitudinal position in mm                            |
+| hit_X0       | **cumulative** radiation lengths of W up to and including this slab (not the local absorber depth — that is the weight inside `hit_w_energy`) |
 | hit_ismasked | masked in ped or MIP file                              |
 
 ### EDM4hep PID file (`ecal_<run>.edm4hep.root`)
 
-One podio `events` frame per cut-passing event. Three collections plus five
+One podio `events` frame per cut-passing event. Three collections plus six
 parallel per-hit `UserDataCollection`s. The legacy column each maps to (read back
 by `siwecal_common.edm4hep_pid`) is shown in parentheses.
 
@@ -176,7 +179,8 @@ by `siwecal_common.edm4hep_pid`) is shown in parentheses.
 | `ECalHitChan` (UserData)                  | pixel index 0..63 (→ `hit_chan`)                               |
 | `ECalHitSca` (UserData)                   | SCA memory cell 0..14 (→ `hit_sca`)                            |
 | `ECalHitHG` (UserData)                    | high-gain ADC minus pedestal (→ `hit_hg`)                      |
-| `ECalHitLG` (UserData)                    | low-gain ADC minus pedestal (→ `hit_lg`)                       |
+| `ECalHitLG` (UserData)                    | low-gain ADC minus the low-gain pedestal (→ `hit_lg`)          |
+| `ECalHitWE` (UserData)                    | sampling-corrected energy (→ `hit_w_energy`)                   |
 | `ECalPid` (`Cluster`) `.shapeParameters`  | the per-event metrics, one cluster/event (see table below)      |
 
 The `shapeParameters` floats are stored in a fixed order (names listed once in

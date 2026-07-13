@@ -6,6 +6,8 @@
 #   EVBLD_OUTPUT=/path/ecal_run.root \
 #   EVBLD_PEDESTAL_FILE=/path/Pedestal_..._highgain.txt \
 #   EVBLD_MIP_FILE=/path/MIP_pedestalsubmode1_..._highgain.txt \
+#   EVBLD_PEDESTAL_FILE_LOWGAIN=/path/Pedestal_..._lowgain.txt \
+#   EVBLD_MIP_FILE_LOWGAIN=/path/MIP_pedestalsubmode1_..._lowgain.txt \
 #       k4run gaudi_source/options/run_event_builder.py
 #
 # threshold_dac is read directly from the siwecaldecoded tree's thresholdDac
@@ -16,6 +18,7 @@
 # All work happens in EcalEventBuilder::initialize(); EvtMax=1 is enough
 # since execute() is a no-op (this is a global reduction over an entire run,
 # not a per-event k4FWCore transform -- see EcalEventBuilder.cpp).
+import glob
 import os
 
 from Gaudi.Configuration import INFO
@@ -23,9 +26,19 @@ from Configurables import EventDataSvc
 from Configurables import EcalEventBuilder
 from k4FWCore import ApplicationMgr
 
+# EVBLD_INPUT is one siwecaldecoded file; EVBLD_INPUT_FILES is a comma-separated
+# list (or a glob) of them, chained in order -- that is how a run decoded in
+# parallel is event-built straight from its chunks, with no merge step. The
+# output is a single ecal file either way.
 input_file = os.environ.get("EVBLD_INPUT", "")
-if not input_file:
-    raise SystemExit("Set EVBLD_INPUT to the input siwecaldecoded ROOT file")
+input_files_raw = os.environ.get("EVBLD_INPUT_FILES", "")
+input_files = [f.strip() for f in input_files_raw.split(",") if f.strip()]
+if len(input_files) == 1 and glob.has_magic(input_files[0]):
+    input_files = sorted(glob.glob(input_files[0]))
+    if not input_files:
+        raise SystemExit(f"EVBLD_INPUT_FILES glob matched nothing: {input_files_raw}")
+if not input_file and not input_files:
+    raise SystemExit("Set EVBLD_INPUT (one file) or EVBLD_INPUT_FILES (comma-separated list, or a glob)")
 
 output_file = os.environ.get("EVBLD_OUTPUT", "")
 if not output_file:
@@ -34,6 +47,12 @@ if not output_file:
 no_calibration = os.environ.get("EVBLD_NO_CALIBRATION", "0") == "1"
 pedestal_file = os.environ.get("EVBLD_PEDESTAL_FILE", "")
 mip_file = os.environ.get("EVBLD_MIP_FILE", "")
+# Low-gain tables: optional, but only useful as a pair. With both set, a hit whose
+# raw adc_high >= AdcSaturationThreshold takes its energy from the low-gain branch
+# (the high-gain preamp is saturated there); with neither, the energy always comes
+# from the high gain, as before low-gain support existed.
+pedestal_file_lg = os.environ.get("EVBLD_PEDESTAL_FILE_LOWGAIN", "")
+mip_file_lg = os.environ.get("EVBLD_MIP_FILE_LOWGAIN", "")
 if not no_calibration and (not pedestal_file or not mip_file):
     raise SystemExit("Set EVBLD_PEDESTAL_FILE and EVBLD_MIP_FILE, or EVBLD_NO_CALIBRATION=1 for raw-ADC mode")
 
@@ -42,6 +61,7 @@ pad_map_overrides = [e for e in os.environ.get("EVBLD_PADMAP_SLAB_OVERRIDES", ""
 builder = EcalEventBuilder(
     "EcalEventBuilder",
     InputFile=input_file,
+    InputFiles=input_files,
     TreeName=os.environ.get("EVBLD_TREE", "siwecaldecoded"),
     OutputFile=output_file,
     RunId=int(os.environ.get("EVBLD_RUN_ID", "-1")),
@@ -49,6 +69,9 @@ builder = EcalEventBuilder(
     NoCalibration=no_calibration,
     PedestalFile=pedestal_file,
     MipFile=mip_file,
+    PedestalFileLowGain=pedestal_file_lg,
+    MipFileLowGain=mip_file_lg,
+    AdcSaturationThreshold=int(os.environ.get("EVBLD_ADC_SATURATION", "1900")),
     PadMapDefaultFile=os.environ.get("EVBLD_PADMAP_DEFAULT", ""),
     PadMapSlabOverrides=pad_map_overrides,
     SlabZFile=os.environ.get("EVBLD_SLAB_Z_FILE", ""),

@@ -24,6 +24,7 @@
 #include "Gaudi/Property.h"
 
 #include "k4SiWEcalReco/EcalShowerVars.h"
+#include "k4SiWEcalReco/PadMapGeometry.h"  // SlabGeometry: the ONE tungsten geometry
 
 #include <memory>
 #include <string>
@@ -58,10 +59,25 @@ struct EcalPidTransformer final
 
   StatusCode initialize() override {
     m_coder = std::make_unique<dd4hep::DDSegmentation::BitFieldCoder>(m_cellIDEncoding.value());
-    if (static_cast<int>(m_wThicknesses.value().size()) != m_nLayers.value())
-      return error() << "WThicknesses length != NLayers" << endmsg, StatusCode::FAILURE;
+
+    // The sampling weights come from the SAME SlabGeometry the event builder
+    // uses for hit_w_energy/hit_X0, not from a second list living here. They
+    // used to be an independent literal in this file, and an independent list
+    // is an independent chance to be wrong: `weighte` and `hit_w_energy` are
+    // the same quantity summed at different stages, so they must not be able to
+    // disagree. WThicknesses stays as an explicit escape hatch (empty = use the
+    // geometry).
+    const k4siwecal::SlabGeometry geom = m_slabZFile.value().empty()
+                                             ? k4siwecal::SlabGeometry::defaults()
+                                             : k4siwecal::SlabGeometry::fromYamlFile(m_slabZFile.value());
     m_wOverX0.clear();
-    for (double w : m_wThicknesses.value()) m_wOverX0.push_back(w / m_wX0.value());
+    if (m_wThicknesses.value().empty()) {
+      for (int slab = 0; slab < m_nLayers.value(); ++slab) m_wOverX0.push_back(geom.slabWOverX0(slab));
+    } else {
+      if (static_cast<int>(m_wThicknesses.value().size()) != m_nLayers.value())
+        return error() << "WThicknesses length != NLayers" << endmsg, StatusCode::FAILURE;
+      for (double w : m_wThicknesses.value()) m_wOverX0.push_back(w / m_wX0.value());
+    }
 
     // Build and publish the shapeParameterNames metadata.
     m_paramNames = buildParamNames();
@@ -142,11 +158,15 @@ struct EcalPidTransformer final
 
   Gaudi::Property<int> m_nLayers{this, "NLayers", 15, "Number of ECAL layers"};
   // double (not float) to bit-match metrics.py's float64 W/X0 weights.
+  Gaudi::Property<std::string> m_slabZFile{
+      this, "SlabZFile", "",
+      "slab_z_positions.yml; empty = the compiled-in geometry defaults. Same file/defaults the event builder "
+      "uses, so weighte and hit_w_energy always share one tungsten geometry."};
   Gaudi::Property<std::vector<double>> m_wThicknesses{
-      this, "WThicknesses",
-      {2.8, 4.2, 4.2, 4.2, 4.2, 4.2, 4.2, 4.2, 4.2, 5.6, 5.6, 5.6, 5.6, 5.6, 5.6},
-      "Per-slab tungsten thickness [mm]"};
-  Gaudi::Property<double> m_wX0{this, "WX0", 3.5, "Tungsten radiation length [mm]"};
+      this, "WThicknesses", {},
+      "Per-slab tungsten thickness [mm]. Empty (the default) = take it from the slab geometry, which is what "
+      "you want; set it only to deliberately override the geometry."};
+  Gaudi::Property<double> m_wX0{this, "WX0", k4siwecal::kWX0Mm, "Tungsten radiation length [mm]"};
   Gaudi::Property<std::string> m_showerProfile{this, "ShowerProfile", "nhit",
                                                "Profile for shower flag: nhit|sume|weighte"};
   Gaudi::Property<float> m_showerEThreshold{this, "ShowerEThreshold", 5.0f, ""};

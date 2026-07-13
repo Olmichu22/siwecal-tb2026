@@ -26,9 +26,13 @@ DEFAULT_RUN = "TB2026CERN_run_000013"
 
 # Tungsten radiation length [mm]; the per-hit weight is E * W[slab] / X0.
 W_X0_MM = 3.5
-# Per-slab tungsten thickness [mm], resolved from Tungsten_thickness.yml
-# (slab 0 behind 2.8 mm, slabs 1-7 behind 4.2 mm, slabs 8-14 behind 5.6 mm).
-W_THICKNESSES_DEFAULT = (2.8,) + (4.2,) * 7 + (5.6,) * 7
+# Per-slab tungsten thickness [mm], resolved from mappings/Tungsten_thickness.yml
+# (slab 0 behind 2.8 mm, slabs 1-8 behind 4.2 mm, slabs 9-14 behind 5.6 mm).
+# Slab 8 sits behind 4.2 mm, NOT 5.6: this constant and Tungsten_thickness.yml
+# both used to put the first t3 plate in front of slab 8, disagreeing with the
+# detector and with the C++ pipeline. Keep in step with
+# PadMapGeometry.h::kDefaultSlabWThicknessMm, which is the same 15 values.
+W_THICKNESSES_DEFAULT = (2.8,) + (4.2,) * 8 + (5.6,) * 6
 # Per-slab physical z position [mm], mirrors
 # event_display/conversion/slab_z_positions.yml (also the source of ``hit_z``).
 SLAB_Z_MM_DEFAULT = (0.0, 11.0, 22.0, 33.0, 44.0, 55.0, 66.0, 77.0,

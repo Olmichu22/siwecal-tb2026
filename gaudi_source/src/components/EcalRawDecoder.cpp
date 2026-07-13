@@ -31,8 +31,11 @@
 #include "TString.h"
 #include "TTree.h"
 
+#include <algorithm>
+#include <cstddef>
 #include <fstream>
 #include <memory>
+#include <set>
 #include <string>
 #include <vector>
 
@@ -66,40 +69,41 @@ struct EcalRawDecoder final : Gaudi::Algorithm {
     }
     bindBranches(*tree, *acq, runSettings);
 
+    // Stream each flushed acquisition straight into the tree and drop it,
+    // instead of collecting a whole file's worth in a vector first: an
+    // Acquisition is ~5.5MB and a sparse (muon) chunk decodes into thousands
+    // of them, so buffering them all peaked at >20GB per job. The sink keeps
+    // memory flat (only the cycle-buffer window is ever live).
     long long totalCycles = 0;
+    const auto sink = [&](const k4siwecal::Acquisition& a) {
+      *acq = a;
+      tree->Fill();
+      ++totalCycles;
+    };
+
     if (m_resetStatePerInputFile.value()) {
       for (const auto& path : m_inputFiles.value()) {
-        std::vector<k4siwecal::Acquisition> flushed;
-        if (!decodeFileWithRetry(path, flushed)) {
+        const long long before = totalCycles;
+        if (!decodeFileWithRetry(path, sink)) {
           return error() << "Could not decode " << path << " without repeated cycles after retries" << endmsg,
                  StatusCode::FAILURE;
         }
-        for (const auto& a : flushed) {
-          *acq = a;
-          tree->Fill();
-        }
-        totalCycles += static_cast<long long>(flushed.size());
-        info() << "EcalRawDecoder: decoded " << flushed.size() << " acquisition cycles from " << path << endmsg;
+        info() << "EcalRawDecoder: decoded " << (totalCycles - before) << " acquisition cycles from " << path
+               << endmsg;
       }
     } else {
       k4siwecal::CycleAssembler assembler(m_maxReadoutCycleJump.value(), m_bcidThreshold.value());
-      std::vector<k4siwecal::Acquisition> flushed;
       for (const auto& path : m_inputFiles.value()) {
-        if (!streamFile(path, assembler, flushed)) {
+        if (!streamFile(path, assembler, sink)) {
           return error() << "Cannot open raw file: " << path << endmsg, StatusCode::FAILURE;
         }
       }
-      assembler.drain(flushed);
+      drainAssembler(assembler, sink);
       if (assembler.repeatedCycleCount() > 0) {
         warning() << "Repeated cycles detected across the combined input; MaxReadoutCycleJump="
                   << m_maxReadoutCycleJump.value()
                   << " may be too small (ResetStatePerInputFile=false disables the automatic retry)" << endmsg;
       }
-      for (const auto& a : flushed) {
-        *acq = a;
-        tree->Fill();
-      }
-      totalCycles = static_cast<long long>(flushed.size());
     }
 
     fout->cd();
@@ -186,37 +190,84 @@ struct EcalRawDecoder final : Gaudi::Algorithm {
     tree.Branch("gainSelectionThreshold", &runSettings.gainSelectionThreshold, "gainSelectionThreshold/I");
   }
 
-  // Streams one raw file's frames into `assembler`, appending any flushed
-  // acquisitions into `flushed`. Returns false only if the file cannot be
-  // opened.
-  bool streamFile(const std::string& path, k4siwecal::CycleAssembler& assembler,
-                   std::vector<k4siwecal::Acquisition>& flushed) const {
+  // Streams one raw file's frames into `assembler`, invoking `sink` for each
+  // acquisition the moment it flushes (the transient `flushed` vector holds at
+  // most the one cycle a single addFrame can release, so memory stays flat).
+  // Returns false only if the file cannot be opened.
+  template <typename Sink>
+  bool streamFile(const std::string& path, k4siwecal::CycleAssembler& assembler, const Sink& sink) const {
     std::ifstream fin(path, std::ios::binary);
     if (!fin.is_open()) return false;
     k4siwecal::RawFrameReader reader(fin, m_eudaqFormat.value());
     std::vector<unsigned char> frameBytes;
+    std::vector<k4siwecal::Acquisition> flushed;
     while (reader.nextFrame(frameBytes)) {
       assembler.addFrame(frameBytes, flushed);
+      for (const auto& a : flushed) sink(a);
+      flushed.clear();
     }
     return true;
   }
 
-  // Decodes one chunk file with a fresh CycleAssembler, escalating
-  // MaxReadoutCycleJump by x10 and re-reading from scratch (bounded to a
+  // Flushes the assembler's remaining buffered cycles at EOF through `sink`.
+  // The transient vector is bounded by the cycle-buffer window (~MaxReadoutCycleJump
+  // acquisitions), not the whole file.
+  template <typename Sink>
+  static void drainAssembler(k4siwecal::CycleAssembler& assembler, const Sink& sink) {
+    std::vector<k4siwecal::Acquisition> flushed;
+    assembler.drain(flushed);
+    for (const auto& a : flushed) sink(a);
+  }
+
+  // Cheap key-only pre-scan: replays CycleAssembler's exact eviction rule
+  // (evict the smallest-key cycle once more than `maxJump` distinct cycles are
+  // buffered) reading ONLY each frame's cycle-id key (decodeCycleId, ~32
+  // bytes/frame) -- never decoding the frame payload's Gray-coded ADC/BCID
+  // data. Returns CycleAssembler::repeatedCycleCount() for this window without
+  // paying the decode cost, so decodeFileWithRetry can pick the right window
+  // BEFORE the single streaming decode pass fills the tree (a streaming pass
+  // can't be un-filled, so the window must be settled up front). Open failures
+  // return 0 and are surfaced later by the decode pass itself.
+  std::size_t countRepeatedCyclesKeyOnly(const std::string& path, int maxJump) const {
+    std::ifstream fin(path, std::ios::binary);
+    if (!fin.is_open()) return 0;
+    k4siwecal::RawFrameReader reader(fin, m_eudaqFormat.value());
+    std::vector<unsigned char> frameBytes;
+    std::set<int> buffered;      // cycle keys currently in the window (mirrors m_cycles)
+    std::vector<int> seenKeys;   // every key as it first entered the window (mirrors m_seenKeys)
+    while (reader.nextFrame(frameBytes)) {
+      const int key = k4siwecal::decodeCycleId(frameBytes);
+      if (buffered.insert(key).second) {
+        seenKeys.push_back(key);
+        if (static_cast<int>(buffered.size()) > maxJump) {
+          buffered.erase(buffered.begin());  // smallest key: std::set is sorted, like m_cycles.begin()
+        }
+      }
+    }
+    std::vector<int> uniq = seenKeys;
+    std::sort(uniq.begin(), uniq.end());
+    uniq.erase(std::unique(uniq.begin(), uniq.end()), uniq.end());
+    return seenKeys.size() - uniq.size();
+  }
+
+  // Decodes one chunk file, escalating MaxReadoutCycleJump by x10 (bounded to a
   // handful of attempts) if repeated cycles are detected, mirroring
-  // ConvertDirectorySL_Raw.cc:66-71's `while(result==false)` retry loop.
-  bool decodeFileWithRetry(const std::string& path, std::vector<k4siwecal::Acquisition>& flushed) const {
+  // ConvertDirectorySL_Raw.cc:66-71's `while(result==false)` retry loop. The
+  // window is chosen by the key-only pre-scan first, then a single streaming
+  // decode pass emits acquisitions through `sink` -- so a repeated-cycle window
+  // never reaches the tree.
+  template <typename Sink>
+  bool decodeFileWithRetry(const std::string& path, const Sink& sink) const {
     int maxJump = m_maxReadoutCycleJump.value();
     constexpr int kMaxAttempts = 6;
     for (int attempt = 0; attempt < kMaxAttempts; ++attempt) {
-      k4siwecal::CycleAssembler assembler(maxJump, m_bcidThreshold.value());
-      flushed.clear();
-      if (!streamFile(path, assembler, flushed)) {
-        error() << "Cannot open raw file: " << path << endmsg;
-        return false;
-      }
-      assembler.drain(flushed);
-      if (assembler.repeatedCycleCount() == 0) {
+      if (countRepeatedCyclesKeyOnly(path, maxJump) == 0) {
+        k4siwecal::CycleAssembler assembler(maxJump, m_bcidThreshold.value());
+        if (!streamFile(path, assembler, sink)) {
+          error() << "Cannot open raw file: " << path << endmsg;
+          return false;
+        }
+        drainAssembler(assembler, sink);
         return true;
       }
       warning() << "Repeated cycles detected in " << path << " with MaxReadoutCycleJump=" << maxJump

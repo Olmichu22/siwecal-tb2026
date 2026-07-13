@@ -36,6 +36,7 @@ gaudi_jobs/calibration/run_thresholds*.txt
 
 # --- Generated Condor pipeline artifacts (gaudi_jobs/calibration/condor/generate_*.py) ---
 gaudi_jobs/calibration/condor/generated/
+gaudi_jobs/condor/generated/
 
 # --- Local machine config: settings.yml holds your private paths, so it is NOT
 #     versioned. Copy settings.example.yml -> settings.yml and edit per machine. ---
@@ -51,3 +52,6 @@ settings.yml
 # build artifacts
 build/
 k4SiWEcalReco/build/
+
+# local diagnostic plots (not versioned)
+diagnostics/

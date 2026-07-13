@@ -133,6 +133,6 @@ in a dedicated EOS scratch area, `.../Data/calib_fill_scratch/{decoded,hist}/`.
   scratch area) — cleanup is the user's call, not automated by any script
   here.
 - Decoded/intermediate output always goes to a separate location
-  (`rundata_converted_test/` for `run_calibration_batch.py`,
+  (`rundata_converted_gaudi/` for `run_calibration_batch.py`,
   `calib_fill_scratch/` for the Condor pipeline), never mixed with the raw
   data or with each other.
