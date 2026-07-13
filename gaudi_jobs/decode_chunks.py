@@ -5,25 +5,22 @@ chunk -- and check that nothing was lost.
 
 Why this module exists
 ----------------------
-Every driver here used to decode a whole run inside a SINGLE k4run process,
-passing the full chunk list via ``RAW_FILES_LIST``. That **silently drops
-acquisitions**. Measured 2026-07-13:
+Decoding a run's raw chunks one-per-process is what makes the Condor fan-out
+possible: N chunks decode on N workers instead of one process grinding through
+them. That is the ONLY reason. Multi-file decoding in a single process is
+correct -- run_000012's 292 chunks decoded in one k4run give 119,211 entries,
+exactly what 292 separate processes give.
 
-    run_000012:    30,020 acq  (one process)  vs  119,211 acq  (per chunk)
-    run_000004:   752,414 acq  (one process)  vs 3,005,607 acq  (per chunk)
-    run_000013:   110,265 acq  (one process)  vs   110,265 acq  (identical)
+(For a while this module claimed the single-process path silently dropped ~75%
+of the acquisitions. That was wrong: the number came from reading a ROOT file
+that was still being written. It does not reproduce. Retracted 2026-07-13.)
 
-Nothing fails. No warning is printed. The output is a perfectly valid ROOT file
-holding a quarter of the data -- and it is run-dependent, which is what makes it
-dangerous: run_000013 came through untouched, so a spot check on the wrong run
-"confirms" the code is fine. run_000012's energy distribution had sigma/mu = 1.06
-(nonsense: a width larger than the mean) and only became physical (0.31) once it
-was decoded per chunk.
-
-The mechanism was never pinned down -- a 3-file test shows no loss, so it is not
-simply "chaining raw files"; it only bites at scale, on some runs. Rather than
-keep hunting it, decode one chunk per process: that path is exercised by the
-Condor DAGs on every run we have, and it is verifiably lossless.
+assert_healthy() below is kept anyway, because a decode CAN go wrong in ways
+nothing else would notice, and the check costs one scan of the chunk headers.
+Note what it does and does not see: it compares tree entries against the largest
+acqNumber, so it catches a decode that skipped acquisitions -- but not one that
+simply stopped early, which stays internally consistent (ratio ~1.0) while
+holding a fraction of the run. Against truncation, compare with the raw.
 
 Chunks are the decoded data. They are NOT an intermediate to be merged away:
 the calibration Fill reads them, and the event builder chains them
@@ -124,8 +121,9 @@ def decode_health(paths, tree="siwecaldecoded"):
     """Cheap check that no acquisitions were dropped.
 
     In a healthy decode there is one tree entry per acquisition, so the largest
-    ``acqNumber`` is about the entry count. The single-process decode this module
-    replaces produced a ratio of ~4 -- three quarters of the acquisitions gone.
+    ``acqNumber`` is about the entry count. A ratio well above 1 means acquisitions
+    were skipped. (Boundary-split acquisitions push it slightly BELOW 1 -- two
+    entries for one acqNumber -- so 0.88 is healthy, not suspicious.)
 
     Returns ``(entries, max_acq, ratio)``; ratio is NaN when the chain is empty.
     """
@@ -144,9 +142,10 @@ def decode_health(paths, tree="siwecaldecoded"):
 def assert_healthy(paths, run, tree="siwecaldecoded", max_ratio=1.5):
     """Fail loudly if a decode looks like it dropped acquisitions.
 
-    This is the check whose absence let a 75%-truncated run_000012 be
-    reconstructed, plotted and believed. It costs one pass over the chunk
-    headers, so there is no reason not to run it every time.
+    Catches a decode that SKIPPED acquisitions. It does NOT catch one that stopped
+    early: a truncated file stays internally consistent (entries and acqNumber both
+    small, ratio ~1.0) and sails through. Only a comparison against the raw would
+    see that. Cheap enough -- one pass over the chunk headers -- to run every time.
     """
     entries, max_acq, ratio = decode_health(paths, tree=tree)
     if entries == 0:
