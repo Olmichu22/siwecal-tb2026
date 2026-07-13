@@ -312,7 +312,9 @@ data_dir:                                   # heavy run/event ROOT files (NOT in
 calib_dir:    ./calibration                 # pedestal / MIP files (vendored)
 geometry_dir: ./mappings                    # pad maps, slab z, tungsten map
 configs_dir:  ./configs/data                # data_reference*.yml run lists
-output_dir:   ./validation_output           # validation plots / results
+reconstruction_dir:                         # reconstructed events + validation,
+  /eos/.../TB2026-06/Reconstruction         #   one folder per run, OUTSIDE Data/
+output_dir:   null                          # validation base (null = reconstruction_dir)
 pid_dir:      null                          # gaudi_source outputs (null = next to input)
 cache_dir:    null                          # legacy *.valcache.root (null = next to input)
 ```

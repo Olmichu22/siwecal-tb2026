@@ -24,11 +24,18 @@ So: decode chunks in parallel, keep them, and let the event builder chain them
 ecal_<run>.root and one ecal_<run>.edm4hep.root -- only the intermediate merge
 disappears.
 
-Layout, per run, under --converted-dir:
+Layout, per run. Decoded chunks are DATA and stay under --converted-dir;
+everything the reconstruction produces goes to --reco-dir, one folder per run:
 
-    <RUN>/chunks/chunk_0000.root ...   decoded (CONVERT)
-    <RUN>/ecal_<RUN>.root              event-built (RECO)
-    <RUN>/ecal_<RUN>.edm4hep.root      PID/EDM4hep (RECO)
+    Data/rundata_converted_gaudi/<RUN>/chunks/chunk_0000.root ...  decoded (CONVERT)
+    Reconstruction/<RUN>/ecal_<RUN>.root                           event-built (RECO)
+    Reconstruction/<RUN>/ecal_<RUN>.edm4hep.root                   PID/EDM4hep (RECO)
+
+The validation writes its plots/results into that same Reconstruction/<RUN>/
+(siwecal_common.paths.output_dir defaults to the reconstruction base and the
+validation labels each sample by run name), so a run's reconstructed events and
+the plots made from them live together, and the whole area can be regenerated
+from Data/ without ever writing there.
 
 Calibration tables are resolved per run from its own ThresholdDAC (read from the
 run's Run_Settings.txt), exactly as the serial drivers do, so runs taken at
@@ -166,7 +173,10 @@ def main(argv=None):
                    help="Comma-separated run folder path(s) or bare run name(s).")
     p.add_argument("--raw-base", default=None, help="Base dir to resolve bare run names against.")
     p.add_argument("--converted-dir", default=DEFAULT_CONVERTED_DIR,
-                   help=f"Where <RUN>/chunks/ and <RUN>/ecal_*.root go. Default: {DEFAULT_CONVERTED_DIR}")
+                   help=f"Where the decoded <RUN>/chunks/ go. Default: {DEFAULT_CONVERTED_DIR}")
+    p.add_argument("--reco-dir", default=paths.reconstruction_dir(),
+                   help=f"Where <RUN>/ecal_*.root go (outside Data/). "
+                        f"Default: {paths.reconstruction_dir()}")
     p.add_argument("--out-dir", required=True, help="Directory to write the DAG, subs, wrappers and logs into.")
     p.add_argument("--convert-request-memory", type=int, default=7000,
                    help="request_memory in MB for a CONVERT (one-chunk decode) job. Default 7000; see "
@@ -216,8 +226,10 @@ def main(argv=None):
 
         digits = "".join(ch for ch in run.split("_")[-1] if ch.isdigit())
         run_id = int(digits) if digits else -1
-        ecal_out = os.path.join(args.converted_dir, run, f"ecal_{run}.root")
-        pid_out = os.path.join(args.converted_dir, run, f"ecal_{run}.edm4hep.root")
+        rdir = os.path.join(args.reco_dir, run)
+        os.makedirs(rdir, exist_ok=True)
+        ecal_out = os.path.join(rdir, f"ecal_{run}.root")
+        pid_out = os.path.join(rdir, f"ecal_{run}.edm4hep.root")
 
         dag.append(f"JOB convert_{run} {out_dir}/convert_{run}.sub")
         dag.append(f"RETRY convert_{run} 3")
@@ -233,7 +245,7 @@ def main(argv=None):
             dag.append(f"SCRIPT POST reco_{run} {_CLEANUP} $RETURN {os.path.join(log_dir, f'reco_{run}')}")
         dag.append("")
 
-        print(f"[{run}] th={th}  {len(raw_chunks)} chunk(s) -> {cdir}/")
+        print(f"[{run}] th={th}  {len(raw_chunks)} chunk(s) -> {cdir}/  reco -> {rdir}/")
         print(f"          calib: {os.path.basename(ped)} / {os.path.basename(mip)}"
               f"{'' if ped_lg else '   (no low-gain tables: no saturation recovery)'}")
 
