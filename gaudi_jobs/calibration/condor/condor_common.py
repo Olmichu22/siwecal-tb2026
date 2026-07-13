@@ -49,17 +49,15 @@ def mkdirs_line(dir_expr):
     return f'python3 -c "import os, sys; os.makedirs(sys.argv[1], exist_ok=True)" "{dir_expr}"\n'
 
 
-# Where a fully converted run is PUBLISHED, one directory per run holding one
-# ROOT file named after it: <converted_dir>/<RUN>/<RUN>.root. This is the
-# collaboration's own layout (cf. rundata_converted_old/, and the runs written
-# by gaudi_jobs/run000012, run000013 and run_calibration_batch.py) -- calibration
-# runs follow it too, they are not a special case.
+# Where a run's decoded data lives: <converted_dir>/<RUN>/chunks/.
+#
+# There is deliberately no merged per-run <RUN>.root any more. Every run used to
+# get one, to match the collaboration's one-file-per-run layout, but nothing reads
+# it: the calibration Fill reads the chunks and so does the event builder
+# (EcalEventBuilder chains them via InputFiles). It was ~223 GB of duplicate data,
+# and for run_000004 (~176 GB of chunks) it cannot even exist -- that crosses
+# ROOT's 100 GB TTree::fgMaxTreeSize, which is what killed the hadd.
 DEFAULT_CONVERTED_DIR = "/eos/experiment/drdcalo/siw-ecal/TB2026-06/Data/rundata_converted_gaudi"
-
-
-def converted_run_file(converted_dir, run):
-    """The published converted file for `run`: <converted_dir>/<RUN>/<RUN>.root."""
-    return os.path.join(converted_dir, run, f"{run}.root")
 
 
 def chunks_dir(converted_dir, run):
