@@ -20,17 +20,18 @@ OPTIONS_DIR = os.path.join(REPO_ROOT, "gaudi_source", "options")
 # release so the AFS-resident gaudi_source/build is ABI-compatible.
 KEY4HEP_RELEASE = "2026-04-08"
 
-# EOS scratch area for the Condor pipeline's intermediate files. NEVER
-# auto-deleted by any script here (see the repo-wide "never delete anything
-# under /Data/" rule).
+# EOS scratch area for the Fill stage's histograms. NEVER auto-deleted by any
+# script here (see the repo-wide "never delete anything under /Data/" rule).
 #
-# Deliberately still under rundata_converted_test/ even though converted
-# events now go to rundata_converted_gaudi/: this holds ~1.1 TB of already
-# validated per-chunk/per-run/per-threshold histograms (incl. the merged
-# merged_th220/th230.root the current calibration tables were fitted from).
-# It is calibration scratch, not converted events, and repointing it would
-# orphan all of it and force a full re-fill for no gain.
-DEFAULT_FILL_SCRATCH_DIR = "/eos/experiment/drdcalo/siw-ecal/TB2026-06/Data/rundata_converted_test/calib_fill_scratch"
+# Sits at the top level of Data/, NOT under a rundata_converted_* area: these
+# are calibration histograms, not converted events, and the previous home
+# (rundata_converted_test/) was deleted wholesale in July 2026 precisely
+# because it looked like a scratch area for converted events. That took the
+# merged_th220/th230.root the current MIP/pedestal tables were fitted from with
+# it -- the tables themselves survived only because they live in git, under
+# calibration/MuonCalib_gaudi/. Re-fitting now means re-running Fill from the
+# chunks in rundata_converted_gaudi/<RUN>/chunks/.
+DEFAULT_FILL_SCRATCH_DIR = "/eos/experiment/drdcalo/siw-ecal/TB2026-06/Data/calib_fill_scratch"
 
 # IMPORTANT: shell `mkdir -p` reproducibly FAILS on this EOS FUSE mount --
 # even creating a single new level under an already-existing, writable
@@ -48,17 +49,15 @@ def mkdirs_line(dir_expr):
     return f'python3 -c "import os, sys; os.makedirs(sys.argv[1], exist_ok=True)" "{dir_expr}"\n'
 
 
-# Where a fully converted run is PUBLISHED, one directory per run holding one
-# ROOT file named after it: <converted_dir>/<RUN>/<RUN>.root. This is the
-# collaboration's own layout (cf. rundata_converted_old/, and the runs written
-# by gaudi_jobs/run000012, run000013 and run_calibration_batch.py) -- calibration
-# runs follow it too, they are not a special case.
+# Where a run's decoded data lives: <converted_dir>/<RUN>/chunks/.
+#
+# There is deliberately no merged per-run <RUN>.root any more. Every run used to
+# get one, to match the collaboration's one-file-per-run layout, but nothing reads
+# it: the calibration Fill reads the chunks and so does the event builder
+# (EcalEventBuilder chains them via InputFiles). It was ~223 GB of duplicate data,
+# and for run_000004 (~176 GB of chunks) it cannot even exist -- that crosses
+# ROOT's 100 GB TTree::fgMaxTreeSize, which is what killed the hadd.
 DEFAULT_CONVERTED_DIR = "/eos/experiment/drdcalo/siw-ecal/TB2026-06/Data/rundata_converted_gaudi"
-
-
-def converted_run_file(converted_dir, run):
-    """The published converted file for `run`: <converted_dir>/<RUN>/<RUN>.root."""
-    return os.path.join(converted_dir, run, f"{run}.root")
 
 
 def chunks_dir(converted_dir, run):

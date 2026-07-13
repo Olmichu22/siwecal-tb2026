@@ -56,6 +56,12 @@ def parse_args(argv=None):
                            "compare energies within it.")
     p.add_argument("--out", default=DEFAULT_OUTPUT_DIR,
                    help="External output base directory")
+    p.add_argument("--results-id", type=int, default=None,
+                   help="Fix the id of this invocation's results table (Draft/results_id<NN>.*) "
+                        "instead of taking the next one free on disk. REQUIRED when several "
+                        "validations run concurrently -- the Condor VALIDATE stage passes one id "
+                        "per run, because parallel jobs auto-allocating would all pick the same "
+                        "id and overwrite each other's table.")
     # Combined grid vs individual plots (default: produce both).
     grid = p.add_mutually_exclusive_group()
     grid.add_argument("--grid-only", action="store_true",
@@ -108,7 +114,8 @@ def main(argv=None):
     make_grid = not args.no_grid
     runner = ValidationRunner(layout, config=PlotConfig(),
                               make_individual=make_individual,
-                              make_grid=make_grid)
+                              make_grid=make_grid,
+                              run_id=args.results_id)
 
     if args.all or args.point is not None:
         with open(args.cfg) as handle:

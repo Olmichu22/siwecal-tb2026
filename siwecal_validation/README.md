@@ -28,9 +28,13 @@ For each input file the pipeline (one class per concern) does:
    (energy histogram with a Gaussian fit, MIP-likeness, nHit-vs-⟨Z⟩, ...),
    produced individually and/or as a combined grid.
 4. **Results** (`results.py`, `output.py`) — a structured output tree under
-   `output_dir`, plus `results.csv` / `results.txt` (signal rate, fitted μ/σ,
-   summary metrics). In `--all`/`--point` mode it also makes cross-energy summary
-   plots (energy calibration, resolution vs E).
+   `output_dir` (which defaults to the reconstruction area, so a run's plots land
+   in `Reconstruction/<RUN>/`, beside the events they were made from), plus
+   `Draft/results_id<NN>.csv` / `.txt` (signal rate, fitted μ/σ, summary metrics).
+   Those tables span runs and get one pair of files per invocation, so they live
+   in `Draft/` instead of loose at the top of the output base. In `--all`/`--point`
+   mode it also makes cross-energy summary plots (energy calibration,
+   resolution vs E) under `summary/`.
 
 `PlotConfig` (`config.py`) holds the tunables (layer count, fit windows,
 tungsten map, shower thresholds, ...). Tungsten thickness and slab z default to

@@ -49,7 +49,7 @@ class ValidationRunner:
 
     def __init__(self, layout: OutputLayout, config: PlotConfig = None,
                  plotters=DEFAULT_PLOTTERS, make_individual=True,
-                 make_grid=True):
+                 make_grid=True, run_id: int = None):
         self._layout = layout
         self._config = config or PlotConfig()
         self._plotters = plotters
@@ -59,7 +59,12 @@ class ValidationRunner:
         # One run id per invocation, shared by the summary plots and the
         # results table so they stay associated (and never overwrite a
         # previous run with a different cut).
-        self._run_id = layout.allocate_run_id()
+        #
+        # `run_id` must be passed when several validations run CONCURRENTLY (the
+        # Condor VALIDATE stage does): allocate_run_id() picks the next id free
+        # *on disk*, so parallel jobs would all see the same one and clobber each
+        # other's results table.
+        self._run_id = run_id if run_id is not None else layout.allocate_run_id()
         print(f"[Run id] {layout.id_token(self._run_id)}")
 
     # ------------------------------------------------------- source picking -
