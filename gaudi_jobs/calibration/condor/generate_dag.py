@@ -87,21 +87,37 @@ def _check_decoded_chunks(run_folders, converted_dir):
 
 
 def _fill_sh(out_dir):
+    # A Fill job takes a GROUP of decoded chunks, all in ONE k4run.
+    #
+    # Fill's cost is dominated by the four histogram grids it allocates: 230,400
+    # cells x (900 mip + 400 ped) bins x 2 gains. Measured peak RSS is 4.3 GB, and
+    # it is paid whether the job reads one chunk or twenty -- the grids are
+    # allocated once and every chunk fills the same ones. So one chunk per job
+    # bought nothing and cost everything: th220 alone would have queued 6,073 jobs
+    # each asking for 5 GB, and a 5 GB slot is hard to place. The convert stage
+    # taught this the expensive way (11,432 one-chunk jobs got 12 slots at a time).
+    #
+    # Grouping also shrinks the merge tree: 6,073 per-chunk histogram files become
+    # ~304 per-group ones, and each is a 190 MB ROOT file that hadd would otherwise
+    # have to open.
     content = f"""#!/bin/bash
 set -eo pipefail
-# fill.sh <decoded_chunk> <out_hist>
-DECODED_CHUNK="$1"; OUT_HIST="$2"
+# fill.sh <chunklist> <out_hist>
+#   chunklist: text file, one decoded chunk path per line
+CHUNKLIST="$1"; OUT_HIST="$2"
 """ + env_wrapper_preamble() + f"""
-# Idempotent: if a VALID histogram already exists (a previous submission of
-# this DAG that got as far as this chunk), skip -- makes relaunching the whole
-# DAG cheap without re-filling everything. Validity is checked by actually
-# opening the ROOT file (non-empty + not a zombie + has keys), so a partial
-# file left by a killed job is NOT trusted and gets refilled.
+# Idempotent: if a VALID histogram already exists (from a previous submission of
+# this DAG), skip -- makes relaunching the whole DAG cheap without re-filling
+# everything. Validity is checked by actually opening the ROOT file (non-empty +
+# not a zombie + has keys), so a partial file left by a killed job is NOT trusted
+# and gets refilled.
 if [ -s "$OUT_HIST" ] && python3 -c "import ROOT,sys; f=ROOT.TFile.Open(sys.argv[1]); sys.exit(0 if f and not f.IsZombie() and f.GetListOfKeys().GetSize()>0 else 1)" "$OUT_HIST" >/dev/null 2>&1; then
   echo "[fill] $OUT_HIST already valid -- skipping"
   exit 0
 fi
-""" + mkdirs_line('$(dirname "$OUT_HIST")') + f"""CALIB_INPUT_FILES="$DECODED_CHUNK" CALIB_MODE=Fill CALIB_OUTPUT_HISTOGRAM_FILE="$OUT_HIST" \\
+INPUTS=$(paste -sd, "$CHUNKLIST")
+echo "[fill] $(wc -l < "$CHUNKLIST") chunk(s) -> $OUT_HIST"
+""" + mkdirs_line('$(dirname "$OUT_HIST")') + f"""CALIB_INPUT_FILES="$INPUTS" CALIB_MODE=Fill CALIB_OUTPUT_HISTOGRAM_FILE="$OUT_HIST" \\
   k4run "{OPTIONS_DIR}/run_pedestal_mip.py"
 """
     write_executable(os.path.join(out_dir, "fill.sh"), content)
@@ -204,7 +220,7 @@ error                   = {log_dir}/$(JOB).err
 periodic_release        = (JobStatus == 5) && (HoldReasonCode == 34) && (NumJobStarts < 5)
 """.replace("{log_dir}", log_dir)
     fill_sub = common + f"""executable              = {out_dir}/fill.sh
-arguments               = "$(in_decoded) $(out_hist)"
+arguments               = "$(chunklist) $(out_hist)"
 request_cpus            = 1
 request_memory          = {_mem(fill_mem)}
 request_disk            = 2000M
@@ -283,6 +299,11 @@ def main(argv=None):
                    help="Keep every job's .out/.err. Default: a SCRIPT POST deletes each node's .out/.err "
                         "once it succeeds (failed nodes keep theirs) to protect the AFS logs/ dir from its "
                         "directory-entry limit. Pass this for small test DAGs where you want all logs.")
+    p.add_argument("--chunks-per-fill-job", type=int, default=20,
+                   help="Decoded chunks read by ONE Fill job, in a single k4run (default 20). Fill's 4.3 GB "
+                        "peak RSS is the four histogram grids, allocated once per process regardless of how "
+                        "many chunks it reads -- so one chunk per job paid that memory 6,073 times for th220 "
+                        "and queued 6,073 hard-to-place 5 GB jobs. Grouping also shrinks the merge tree.")
     p.add_argument("--fill-request-memory", type=int, default=5000,
                    help="Fill job request_memory in MB (default 5000: ~3.3GB for the 4 histogram grids + margin).")
     p.add_argument("--fill-job-flavour", default="microcentury")
@@ -337,12 +358,17 @@ def main(argv=None):
         # Pre-create now: os.makedirs works on the EOS FUSE mount, shell
         # `mkdir -p` on the worker node does not (see condor_common.py).
         os.makedirs(run_hist_dir, exist_ok=True)
-        for idx, chunk_name in enumerate(chunk_names):
-            job_name = f"fill_{run_name}_{idx:04d}"
-            in_decoded = os.path.join(chunks_dir(args.converted_dir, run_name), chunk_name)
-            out_hist = os.path.join(run_hist_dir, chunk_name)
+        groups_dir = os.path.join(args.dag_dir, "fill_groups")
+        os.makedirs(groups_dir, exist_ok=True)
+        for gidx, start in enumerate(range(0, len(chunk_names), args.chunks_per_fill_job)):
+            group = chunk_names[start:start + args.chunks_per_fill_job]
+            job_name = f"fill_{run_name}_{gidx:04d}"
+            chunklist = os.path.join(groups_dir, f"{run_name}_g{gidx:04d}.txt")
+            write_text(chunklist, "\n".join(
+                os.path.join(chunks_dir(args.converted_dir, run_name), c) for c in group) + "\n")
+            out_hist = os.path.join(run_hist_dir, f"group_{gidx:04d}.root")
             dag_lines.append(f"JOB {job_name} {args.dag_dir}/fill.sub")
-            dag_lines.append(f'VARS {job_name} in_decoded="{in_decoded}" out_hist="{out_hist}"')
+            dag_lines.append(f'VARS {job_name} chunklist="{chunklist}" out_hist="{out_hist}"')
             dag_lines.append(f"RETRY {job_name} 2")
             dag_lines.append(f"CATEGORY {job_name} FillJobs")
             if emit_cleanup:
