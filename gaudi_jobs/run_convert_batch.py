@@ -2,16 +2,22 @@
 """
 Convert a range or list of runs to `siwecaldecoded` ROOT files (raw2root ONLY).
 
-One `k4run EcalRawDecoder` process per run decodes all of that run's raw chunk
-files into a single `<converted-dir>/<run>/<run>.root`. No event building, no
-PID -- just the decoded tree. This is the convert-only counterpart of
-`run_full_pipeline_batch.py` (which additionally does event building + PID for
-one run), for when you just want the decoded trees of several runs at once.
+One `k4run EcalRawDecoder` process per RAW CHUNK, decoded into
+`<converted-dir>/<run>/chunks/chunk_NNNN.root`. No event building, no PID --
+just the decoded trees. This is the convert-only counterpart of
+`run_full_pipeline_batch.py`, for when you just want several runs decoded.
 
-Since the decoder streams acquisitions to disk (constant memory, see
-EcalRawDecoder.cpp), decoding a whole run in one process is fine regardless of
-how many chunks it has. For fanning a single huge run out across the batch farm
-per-chunk instead, use gaudi_jobs/calibration/condor/generate_convert_jobs.py.
+It used to decode a whole run in one process, into a single `<run>.root`. That
+silently dropped ~75% of the acquisitions on some runs; see gaudi_jobs/decode_chunks.py
+for the measurements. Every decode now ends with a health check that fails loudly
+if the acquisitions do not add up, so a truncated run can no longer be quietly
+reconstructed.
+
+The chunks ARE the decoded data -- not an intermediate to merge away. The
+calibration Fill reads them and the event builder chains them.
+
+For fanning a run out across the batch farm instead of decoding locally, use
+gaudi_jobs/condor/generate_reco_dag.py (or calibration/condor/generate_convert_jobs.py).
 
 SAFETY: the raw data directory is READ-ONLY -- this script only reads chunks
 from it and writes decoded output to --converted-dir; it never deletes anything.
@@ -34,28 +40,18 @@ Usage::
 import argparse
 import os
 import re
-import subprocess
 import sys
 
 # calib_run_utils lives in gaudi_jobs/calibration/; reuse its raw-chunk
 # discovery (handles the plain vs eudaq `_raw.bin`/`.bin` naming quirk) and the
 # shared read-only raw base, rather than re-deriving them here.
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "calibration"))
-from calib_run_utils import DEFAULT_RAW_BASE, raw_chunk_files  # noqa: E402
-
-_OPTIONS_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "gaudi_source", "options")
-_RAW2ROOT_STEERING = os.path.join(_OPTIONS_DIR, "run_raw2root.py")
+from calib_run_utils import DEFAULT_RAW_BASE  # noqa: E402
+from decode_chunks import assert_healthy, assert_not_under, chunks_dir, decode_run  # noqa: E402
 
 _DEFAULT_CONVERTED_DIR = "/eos/experiment/drdcalo/siw-ecal/TB2026-06/Data/rundata_converted_gaudi"
 
 _RANGE_RE = re.compile(r"^(\d+)-(\d+)$")
-
-
-def _assert_not_under(path, readonly_root):
-    real_path = os.path.realpath(path)
-    real_root = os.path.realpath(readonly_root)
-    if real_path == real_root or real_path.startswith(real_root + os.sep):
-        raise SystemExit(f"REFUSING to write inside the read-only raw data directory: {path} is under {readonly_root}")
 
 
 def _resolve_run(token, raw_base):
@@ -113,63 +109,37 @@ def main(argv=None):
     p.add_argument("--raw-base", default=DEFAULT_RAW_BASE,
                    help=f"Base directory to resolve run numbers/names against (READ-ONLY). Default: {DEFAULT_RAW_BASE}")
     p.add_argument("--converted-dir", default=_DEFAULT_CONVERTED_DIR,
-                   help=f"Output base directory; each run writes <converted-dir>/<run>/<run>.root. "
+                   help=f"Output base directory; each run writes <converted-dir>/<run>/chunks/chunk_NNNN.root. "
                         f"Default: {_DEFAULT_CONVERTED_DIR}")
     p.add_argument("--tree", default="siwecaldecoded", help="Output TTree name (default siwecaldecoded)")
     p.add_argument("--max-cycle-jump", type=int, default=10, help="EcalRawDecoder MaxReadoutCycleJump (default 10)")
     p.add_argument("--force", action="store_true",
-                   help="Re-decode even if the output <run>.root already exists (default: skip existing)")
+                   help="Re-decode chunks whose output already exists (default: skip them, so an "
+                        "interrupted decode is resumed by simply re-running)")
     p.add_argument("--dry-run", action="store_true", help="Print what would be decoded without running k4run")
     args = p.parse_args(argv)
 
     run_folders = _parse_runs(args.runs, args.raw_base)
-    _assert_not_under(args.converted_dir, args.raw_base)
+    assert_not_under(args.converted_dir, args.raw_base)
 
-    print(f"[convert] {len(run_folders)} run(s) -> {args.converted_dir}/<run>/<run>.root")
+    print(f"[convert] {len(run_folders)} run(s) -> {args.converted_dir}/<run>/chunks/")
     failures = []
     for run_name, raw_dir in run_folders:
-        out_dir = os.path.join(args.converted_dir, run_name)
-        out_file = os.path.join(out_dir, f"{run_name}.root")
         try:
-            chunks = raw_chunk_files(raw_dir, run_name)
+            chunks = decode_run(run_name, raw_dir, args.converted_dir,
+                                force=args.force, dry_run=args.dry_run,
+                                tree=args.tree, max_cycle_jump=args.max_cycle_jump)
+            if not args.dry_run:
+                assert_healthy(chunks, run_name, tree=args.tree)
         except SystemExit as exc:
-            print(f"[skip] {run_name}: {exc}")
+            print(f"[FAIL] {run_name}: {exc}")
             failures.append(run_name)
             continue
-
-        if os.path.exists(out_file) and not args.force:
-            print(f"[skip] {run_name}: {out_file} already exists (use --force to re-decode)")
-            continue
-
-        print(f"[convert] {run_name}: {len(chunks)} chunk(s) -> {out_file}")
-        if args.dry_run:
-            continue
-
-        os.makedirs(out_dir, exist_ok=True)
-        # Pass the chunk list via a file (RAW_FILES_LIST), not RAW_FILES: a run
-        # with hundreds/thousands of chunks would blow past the execve argument
-        # size limit as one comma-joined env var.
-        chunklist = os.path.join(out_dir, "chunklist.txt")
-        with open(chunklist, "w") as fh:
-            fh.write("\n".join(chunks) + "\n")
-
-        env = {
-            **os.environ,
-            "RAW_FILES_LIST": chunklist,
-            "RAW2ROOT_OUT": out_file,
-            "RAW2ROOT_TREE": args.tree,
-            "RAW2ROOT_MAX_CYCLE_JUMP": str(args.max_cycle_jump),
-            "RAW2ROOT_RUN_SETTINGS_FILE": os.path.join(raw_dir, "Run_Settings.txt"),
-        }
-        result = subprocess.run(["k4run", _RAW2ROOT_STEERING], env=env)
-        if result.returncode != 0:
-            print(f"[FAIL] {run_name}: k4run raw2root exited {result.returncode}")
-            failures.append(run_name)
 
     if failures:
         print(f"\n[Done with errors] {len(failures)} run(s) failed: {', '.join(failures)}")
         return 1
-    print(f"\n[Done] {len(run_folders)} run(s) processed")
+    print(f"\n[Done] {len(run_folders)} run(s) decoded to {chunks_dir(args.converted_dir, '<run>')}")
     return 0
 
 

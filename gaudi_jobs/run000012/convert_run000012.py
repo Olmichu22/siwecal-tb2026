@@ -1,56 +1,34 @@
-#
-# PIPELINE 1/2 -- raw2root ONLY for TB2026CERN_run_000012 (th230).
-#
-# Converts the raw SLB DAQ binary chunks into the intermediate
-# `siwecaldecoded` ROOT tree, via EcalRawDecoder. Independent of pipeline 2
-# (process_run000012.py): this script never runs the event builder, PID, or
-# validation -- it only produces the converted file that pipeline 2 reads.
-#
-# Uso (desde la raiz del repo):
-#   source setup.sh
-#   export LD_LIBRARY_PATH=$PWD/gaudi_source/build:$LD_LIBRARY_PATH
-#   export PYTHONPATH=$PWD/gaudi_source/build/genConfDir:$PWD:$PYTHONPATH
-#   k4run gaudi_jobs/run000012/convert_run000012.py
-#
-import glob
-import os
+#!/usr/bin/env python
+"""
+PIPELINE 1/2 -- decode TB2026CERN_run_000012 (th230) to siwecaldecoded chunks.
 
-from Gaudi.Configuration import INFO
-from Configurables import EventDataSvc
-from Configurables import EcalRawDecoder
-from k4FWCore import ApplicationMgr
+A thin wrapper over gaudi_jobs/run_convert_batch.py, which does the real work:
+one k4run per raw chunk into <converted-dir>/<run>/chunks/, then a health check
+that the acquisitions add up.
+
+It used to be a k4run steering file that handed EVERY raw chunk of the run to a
+single EcalRawDecoder. On this run that silently dropped 75% of the acquisitions
+(30,020 decoded out of 119,211) and produced a perfectly valid-looking ROOT file;
+the reconstruction built from it had sigma/mu = 1.06, a width larger than the
+mean. Nothing failed, nothing warned. See gaudi_jobs/decode_chunks.py.
+
+There is no per-run decoding logic left here on purpose: a copy of the pipeline
+per run is how one copy gets fixed and the others quietly do not.
+
+Usage::
+
+    source setup.sh
+    export LD_LIBRARY_PATH=$PWD/gaudi_source/build:$LD_LIBRARY_PATH
+    export PYTHONPATH=$PWD/gaudi_source/build/genConfDir:$PWD:$PYTHONPATH
+    python gaudi_jobs/run000012/convert_run000012.py      # NOT k4run
+"""
+import os
+import sys
+
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."))
+from run_convert_batch import main  # noqa: E402
 
 _RUN = "TB2026CERN_run_000012"
 
-_RAW_DIR = os.path.join("/eos/experiment/drdcalo/siw-ecal/TB2026-06/Data/rundata", _RUN)  # READ-ONLY
-_CONVERTED_DIR = os.path.join("/eos/experiment/drdcalo/siw-ecal/TB2026-06/Data/rundata_converted_gaudi", _RUN)
-_SIWECALDECODED_OUT = os.path.join(_CONVERTED_DIR, f"{_RUN}.root")
-
-os.makedirs(_CONVERTED_DIR, exist_ok=True)
-
-raw_files = sorted(glob.glob(os.path.join(_RAW_DIR, f"{_RUN}_raw.bin*")))
-if not raw_files:
-    raise SystemExit(f"ERROR: no raw chunk files found in {_RAW_DIR}")
-print(f"[convert] {_RUN}: {len(raw_files)} raw chunk file(s) -> {_SIWECALDECODED_OUT}")
-
-decoder = EcalRawDecoder(
-    "EcalRawDecoder",
-    InputFiles=raw_files,
-    OutputFile=_SIWECALDECODED_OUT,
-    TreeName="siwecaldecoded",
-    MaxReadoutCycleJump=10,
-    BcidThreshold=3,
-    ZeroSuppression=False,
-    EudaqFormat=False,
-    ComputeBadBcid=True,
-    ResetStatePerInputFile=True,
-    RunSettingsFile=os.path.join(_RAW_DIR, "Run_Settings.txt"),
-)
-
-# All work happens in EcalRawDecoder::initialize(); EvtMax=1 is enough since
-# execute() is a no-op (see EcalRawDecoder.cpp).
-ApplicationMgr(TopAlg=[decoder],
-               EvtSel="NONE",
-               EvtMax=1,
-               ExtSvc=[EventDataSvc("EventDataSvc")],
-               OutputLevel=INFO)
+if __name__ == "__main__":
+    sys.exit(main(["--runs", _RUN] + sys.argv[1:]))

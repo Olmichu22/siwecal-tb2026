@@ -280,13 +280,15 @@ electrons, run `TB2026CERN_run_000013`) run the **entire** chain from raw
 binary to EDM4hep. Both are plain Python scripts (run with `python`, not
 `k4run`) that orchestrate **two** `k4run` processes:
 
-1. `options/run_raw2root_and_eventbuilder.py`
-   (`TopAlg=[EcalRawDecoder, EcalEventBuilder]`, one process — this
-   combination works because both are plain `Gaudi::Algorithm` with
-   `EvtMax=1`; Gaudi runs `TopAlg` members' `initialize()` in order, so
-   `EcalEventBuilder` opens the `siwecaldecoded` file only after
-   `EcalRawDecoder` has already written and closed it).
-2. `options/run_pid.py` (`TopAlg=[EcalToEDM4hep, EcalPidTransformer]`) — a
+1. `options/run_raw2root.py`, **one process per raw chunk**, into
+   `<converted-dir>/<run>/chunks/` — followed by a health check that the
+   acquisitions add up (`gaudi_jobs/decode_chunks.py`). This used to be a single
+   `run_raw2root_and_eventbuilder.py` process decoding the whole run at once;
+   that silently dropped ~75% of the acquisitions on some runs, so the steering
+   file is gone and `run_raw2root.py` warns if handed more than one chunk.
+2. `options/run_event_builder.py` (`EcalEventBuilder`), chaining those chunks via
+   `EVBLD_INPUT_FILES`.
+3. `options/run_pid.py` (`TopAlg=[EcalToEDM4hep, EcalPidTransformer]`) — a
    **separate** process, because these are `k4FWCore::Producer`/
    `Transformer` components that need `EvtMax` (the `ecal` tree's entry
    count) fixed *before* the process starts, and that count is only known
@@ -360,8 +362,7 @@ application or output-file naming):
 
 | Stage | Steering file | Key env vars |
 |---|---|---|
-| raw2root | `run_raw2root.py` | `RAW_FILES`, `RAW2ROOT_OUT`, `RAW2ROOT_RUN_SETTINGS_FILE` |
-| raw2root + event building (one process) | `run_raw2root_and_eventbuilder.py` | above + `EVBLD_OUTPUT`, `EVBLD_PEDESTAL_FILE`, `EVBLD_MIP_FILE` |
+| raw2root (ONE chunk per process) | `run_raw2root.py` | `RAW_FILES`, `RAW2ROOT_OUT`, `RAW2ROOT_RUN_SETTINGS_FILE` |
 | pedestal/MIP calibration | `run_pedestal_mip.py` | `CALIB_INPUT_FILES`, `CALIB_MODE`, `CALIB_GAIN`, `CALIB_OUTPUT_PEDESTAL_FILE`/`CALIB_OUTPUT_MIP_FILE` |
 | event building | `run_event_builder.py` | `EVBLD_INPUT`, `EVBLD_OUTPUT`, `EVBLD_PEDESTAL_FILE`, `EVBLD_MIP_FILE`, `EVBLD_PADMAP_DEFAULT`, `EVBLD_SLAB_Z_FILE` |
 | PID/EDM4hep | `run_pid.py` | `ECAL_FILE`, `ECAL_PID_OUT`, `ECAL_HIT_MIP_CUT` (`<0` disables), `ECAL_MIP_THRESHOLDS` (`""` = no variant blocks) |
