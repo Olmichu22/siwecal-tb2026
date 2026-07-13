@@ -186,9 +186,15 @@ inline MipFitResult fitLangau(TH1F& hist, bool highGain) {
 
   double fr[2];
   if (highGain) {
-    fr[0] = std::max(hist.GetMean() - 0.8 * hist.GetRMS(), 5.);
-    hist.GetXaxis()->SetRangeUser(fr[0], 150);
-    fr[1] = hist.GetMean() * 1.3;
+    // Fit over the full positive ADC range so the Langau describes the whole
+    // MIP distribution (peak + Landau tail), not just a narrow window around
+    // the mean. The earlier narrow range ([mean-0.8*RMS, mean*1.3]) biased the
+    // fitted MPV low (it sat on the rising edge, left of the visible peak) and
+    // made chi2/ndf meaningless -- computed over too few bins, so a fit that
+    // missed the peak still scored a good chi2. A full-range fit fixes both.
+    fr[0] = 0.;
+    fr[1] = 100.;
+    hist.GetXaxis()->SetRangeUser(fr[0], fr[1]);
   } else {
     fr[0] = std::max(hist.GetMean() - 2. * hist.GetRMS(), 2.);
     hist.GetXaxis()->SetRangeUser(fr[0], 25.);

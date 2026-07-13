@@ -28,6 +28,7 @@
 #include "Gaudi/Algorithm.h"
 #include "Gaudi/Property.h"
 
+#include "TChain.h"
 #include "TFile.h"
 #include "TTree.h"
 
@@ -61,22 +62,43 @@ struct EcalEventBuilder final : Gaudi::Algorithm {
   using Gaudi::Algorithm::Algorithm;
 
   StatusCode initialize() override {
-    if (m_inputFile.value().empty()) {
-      return error() << "InputFile not set" << endmsg, StatusCode::FAILURE;
+    // InputFiles (a list) or InputFile (one path) -- a run that was decoded in
+    // parallel exists only as per-chunk files, and CONVERT's chunking is a
+    // parallelisation detail, not a property of the data. Chaining them here is
+    // what the calibrator's InputFiles already does, and it means a run never
+    // has to be merged into one file first: TB2026CERN_run_000004's 1369 chunks
+    // come to ~176 GB, which crosses ROOT's 100 GB TTree::fgMaxTreeSize and so
+    // cannot even be held in a single tree. The OUTPUT is one `ecal` file either
+    // way -- only the input side is chained.
+    std::vector<std::string> inputs = m_inputFiles.value();
+    if (inputs.empty() && !m_inputFile.value().empty()) inputs.push_back(m_inputFile.value());
+    if (inputs.empty()) {
+      return error() << "Set InputFiles (list) or InputFile (single path)" << endmsg, StatusCode::FAILURE;
     }
     if (m_outputFile.value().empty()) {
       return error() << "OutputFile not set" << endmsg, StatusCode::FAILURE;
     }
 
-    std::unique_ptr<TFile> fin(TFile::Open(m_inputFile.value().c_str(), "READ"));
-    if (!fin || fin->IsZombie()) {
-      return error() << "Cannot open input file: " << m_inputFile.value() << endmsg, StatusCode::FAILURE;
+    // TChain IS a TTree, so everything downstream (bindReadBranches, GetEntry,
+    // GetEntries) works unchanged; the chain just rolls over files for us.
+    auto chain = std::make_unique<TChain>(m_treeName.value().c_str());
+    for (const auto& path : inputs) {
+      if (chain->AddFile(path.c_str()) == 0) {
+        return error() << "Cannot add input file (missing, or holds no '" << m_treeName.value()
+                       << "' tree): " << path << endmsg,
+               StatusCode::FAILURE;
+      }
     }
-    auto* tree = dynamic_cast<TTree*>(fin->Get(m_treeName.value().c_str()));
-    if (!tree) {
-      return error() << "Tree '" << m_treeName.value() << "' not found in " << m_inputFile.value() << endmsg,
+    if (chain->GetEntries() <= 0) {
+      return error() << "No entries in '" << m_treeName.value() << "' across the " << inputs.size()
+                     << " input file(s)" << endmsg,
              StatusCode::FAILURE;
     }
+    if (inputs.size() > 1) {
+      info() << "Chained " << inputs.size() << " input file(s), " << chain->GetEntries() << " acquisitions"
+             << endmsg;
+    }
+    TTree* tree = chain.get();
 
     // TreeBuffers is ~2.8MB (three [15][16][15][64] int arrays) -- too large
     // for a stack frame on the smaller worker-thread stacks Gaudi/k4run can
@@ -93,13 +115,33 @@ struct EcalEventBuilder final : Gaudi::Algorithm {
         return error() << "PedestalFile and MipFile must both be set unless NoCalibration=true" << endmsg,
                StatusCode::FAILURE;
       }
+      // Low-gain tables are optional but must be given as a PAIR: one without
+      // the other would silently reconstruct saturated hits against a missing
+      // pedestal or MIP scale.
+      const bool hasPedLg = !m_pedestalFileLowGain.value().empty();
+      const bool hasMipLg = !m_mipFileLowGain.value().empty();
+      if (hasPedLg != hasMipLg) {
+        return error() << "PedestalFileLowGain and MipFileLowGain must be set together (or both left empty "
+                          "to disable the low-gain saturation recovery)"
+                       << endmsg,
+               StatusCode::FAILURE;
+      }
       bool ok = false;
       std::string calibError;
       calib = k4siwecal::CalibrationTables::fromFiles(m_pedestalFile.value(), m_mipFile.value(),
                                                        m_pedestalFallback.value(), m_defaultMipFallback.value(), ok,
-                                                       calibError);
+                                                       calibError, m_pedestalFileLowGain.value(),
+                                                       m_mipFileLowGain.value());
       if (!ok) {
         return error() << calibError << endmsg, StatusCode::FAILURE;
+      }
+      if (calib.hasLowGain()) {
+        info() << "Low-gain calibration loaded: hits with raw adc_high >= " << m_adcSaturationThreshold.value()
+               << " take their energy from the low-gain branch" << endmsg;
+      } else {
+        warning() << "No low-gain calibration given: saturated high-gain hits will be under-read "
+                     "(set PedestalFileLowGain/MipFileLowGain to enable saturation recovery)"
+                  << endmsg;
       }
     }
 
@@ -130,13 +172,16 @@ struct EcalEventBuilder final : Gaudi::Algorithm {
     cfg.bcidOverflow = m_bcidOverflow.value();
     cfg.badValue = m_badValue.value();
     cfg.adcUnderflowThreshold = m_adcUnderflowThreshold.value();
+    cfg.adcSaturationThreshold = m_adcSaturationThreshold.value();
     cfg.maxHitsPerSca = m_maxHitsPerSca.value();
     cfg.maxHitsPerEvent = m_maxHitsPerEvent.value();
 
     const k4siwecal::EventBuilder builder(cfg, calib, geom, padMap.get());
 
     int runId = m_runId.value();
-    if (runId < 0) runId = parseRunIdFromPath(m_inputFile.value());
+    // Chunk files are named chunk_NNNN.root, so the run number is only in their
+    // directory -- parse the full path, not the basename.
+    if (runId < 0) runId = parseRunIdFromPath(inputs.front());
 
     int thresholdDac = m_thresholdDacOverride.value();
     if (thresholdDac < 0 && tree->GetBranch("thresholdDac") != nullptr && tree->GetEntries() > 0) {
@@ -178,10 +223,14 @@ struct EcalEventBuilder final : Gaudi::Algorithm {
   StatusCode execute(const EventContext&) const override { return StatusCode::SUCCESS; }
 
   // I/O
-  Gaudi::Property<std::string> m_inputFile{this, "InputFile", "", "siwecaldecoded ROOT file"};
+  Gaudi::Property<std::string> m_inputFile{this, "InputFile", "", "siwecaldecoded ROOT file (single)"};
+  Gaudi::Property<std::vector<std::string>> m_inputFiles{
+      this, "InputFiles", {},
+      "siwecaldecoded ROOT files to chain, in order. Takes precedence over InputFile. Lets a run be event-built "
+      "straight from its decoded chunks, with no merge step."};
   Gaudi::Property<std::string> m_treeName{this, "TreeName", "siwecaldecoded", "Input TTree name"};
   Gaudi::Property<std::string> m_outputFile{this, "OutputFile", "", "Output ecal ROOT file"};
-  Gaudi::Property<int> m_runId{this, "RunId", -1, "-1 = parse from InputFile basename (..._run_<N>...)"};
+  Gaudi::Property<int> m_runId{this, "RunId", -1, "-1 = parse from the first input path (..._run_<N>...)"};
   Gaudi::Property<int> m_thresholdDacOverride{
       this, "ThresholdDacOverride", -1,
       "-1 = read from siwecaldecoded's thresholdDac branch (written by EcalRawDecoder from Run_Settings.txt); "
@@ -190,6 +239,11 @@ struct EcalEventBuilder final : Gaudi::Algorithm {
   // Calibration
   Gaudi::Property<std::string> m_pedestalFile{this, "PedestalFile", "", "Pedestal calibration text table"};
   Gaudi::Property<std::string> m_mipFile{this, "MipFile", "", "MIP calibration text table"};
+  Gaudi::Property<std::string> m_pedestalFileLowGain{
+      this, "PedestalFileLowGain", "",
+      "Low-gain pedestal table. Optional, but must be set together with MipFileLowGain; both empty disables "
+      "the low-gain saturation recovery and hit energy always comes from the high gain."};
+  Gaudi::Property<std::string> m_mipFileLowGain{this, "MipFileLowGain", "", "Low-gain MIP calibration text table"};
   Gaudi::Property<bool> m_noCalibration{this, "NoCalibration", false, "Raw-ADC mode: pedestal=0, mip=1"};
   Gaudi::Property<double> m_pedestalFallback{this, "PedestalFallback", 250.0, ""};
   Gaudi::Property<double> m_defaultMipFallback{this, "DefaultMipFallback", 20.0, ""};
@@ -210,6 +264,11 @@ struct EcalEventBuilder final : Gaudi::Algorithm {
   Gaudi::Property<int> m_bcidOverflow{this, "BcidOverflow", 4096, ""};
   Gaudi::Property<int> m_badValue{this, "BadValue", -999, ""};
   Gaudi::Property<int> m_adcUnderflowThreshold{this, "AdcUnderflowThreshold", 11, ""};
+  Gaudi::Property<int> m_adcSaturationThreshold{
+      this, "AdcSaturationThreshold", 1900,
+      "Raw (not pedestal-subtracted) high-gain ADC at/above which the high-gain preamp is taken to be "
+      "saturated and the energy is read from the low-gain branch instead. Only has an effect when the "
+      "low-gain tables are loaded."};
   // config.py's BuilderConfig.max_hits_per_sca defaults to math.inf ("disabled"),
   // but Gaudi's confdb2 generator can't serialize an infinite double property
   // default (emits invalid Python "inf.0" and fails the build) -- use a huge
@@ -260,6 +319,7 @@ struct EcalEventBuilder final : Gaudi::Algorithm {
       m_hitHg.resize(maxHitsPerEvent);
       m_hitLg.resize(maxHitsPerEvent);
       m_hitEnergy.resize(maxHitsPerEvent);
+      m_hitWEnergy.resize(maxHitsPerEvent);
       m_hitX.resize(maxHitsPerEvent);
       m_hitY.resize(maxHitsPerEvent);
       m_hitZ.resize(maxHitsPerEvent);
@@ -276,6 +336,7 @@ struct EcalEventBuilder final : Gaudi::Algorithm {
       m_tree->Branch("nhit_chan", &m_nChan, "nhit_chan/I");
       m_tree->Branch("sum_hg", &m_sumHg, "sum_hg/F");
       m_tree->Branch("sum_energy", &m_sumEnergy, "sum_energy/F");
+      m_tree->Branch("sum_w_energy", &m_sumWEnergy, "sum_w_energy/F");
       m_tree->Branch("hit_slab", m_hitSlab.data(), "hit_slab[nhit_chan]/I");
       m_tree->Branch("hit_chip", m_hitChip.data(), "hit_chip[nhit_chan]/I");
       m_tree->Branch("hit_chan", m_hitChan.data(), "hit_chan[nhit_chan]/I");
@@ -283,6 +344,7 @@ struct EcalEventBuilder final : Gaudi::Algorithm {
       m_tree->Branch("hit_hg", m_hitHg.data(), "hit_hg[nhit_chan]/F");
       m_tree->Branch("hit_lg", m_hitLg.data(), "hit_lg[nhit_chan]/F");
       m_tree->Branch("hit_energy", m_hitEnergy.data(), "hit_energy[nhit_chan]/F");
+      m_tree->Branch("hit_w_energy", m_hitWEnergy.data(), "hit_w_energy[nhit_chan]/F");
       m_tree->Branch("hit_x", m_hitX.data(), "hit_x[nhit_chan]/F");
       m_tree->Branch("hit_y", m_hitY.data(), "hit_y[nhit_chan]/F");
       m_tree->Branch("hit_z", m_hitZ.data(), "hit_z[nhit_chan]/F");
@@ -303,6 +365,7 @@ struct EcalEventBuilder final : Gaudi::Algorithm {
       m_nChip = event.nChips();
       m_sumHg = static_cast<float>(event.sumAdcHigh());
       m_sumEnergy = static_cast<float>(event.sumEnergy());
+      m_sumWEnergy = static_cast<float>(event.sumWEnergy());
 
       for (int i = 0; i < event.nChannels(); ++i) {
         const auto& hit = event.hits[i];
@@ -313,6 +376,7 @@ struct EcalEventBuilder final : Gaudi::Algorithm {
         m_hitHg[i] = hit.adcHighPedsub;
         m_hitLg[i] = hit.adcLowPedsub;
         m_hitEnergy[i] = hit.energyMip;
+        m_hitWEnergy[i] = hit.wEnergy;
         m_hitX[i] = hit.x;
         m_hitY[i] = hit.y;
         m_hitZ[i] = hit.z;
@@ -327,9 +391,9 @@ struct EcalEventBuilder final : Gaudi::Algorithm {
     TTree* m_tree = nullptr;
     int m_run = -1, m_thresholdDac = -1, m_event = 0, m_spill = 0, m_bcid = 0;
     int m_nSlab = 0, m_nChip = 0, m_nChan = 0;
-    float m_sumHg = 0.f, m_sumEnergy = 0.f;
+    float m_sumHg = 0.f, m_sumEnergy = 0.f, m_sumWEnergy = 0.f;
     std::vector<int> m_hitSlab, m_hitChip, m_hitChan, m_hitSca, m_hitIsMasked;
-    std::vector<float> m_hitHg, m_hitLg, m_hitEnergy, m_hitX, m_hitY, m_hitZ, m_hitX0;
+    std::vector<float> m_hitHg, m_hitLg, m_hitEnergy, m_hitWEnergy, m_hitX, m_hitY, m_hitZ, m_hitX0;
   };
 };
 

@@ -59,7 +59,7 @@ SAFETY: the raw data directory (``_DEFAULT_RAW_BASE`` below, .../Data/rundata/)
 is READ-ONLY -- this script must never write, overwrite, or delete anything
 under it, only read the ``<run>_raw.bin*`` chunk files. Decoded siwecaldecoded
 ROOT files always go to a separate ``--converted-dir``
-(default ``_DEFAULT_CONVERTED_DIR``, .../Data/rundata_converted_test/).
+(default ``_DEFAULT_CONVERTED_DIR``, .../Data/rundata_converted_gaudi/).
 This script (and any driver like it) must also never delete anything under
 .../Data/ -- if a converted file needs regenerating, --force-raw2root
 overwrites it in place (TFile RECREATE), it is never removed first.
@@ -80,7 +80,7 @@ _CALIB_STEERING = os.path.join(_OPTIONS_DIR, "run_pedestal_mip.py")
 
 # Where decoded siwecaldecoded ROOT files are written. Separate from
 # _DEFAULT_RAW_BASE by design (see module docstring SAFETY note).
-_DEFAULT_CONVERTED_DIR = "/eos/experiment/drdcalo/siw-ecal/TB2026-06/Data/rundata_converted_test"
+_DEFAULT_CONVERTED_DIR = "/eos/experiment/drdcalo/siw-ecal/TB2026-06/Data/rundata_converted_gaudi"
 
 # Literal naming convention already used by the deployed cumulative MIP files
 # (MuonCalib_it2/mips/th220/MIP_pedestalsubmode1_TB2026CERN_run_000th220_*)

@@ -12,7 +12,8 @@
  *   - EventHeaderCollection EventHeader : run/event (+ bcid in timeStamp, spill
  *     in weight).
  *   - UserDataCollections (parallel to ECalHits, same order): ECalHitChip,
- *     ECalHitChan, ECalHitSca (int) and ECalHitHG, ECalHitLG (float). These
+ *     ECalHitChan, ECalHitSca (int) and ECalHitHG, ECalHitLG, ECalHitWE
+ *     (float; ECalHitWE = hit_w_energy, the sampling-corrected energy). These
  *     carry the per-hit quantities EDM4hep CalorimeterHit has no native field
  *     for, kept as podio-native collections (no cellID decode needed downstream).
  *
@@ -45,7 +46,8 @@ using OutputType = std::tuple<edm4hep::CalorimeterHitCollection, edm4hep::EventH
                               podio::UserDataCollection<std::int32_t>,   // chan
                               podio::UserDataCollection<std::int32_t>,   // sca
                               podio::UserDataCollection<float>,          // hg
-                              podio::UserDataCollection<float>>;         // lg
+                              podio::UserDataCollection<float>,          // lg
+                              podio::UserDataCollection<float>>;         // w_energy
 
 struct EcalToEDM4hep final : k4FWCore::Producer<OutputType()> {
   EcalToEDM4hep(const std::string& name, ISvcLocator* svcLoc)
@@ -56,7 +58,8 @@ struct EcalToEDM4hep final : k4FWCore::Producer<OutputType()> {
                   KeyValues("OutputHitChan", {"ECalHitChan"}),
                   KeyValues("OutputHitSca", {"ECalHitSca"}),
                   KeyValues("OutputHitHG", {"ECalHitHG"}),
-                  KeyValues("OutputHitLG", {"ECalHitLG"})}) {}
+                  KeyValues("OutputHitLG", {"ECalHitLG"}),
+                  KeyValues("OutputHitWE", {"ECalHitWE"})}) {}
 
   StatusCode initialize() override {
     m_file.reset(TFile::Open(m_inputFile.value().c_str(), "READ"));
@@ -79,6 +82,7 @@ struct EcalToEDM4hep final : k4FWCore::Producer<OutputType()> {
     m_hitEnergy = std::make_unique<TTreeReaderArray<float>>(*m_reader, "hit_energy");
     m_hitHG = std::make_unique<TTreeReaderArray<float>>(*m_reader, "hit_hg");
     m_hitLG = std::make_unique<TTreeReaderArray<float>>(*m_reader, "hit_lg");
+    m_hitWE = std::make_unique<TTreeReaderArray<float>>(*m_reader, "hit_w_energy");
     m_hitX = std::make_unique<TTreeReaderArray<float>>(*m_reader, "hit_x");
     m_hitY = std::make_unique<TTreeReaderArray<float>>(*m_reader, "hit_y");
     m_hitZ = std::make_unique<TTreeReaderArray<float>>(*m_reader, "hit_z");
@@ -98,14 +102,14 @@ struct EcalToEDM4hep final : k4FWCore::Producer<OutputType()> {
     edm4hep::CalorimeterHitCollection hits;
     edm4hep::EventHeaderCollection headers;
     podio::UserDataCollection<std::int32_t> chip, chan, sca;
-    podio::UserDataCollection<float> hg, lg;
+    podio::UserDataCollection<float> hg, lg, we;
 
     std::scoped_lock lock(m_mutex);
     const Long64_t entry = m_cursor.fetch_add(1);
     if (m_reader->SetEntry(entry) != TTreeReader::kEntryValid) {
       warning() << "Failed to read entry " << entry << endmsg;
       return std::make_tuple(std::move(hits), std::move(headers), std::move(chip), std::move(chan),
-                             std::move(sca), std::move(hg), std::move(lg));
+                             std::move(sca), std::move(hg), std::move(lg), std::move(we));
     }
 
     auto header = headers.create();
@@ -144,9 +148,10 @@ struct EcalToEDM4hep final : k4FWCore::Producer<OutputType()> {
       sca.push_back((*m_hitSca)[i]);
       hg.push_back((*m_hitHG)[i]);
       lg.push_back((*m_hitLG)[i]);
+      we.push_back((*m_hitWE)[i]);
     }
     return std::make_tuple(std::move(hits), std::move(headers), std::move(chip), std::move(chan),
-                           std::move(sca), std::move(hg), std::move(lg));
+                           std::move(sca), std::move(hg), std::move(lg), std::move(we));
   }
 
   Gaudi::Property<std::string> m_inputFile{this, "InputFile", "", "Path to the ecal ROOT file"};
@@ -164,7 +169,7 @@ private:
   std::unique_ptr<TTreeReaderValue<int>> m_nhit, m_run, m_event, m_spill, m_bcid;
   std::unique_ptr<TTreeReaderArray<int>> m_hitSlab, m_hitChip, m_hitChan, m_hitSca;
   std::unique_ptr<TTreeReaderArray<int>> m_hitMasked;   // null for pre-mask ecal files
-  std::unique_ptr<TTreeReaderArray<float>> m_hitEnergy, m_hitHG, m_hitLG, m_hitX, m_hitY, m_hitZ;
+  std::unique_ptr<TTreeReaderArray<float>> m_hitEnergy, m_hitHG, m_hitLG, m_hitWE, m_hitX, m_hitY, m_hitZ;
   std::unique_ptr<dd4hep::DDSegmentation::BitFieldCoder> m_coder;
   mutable std::mutex m_mutex;
   mutable std::atomic<Long64_t> m_cursor{0};

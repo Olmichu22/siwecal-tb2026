@@ -34,11 +34,12 @@ sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."
 from siwecal_common import paths
 
 from calib_run_utils import parse_run_folder_list, raw_chunk_files
-from condor_common import DEFAULT_FILL_SCRATCH_DIR, OPTIONS_DIR, decoded_dir, env_wrapper_preamble, \
+from condor_common import DEFAULT_CONVERTED_DIR, DEFAULT_FILL_SCRATCH_DIR, OPTIONS_DIR, chunks_dir, condor_log_dir, env_wrapper_preamble, \
     hist_dir, mkdirs_line, write_executable, write_text
 from run_calibration_batch import _check_threshold_consistency, _combined_label  # noqa: E402
 
 _CHECK_SCRIPT = os.path.join(os.path.dirname(os.path.abspath(__file__)), "check_merged_histograms.sh")
+_CLEANUP_SCRIPT = os.path.join(os.path.dirname(os.path.abspath(__file__)), "cleanup_job_logs.sh")
 
 # A single merge_run job hadd-ing thousands of per-chunk histogram files
 # serially is what made the th220/th230 merges take the better part of a
@@ -63,21 +64,21 @@ def _expected_chunks(run_folders):
     return expected
 
 
-def _check_decoded_chunks(run_folders, decoded_base):
+def _check_decoded_chunks(run_folders, converted_dir):
     """Aborts with a clear message if generate_convert_jobs.py's CONVERT
     stage hasn't (fully) run yet for the requested runs."""
     expected = _expected_chunks(run_folders)
     missing = []
     for run_name, chunk_names in expected.items():
         for chunk_name in chunk_names:
-            path = os.path.join(decoded_base, run_name, chunk_name)
+            path = os.path.join(chunks_dir(converted_dir, run_name), chunk_name)
             if not os.path.exists(path):
                 missing.append(path)
     if missing:
         preview = "\n".join(f"  {m}" for m in missing[:20])
         more = f"\n  ... and {len(missing) - 20} more" if len(missing) > 20 else ""
         raise SystemExit(
-            f"ERROR: {len(missing)} decoded chunk(s) missing under {decoded_base} -- run CONVERT first:\n"
+            f"ERROR: {len(missing)} decoded chunk(s) missing under {converted_dir} -- run CONVERT first:\n"
             f"  python gaudi_jobs/calibration/condor/generate_convert_jobs.py --runs ... --out-dir ...\n"
             f"  condor_submit <out-dir>/convert.sub\n"
             f"Missing:\n{preview}{more}"
@@ -91,6 +92,15 @@ set -eo pipefail
 # fill.sh <decoded_chunk> <out_hist>
 DECODED_CHUNK="$1"; OUT_HIST="$2"
 """ + env_wrapper_preamble() + f"""
+# Idempotent: if a VALID histogram already exists (a previous submission of
+# this DAG that got as far as this chunk), skip -- makes relaunching the whole
+# DAG cheap without re-filling everything. Validity is checked by actually
+# opening the ROOT file (non-empty + not a zombie + has keys), so a partial
+# file left by a killed job is NOT trusted and gets refilled.
+if [ -s "$OUT_HIST" ] && python3 -c "import ROOT,sys; f=ROOT.TFile.Open(sys.argv[1]); sys.exit(0 if f and not f.IsZombie() and f.GetListOfKeys().GetSize()>0 else 1)" "$OUT_HIST" >/dev/null 2>&1; then
+  echo "[fill] $OUT_HIST already valid -- skipping"
+  exit 0
+fi
 """ + mkdirs_line('$(dirname "$OUT_HIST")') + f"""CALIB_INPUT_FILES="$DECODED_CHUNK" CALIB_MODE=Fill CALIB_OUTPUT_HISTOGRAM_FILE="$OUT_HIST" \\
   k4run "{OPTIONS_DIR}/run_pedestal_mip.py"
 """
@@ -103,29 +113,57 @@ set -eo pipefail
 # merge.sh <filelist.txt> <out.root>
 FILELIST="$1"; OUT="$2"
 """ + env_wrapper_preamble() + """
-""" + mkdirs_line('$(dirname "$OUT")') + """# hadd-ing directly to the EOS (FUSE-mounted) target is what made the
-# th220/th230 merges take the better part of a week in the first place (see
-# the _MERGE_GROUP_SIZE comment above): even with the group-tournament split
-# keeping input counts low, hadd repeatedly re-opening a GROWING target file
-# over the network is slow and can stall for hours on just a handful of
-# large inputs (observed directly: a 20-file merge_run stuck for ~4h with a
-# 0-byte target and eventually killed by the pool's wall-time limit). Merge
-# to local worker-node scratch first -- a single local hadd pass, no
-# regrowth-over-network cost, no -n batching needed -- then copy the
-# finished file over. NOTE: an earlier version of this fix used `xrdcp ...
-# root://eospublic.cern.ch/$OUT` for the final upload (proven to work
-# interactively for the run_000004 calibration merge), but under a Condor
-# job (getenv=False, no forwarded Kerberos/token) it hung for hours with no
-# output at all -- the batch worker has no xrootd auth. `cp` to the same
-# FUSE-mounted /eos path every other job in this pipeline already writes to
-# directly (fill.sh, the merge_group tier) sidesteps that auth entirely and
-# is a single bulk copy of an already-complete local file, not an
-# incremental network write, so it doesn't hit the original growing-target
-# slowness either.
+""" + mkdirs_line('$(dirname "$OUT")') + """# Two separate EOS/hadd hazards, both fixed here:
+#
+# 1) Writing the GROWING target over EOS FUSE (the original "merges took a
+#    week" bug): hadd re-opening a growing file over the network stalls for
+#    hours. Fixed by merging to LOCAL worker scratch (TMP_OUT) and copying the
+#    finished file over once. (`cp` to the FUSE /eos path, not `xrdcp` -- a
+#    getenv=False Condor job has no xrootd auth and xrdcp hangs.)
+#
+# 2) READING the inputs over EOS FUSE (what hung the run_000085/000089
+#    merge_group jobs for 7+ h): each per-chunk histogram file is ~145 MB with
+#    ~365k histograms, and hadd reads every one of those objects as a separate
+#    FUSE round-trip -- measured, hadd of just 3 chunks direct from EOS did not
+#    finish in 100 s, while a local bulk copy is seconds and the local hadd is
+#    CPU-bound and finite. So COPY each input to local scratch first, then hadd
+#    locally. Done in batches of STAGE_BATCH (hadd a batch into a partial,
+#    delete the batch's inputs) so peak local disk stays bounded regardless of
+#    how many inputs the group has; a final hadd combines the partials.
 ulimit -n 524288 || true
+STAGE="$(mktemp -d --tmpdir="${TMPDIR:-/tmp}" mergein_XXXXXX)"
 TMP_OUT="$(mktemp --tmpdir="${TMPDIR:-/tmp}" merge_XXXXXX.root)"
-trap 'rm -f "$TMP_OUT"' EXIT
-hadd -f "$TMP_OUT" "@$FILELIST"
+trap 'rm -rf "$STAGE" "$TMP_OUT"' EXIT
+STAGE_BATCH=25
+# -v 0: silence hadd's per-source-file listing (one line per input otherwise).
+partials=(); batch=(); pidx=0; iidx=0
+flush_batch() {
+  [ "${#batch[@]}" -eq 0 ] && return 0
+  local part="$STAGE/part_${pidx}.root"
+  hadd -v 0 -f "$part" "${batch[@]}"
+  rm -f "${batch[@]}"
+  partials+=("$part"); batch=(); pidx=$((pidx + 1))
+}
+while IFS= read -r infile; do
+  [ -z "$infile" ] && continue
+  # Unique local name per input (numbered): inputs routinely SHARE a basename
+  # -- every run's per-run merge is "merged_run.root", every run's groups are
+  # "merged_group_NNNN.root" -- so copying by basename alone would collide, the
+  # copies overwriting one another and the batch then hadd-ing the lone
+  # survivor once per collided entry (silent data loss + N-fold count
+  # inflation). Numbering the local copies keeps every input distinct.
+  in_local="$STAGE/in_${iidx}_$(basename "$infile")"
+  iidx=$((iidx + 1))
+  cp "$infile" "$in_local"
+  batch+=("$in_local")
+  [ "${#batch[@]}" -ge "$STAGE_BATCH" ] && flush_batch
+done < "$FILELIST"
+flush_batch
+if [ "${#partials[@]}" -eq 1 ]; then
+  cp -f "${partials[0]}" "$TMP_OUT"
+else
+  hadd -v 0 -f "$TMP_OUT" "${partials[@]}"
+fi
 cp -f "$TMP_OUT" "$OUT"
 """
     write_executable(os.path.join(out_dir, "merge.sh"), content)
@@ -144,18 +182,31 @@ CALIB_INPUT_HISTOGRAM_FILE="$IN_HIST" CALIB_MODE="$MODE" CALIB_GAIN="$GAIN" CALI
     write_executable(os.path.join(out_dir, "fit.sh"), content)
 
 
-def _write_subs(out_dir, fill_mem, fill_flavour, merge_mem, merge_flavour, fit_mem, fit_flavour):
+def _write_subs(out_dir, log_dir, fill_mem, fill_flavour, merge_mem, merge_flavour, fit_mem, fit_flavour):
+    # request_memory GROWS with each attempt and a memory-limit HOLD is auto-
+    # released: a job that OOMs is put on HOLD by the startd (HoldReasonCode
+    # 34) -- and a held job is NOT retried by DAGMan's RETRY, so the DAG would
+    # stall (observed on th220/th230 merges, ~11.8 GB used vs a 4 GB request).
+    # `request_memory = base*(NumJobStarts+1)` asks for `base` on the first
+    # start and `2*base, 3*base, ...` on each subsequent one; `periodic_release`
+    # re-runs the held job (up to 5 starts) so it comes back with more memory
+    # and self-heals. NumJobStarts is undefined before the first start, hence
+    # the ifthenelse guard. Value is in MB (numeric request_memory is MB).
+    def _mem(base):
+        return f"ifthenelse(NumJobStarts <= 0, {base}, {base} * (NumJobStarts + 1))"
+
     common = """universe                = vanilla
 should_transfer_files   = NO
 getenv                  = False
-log                     = {out_dir}/logs/$(JOB).log
-output                  = {out_dir}/logs/$(JOB).out
-error                   = {out_dir}/logs/$(JOB).err
-"""
-    fill_sub = common.format(out_dir=out_dir) + f"""executable              = {out_dir}/fill.sh
+log                     = {log_dir}/$(JOB).log
+output                  = {log_dir}/$(JOB).out
+error                   = {log_dir}/$(JOB).err
+periodic_release        = (JobStatus == 5) && (HoldReasonCode == 34) && (NumJobStarts < 5)
+""".replace("{log_dir}", log_dir)
+    fill_sub = common + f"""executable              = {out_dir}/fill.sh
 arguments               = "$(in_decoded) $(out_hist)"
 request_cpus            = 1
-request_memory          = {fill_mem}M
+request_memory          = {_mem(fill_mem)}
 request_disk            = 2000M
 +JobFlavour             = "{fill_flavour}"
 queue
@@ -163,7 +214,7 @@ queue
     merge_sub = common.format(out_dir=out_dir) + f"""executable              = {out_dir}/merge.sh
 arguments               = "$(filelist) $(out)"
 request_cpus            = 1
-request_memory          = {merge_mem}M
+request_memory          = {_mem(merge_mem)}
 request_disk            = 8000M
 +JobFlavour             = "{merge_flavour}"
 queue
@@ -171,7 +222,7 @@ queue
     fit_sub = common.format(out_dir=out_dir) + f"""executable              = {out_dir}/fit.sh
 arguments               = "$(mode) $(gain) $(in_hist) $(out_path) $(diag_path)"
 request_cpus            = 1
-request_memory          = {fit_mem}M
+request_memory          = {_mem(fit_mem)}
 request_disk            = 1000M
 +JobFlavour             = "{fit_flavour}"
 queue
@@ -179,6 +230,14 @@ queue
     write_text(os.path.join(out_dir, "fill.sub"), fill_sub)
     write_text(os.path.join(out_dir, "merge.sub"), merge_sub)
     write_text(os.path.join(out_dir, "fit.sub"), fit_sub)
+
+
+def _cleanup_post(dag_lines, job_name, log_dir):
+    # SCRIPT POST that deletes this node's .out/.err once it succeeds (keeps
+    # the AFS logs/ dir under its entry limit). The helper propagates the
+    # node's real return code, so RETRY semantics are unchanged. Not emitted
+    # for merge_threshold, which already carries its own POST (check_merged).
+    dag_lines.append(f"SCRIPT POST {job_name} {_CLEANUP_SCRIPT} $RETURN {os.path.join(log_dir, job_name)}")
 
 
 def _emit_parent_child(dag_lines, parent_names, child_name, batch_size=200):
@@ -203,8 +262,16 @@ def main(argv=None):
                         "run_calibration_batch.py --runs. No auto-discovery by threshold.")
     p.add_argument("--raw-base", default=None, help="Base directory to resolve bare run names in --runs against.")
     p.add_argument("--th", default=None, help="Override the output th<N> label instead of auto-deriving it.")
+    p.add_argument("--converted-dir", default=DEFAULT_CONVERTED_DIR,
+                   help=f"Where CONVERT put the decoded chunks (<converted-dir>/<RUN>/chunks/). "
+                        f"Default: {DEFAULT_CONVERTED_DIR}")
     p.add_argument("--fill-scratch-dir", default=DEFAULT_FILL_SCRATCH_DIR,
                    help=f"EOS scratch area (decoded/ and hist/ live under it). Default: {DEFAULT_FILL_SCRATCH_DIR}")
+    p.add_argument("--log-dir", default=None,
+                   help="Directory for Condor per-job log/output/error files. Default: <dag-dir>/logs (AFS -- "
+                        "CERN standard schedds reject /eos log paths). Logs are kept tiny via Gaudi WARNING, the "
+                        "Fill skip-if-done check, and hadd -v 0; and each node's .out/.err are deleted once the "
+                        "node succeeds (see --keep-job-logs) so the dir doesn't hit AFS's entry limit.")
     p.add_argument("--outdir", default=None,
                    help="Calibration table output base directory. Default: settings.yml calib_dir()/MuonCalib_gaudi")
     p.add_argument("--gain", choices=("high", "low", "both"), default="high")
@@ -212,10 +279,16 @@ def main(argv=None):
                    help="Directory to write the .dag/.sub/.sh/file-lists/logs/ into.")
     p.add_argument("--diagnostics", action="store_true",
                     help="Also write a <output>.diagnostics.root cross-check file per Fit job.")
+    p.add_argument("--keep-job-logs", action="store_true",
+                   help="Keep every job's .out/.err. Default: a SCRIPT POST deletes each node's .out/.err "
+                        "once it succeeds (failed nodes keep theirs) to protect the AFS logs/ dir from its "
+                        "directory-entry limit. Pass this for small test DAGs where you want all logs.")
     p.add_argument("--fill-request-memory", type=int, default=5000,
                    help="Fill job request_memory in MB (default 5000: ~3.3GB for the 4 histogram grids + margin).")
     p.add_argument("--fill-job-flavour", default="microcentury")
-    p.add_argument("--merge-request-memory", type=int, default=4000)
+    p.add_argument("--merge-request-memory", type=int, default=8000,
+                   help="Merge job base request_memory in MB (default 8000; grows per retry, see _write_subs -- "
+                        "large hadd merges were observed using ~11.8 GB).")
     p.add_argument("--merge-job-flavour", default="workday")
     p.add_argument("--fit-request-memory", type=int, default=4000)
     p.add_argument("--fit-job-flavour", default="workday")
@@ -234,8 +307,7 @@ def main(argv=None):
     kwargs = {"default_base": args.raw_base} if args.raw_base else {}
     run_folders = parse_run_folder_list(args.runs, **kwargs)
 
-    decoded_base = decoded_dir(args.fill_scratch_dir)
-    expected_chunks = _check_decoded_chunks(run_folders, decoded_base)
+    expected_chunks = _check_decoded_chunks(run_folders, args.converted_dir)
 
     th = _check_threshold_consistency(run_folders, args.th)
     label = _combined_label(run_folders, th)
@@ -244,13 +316,16 @@ def main(argv=None):
     out_base = args.outdir or os.path.join(paths.calib_dir(), "MuonCalib_gaudi")
     gains = ["high", "low"] if args.gain == "both" else [args.gain]
 
+    log_dir = args.log_dir or condor_log_dir(args.dag_dir)
+    emit_cleanup = not args.keep_job_logs
+
     os.makedirs(args.dag_dir, exist_ok=True)
-    os.makedirs(os.path.join(args.dag_dir, "logs"), exist_ok=True)
+    os.makedirs(log_dir, exist_ok=True)
 
     _fill_sh(args.dag_dir)
     _merge_sh(args.dag_dir)
     _fit_sh(args.dag_dir)
-    _write_subs(args.dag_dir, args.fill_request_memory, args.fill_job_flavour, args.merge_request_memory,
+    _write_subs(args.dag_dir, log_dir, args.fill_request_memory, args.fill_job_flavour, args.merge_request_memory,
                 args.merge_job_flavour, args.fit_request_memory, args.fit_job_flavour)
 
     dag_lines = []
@@ -264,12 +339,14 @@ def main(argv=None):
         os.makedirs(run_hist_dir, exist_ok=True)
         for idx, chunk_name in enumerate(chunk_names):
             job_name = f"fill_{run_name}_{idx:04d}"
-            in_decoded = os.path.join(decoded_base, run_name, chunk_name)
+            in_decoded = os.path.join(chunks_dir(args.converted_dir, run_name), chunk_name)
             out_hist = os.path.join(run_hist_dir, chunk_name)
             dag_lines.append(f"JOB {job_name} {args.dag_dir}/fill.sub")
             dag_lines.append(f'VARS {job_name} in_decoded="{in_decoded}" out_hist="{out_hist}"')
             dag_lines.append(f"RETRY {job_name} 2")
             dag_lines.append(f"CATEGORY {job_name} FillJobs")
+            if emit_cleanup:
+                _cleanup_post(dag_lines, job_name, log_dir)
             fill_job_names.append(job_name)
             chunk_paths.append(out_hist)
 
@@ -294,6 +371,8 @@ def main(argv=None):
                 dag_lines.append(f'VARS {group_name} filelist="{group_filelist}" out="{group_out}"')
                 dag_lines.append(f"RETRY {group_name} 2")
                 dag_lines.append(f"CATEGORY {group_name} MergeGroupJobs")
+                if emit_cleanup:
+                    _cleanup_post(dag_lines, group_name, log_dir)
                 _emit_parent_child(dag_lines, group_fill_jobs, group_name)
                 group_out_paths.append(group_out)
                 merge_run_parents.append(group_name)
@@ -304,6 +383,8 @@ def main(argv=None):
         dag_lines.append(f"JOB {merge_run_name} {args.dag_dir}/merge.sub")
         dag_lines.append(f'VARS {merge_run_name} filelist="{run_filelist}" out="{merge_run_out}"')
         dag_lines.append(f"RETRY {merge_run_name} 2")
+        if emit_cleanup:
+            _cleanup_post(dag_lines, merge_run_name, log_dir)
         _emit_parent_child(dag_lines, merge_run_parents, merge_run_name)
         merge_run_names.append(merge_run_name)
 
@@ -332,6 +413,8 @@ def main(argv=None):
             dag_lines.append(f"JOB {job_name} {args.dag_dir}/fit.sub")
             dag_lines.append(f'VARS {job_name} mode="{mode}" gain="{gain}" in_hist="{merge_th_out}" '
                               f'out_path="{out_path}" diag_path="{diag_path}"')
+            if emit_cleanup:
+                _cleanup_post(dag_lines, job_name, log_dir)
             fit_job_names.append(job_name)
     dag_lines.append(f"PARENT {merge_th_name} CHILD {' '.join(fit_job_names)}")
 

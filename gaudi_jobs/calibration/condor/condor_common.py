@@ -20,11 +20,16 @@ OPTIONS_DIR = os.path.join(REPO_ROOT, "gaudi_source", "options")
 # release so the AFS-resident gaudi_source/build is ABI-compatible.
 KEY4HEP_RELEASE = "2026-04-08"
 
-# EOS scratch area for the Condor pipeline's intermediate files. Lives
-# INSIDE rundata_converted_test/ (already proven writable all session)
-# rather than as its own top-level sibling under .../Data/. NEVER
-# auto-deleted by any script here (see the repo-wide "never delete
-# anything under /Data/" rule).
+# EOS scratch area for the Condor pipeline's intermediate files. NEVER
+# auto-deleted by any script here (see the repo-wide "never delete anything
+# under /Data/" rule).
+#
+# Deliberately still under rundata_converted_test/ even though converted
+# events now go to rundata_converted_gaudi/: this holds ~1.1 TB of already
+# validated per-chunk/per-run/per-threshold histograms (incl. the merged
+# merged_th220/th230.root the current calibration tables were fitted from).
+# It is calibration scratch, not converted events, and repointing it would
+# orphan all of it and force a full re-fill for no gain.
 DEFAULT_FILL_SCRATCH_DIR = "/eos/experiment/drdcalo/siw-ecal/TB2026-06/Data/rundata_converted_test/calib_fill_scratch"
 
 # IMPORTANT: shell `mkdir -p` reproducibly FAILS on this EOS FUSE mount --
@@ -43,14 +48,54 @@ def mkdirs_line(dir_expr):
     return f'python3 -c "import os, sys; os.makedirs(sys.argv[1], exist_ok=True)" "{dir_expr}"\n'
 
 
-def decoded_dir(fill_scratch_dir):
-    """Where CONVERT (D.1) writes per-chunk decoded siwecaldecoded ROOT files."""
-    return os.path.join(fill_scratch_dir, "decoded")
+# Where a fully converted run is PUBLISHED, one directory per run holding one
+# ROOT file named after it: <converted_dir>/<RUN>/<RUN>.root. This is the
+# collaboration's own layout (cf. rundata_converted_old/, and the runs written
+# by gaudi_jobs/run000012, run000013 and run_calibration_batch.py) -- calibration
+# runs follow it too, they are not a special case.
+DEFAULT_CONVERTED_DIR = "/eos/experiment/drdcalo/siw-ecal/TB2026-06/Data/rundata_converted_gaudi"
+
+
+def converted_run_file(converted_dir, run):
+    """The published converted file for `run`: <converted_dir>/<RUN>/<RUN>.root."""
+    return os.path.join(converted_dir, run, f"{run}.root")
+
+
+def chunks_dir(converted_dir, run):
+    """Where CONVERT writes a run's decoded siwecaldecoded chunks:
+    <converted_dir>/<RUN>/chunks/.
+
+    ONE decoded area, shared by every consumer: the calibration Fill reads these
+    chunks, and so does the event builder (EcalEventBuilder's InputFiles chains
+    them). They used to live off in the calibration Condor scratch, which made
+    the decoded data look like a calibration by-product -- it is not, it is the
+    run's converted data, and it belongs next to the run's reconstructed output.
+
+    There is deliberately no merged per-run siwecaldecoded file. Nothing needs
+    one: it would duplicate ~390 GB across the calibration runs for something no
+    analysis opens, and for run_000004 (~176 GB of chunks) it cannot even exist,
+    since that crosses ROOT's 100 GB TTree::fgMaxTreeSize.
+    """
+    return os.path.join(converted_dir, run, "chunks")
 
 
 def hist_dir(fill_scratch_dir):
     """Where CALIBRACIÓN/Fill (D.2) writes per-chunk/per-run/per-threshold histogram ROOT files."""
     return os.path.join(fill_scratch_dir, "hist")
+
+
+def condor_log_dir(dag_dir):
+    """Where the Condor per-job log/output/error files go: a ``logs/`` subdir of
+    the (AFS) submit directory.
+
+    They MUST stay on AFS, not EOS: CERN's standard batch schedds reject /eos
+    paths for log/output/error/executable outright ("Standard batch schedds
+    cannot use /eos paths directly within the submit file"). The defence against
+    thousands of logs filling the small AFS home is therefore keeping each log
+    tiny -- Fill/Fit run Gaudi at WARNING and Fill skips already-done chunks, so
+    their .out is a line or two; merges run ``hadd -v 0`` instead of listing
+    every source file (which for a 2000-chunk run was thousands of lines)."""
+    return os.path.join(dag_dir, "logs")
 
 
 def env_wrapper_preamble(repo_root=REPO_ROOT, release=KEY4HEP_RELEASE):

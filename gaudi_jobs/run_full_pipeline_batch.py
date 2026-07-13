@@ -6,9 +6,12 @@ raw2root -> event building -> PID/EDM4hep for any run, entirely in Gaudi/C++
 processes -- see that script's module docstring for why two processes are
 needed).
 
-Calibration files are resolved via
-siwecal_eventbuilder.cli.resolve_muon_calib_files(th) (the same lookup the
-existing Python pipeline already uses), reused here rather than duplicated.
+Calibration files come from ``MuonCalib_gaudi/{pedestals,mips}/th<N>/`` via
+siwecal_eventbuilder.cli.resolve_gaudi_calib_files(th). The threshold itself is
+read from the run's own ``Run_Settings.txt`` (read_threshold_dac) unless --th
+overrides it, so a run can no longer be reconstructed against another
+threshold's pedestals by accident. A threshold with no calibration folder stops
+the job.
 
 SAFETY: the raw data directory is READ-ONLY -- this script never writes
 there; decoded/reconstructed outputs go to --converted-dir, and this script
@@ -16,7 +19,7 @@ never deletes anything.
 
 Example::
 
-    python gaudi_jobs/run_full_pipeline_batch.py --run TB2026CERN_run_000013 --th 230
+    python gaudi_jobs/run_full_pipeline_batch.py --run TB2026CERN_run_000013
 """
 import argparse
 import glob
@@ -27,7 +30,8 @@ import sys
 import ROOT
 
 from siwecal_common import paths
-from siwecal_eventbuilder.cli import resolve_muon_calib_files
+from siwecal_eventbuilder.cli import resolve_gaudi_calib_files
+from siwecal_eventbuilder.run_settings import read_threshold_dac
 
 _OPTIONS_DIR = os.path.join(os.path.dirname(__file__), "..", "gaudi_source", "options")
 _RAW2ROOT_AND_EVBLD_STEERING = os.path.join(_OPTIONS_DIR, "run_raw2root_and_eventbuilder.py")
@@ -36,7 +40,7 @@ _PID_STEERING = os.path.join(_OPTIONS_DIR, "run_pid.py")
 # Read-only source of raw DAQ chunk files (per-run subdirectories). NEVER
 # write or delete anything here. Matches run_calibration_batch.py.
 _DEFAULT_RAW_BASE = "/eos/experiment/drdcalo/siw-ecal/TB2026-06/Data/rundata"
-_DEFAULT_CONVERTED_DIR = "/eos/experiment/drdcalo/siw-ecal/TB2026-06/Data/rundata_converted_test"
+_DEFAULT_CONVERTED_DIR = "/eos/experiment/drdcalo/siw-ecal/TB2026-06/Data/rundata_converted_gaudi"
 
 
 def _assert_not_under(path, readonly_root):
@@ -49,7 +53,9 @@ def _assert_not_under(path, readonly_root):
 def main(argv=None):
     p = argparse.ArgumentParser(description="Full raw2root -> event building -> PID/EDM4hep pipeline for one run.")
     p.add_argument("--run", required=True, help="Run name (e.g. TB2026CERN_run_000013)")
-    p.add_argument("--th", required=True, help="Threshold label to resolve calibration files (e.g. 230)")
+    p.add_argument("--th", default=None,
+                   help="Threshold label used to resolve the MuonCalib_gaudi calibration folder (e.g. 230). "
+                        "Default: read the run's ThresholdDAC from its Run_Settings.txt")
     p.add_argument("--run-id", type=int, default=None, help="Numeric run id for the ecal tree's `run` branch "
                                                               "(default: parsed from the run name)")
     p.add_argument("--raw-dir", default=None,
@@ -82,15 +88,32 @@ def main(argv=None):
     padmap_slab12 = args.padmap_slab12 or os.path.join(mappings_dir, "fev11_cob_good_rotate_chip_channel_x_y_mapping.txt")
     slab_z_file = args.slab_z_file or os.path.join(mappings_dir, "slab_z_positions.yml")
 
+    run_settings_file = os.path.join(raw_dir, "Run_Settings.txt")
+
+    pedestal_file_lg, mip_file_lg = "", ""
     if args.no_calibration:
         pedestal_file, mip_file = "", ""
     else:
         pedestal_file = args.pedestal_file
         mip_file = args.mip_file
         if not pedestal_file or not mip_file:
-            auto_pedestal, auto_mip = resolve_muon_calib_files(args.th)
+            th = args.th
+            if th is None:
+                th = read_threshold_dac(run_settings_file)
+                if th < 0:
+                    raise SystemExit(f"ERROR: cannot read ThresholdDAC from {run_settings_file}; "
+                                     f"pass --th explicitly")
+                print(f"[calib] {run}: ThresholdDAC={th} (from {run_settings_file})")
+            else:
+                print(f"[calib] {run}: ThresholdDAC={th} (forced via --th)")
+            auto_pedestal, auto_mip, auto_pedestal_lg, auto_mip_lg = resolve_gaudi_calib_files(th)
             pedestal_file = pedestal_file or auto_pedestal
             mip_file = mip_file or auto_mip
+            pedestal_file_lg = pedestal_file_lg or auto_pedestal_lg
+            mip_file_lg = mip_file_lg or auto_mip_lg
+        print(f"[calib] {run}: pedestal={pedestal_file}\n[calib] {run}: mip={mip_file}")
+        print(f"[calib] {run}: pedestal_lg={pedestal_file_lg or '(none -- no saturation recovery)'}\n"
+              f"[calib] {run}: mip_lg={mip_file_lg or '(none -- no saturation recovery)'}")
 
     run_id = args.run_id
     if run_id is None:
@@ -106,10 +129,12 @@ def main(argv=None):
         **os.environ,
         "RAW_FILES": ",".join(raw_files),
         "RAW2ROOT_OUT": siwecaldecoded_out,
-        "RAW2ROOT_RUN_SETTINGS_FILE": os.path.join(raw_dir, "Run_Settings.txt"),
+        "RAW2ROOT_RUN_SETTINGS_FILE": run_settings_file,
         "EVBLD_OUTPUT": ecal_out,
         "EVBLD_RUN_ID": str(run_id),
         "EVBLD_NO_CALIBRATION": "1" if args.no_calibration else "0",
+        "EVBLD_PEDESTAL_FILE_LOWGAIN": pedestal_file_lg,
+        "EVBLD_MIP_FILE_LOWGAIN": mip_file_lg,
         "EVBLD_PEDESTAL_FILE": pedestal_file,
         "EVBLD_MIP_FILE": mip_file,
         "EVBLD_PADMAP_DEFAULT": padmap_default,

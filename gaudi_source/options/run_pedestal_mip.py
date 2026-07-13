@@ -34,10 +34,15 @@
 # not a per-event k4FWCore transform -- see PedestalMipCalibrator.cpp).
 import os
 
-from Gaudi.Configuration import INFO
+import Gaudi.Configuration as _gaudi_cfg
 from Configurables import EventDataSvc
 from Configurables import PedestalMipCalibrator
 from k4FWCore import ApplicationMgr
+
+# Log verbosity: WARNING by default (Condor fill/fit jobs are silent unless
+# something is wrong -- keeps per-job .out logs tiny across thousands of jobs);
+# override with CALIB_OUTPUT_LEVEL=INFO/DEBUG for interactive debugging.
+_output_level = getattr(_gaudi_cfg, os.environ.get("CALIB_OUTPUT_LEVEL", "WARNING"), _gaudi_cfg.WARNING)
 
 mode = os.environ.get("CALIB_MODE", "Pedestal")
 if mode not in ("Pedestal", "Mip", "Fill", "FitPedestal", "FitMip"):
@@ -58,11 +63,14 @@ calib = PedestalMipCalibrator(
     OutputMipFile=os.environ.get("CALIB_OUTPUT_MIP_FILE", ""),
     MaxNhit=int(os.environ.get("CALIB_MAX_NHIT", "1")),
     NSlabsHit=int(os.environ.get("CALIB_NSLABS_HIT", "8")),
-    MinMipIntegral=float(os.environ.get("CALIB_MIN_MIP_INTEGRAL", "500")),
+    MinMipIntegral=float(os.environ.get("CALIB_MIN_MIP_INTEGRAL", "200")),
     ChipFallbackMinIntegral=float(os.environ.get("CALIB_CHIP_FALLBACK_MIN_INTEGRAL", "2000")),
     PedestalMaxMeanAdc=float(os.environ.get("CALIB_PEDESTAL_MAX_MEAN_ADC", "300")),
     MipFallbackMaxAdc=float(os.environ.get("CALIB_MIP_FALLBACK_MAX_ADC", "300")),
-    MipLowLim=float(os.environ.get("CALIB_MIP_LOW_LIM", "20")),
+    MaxMipChi2Ndf=float(os.environ.get("CALIB_MAX_MIP_CHI2NDF", "1.1")),
+    MaxMipChi2NdfFallback=float(os.environ.get("CALIB_MAX_MIP_CHI2NDF_FALLBACK", "25")),
+    MipHistMaxTol=float(os.environ.get("CALIB_MIP_HISTMAX_TOL", "0.25")),
+    MipLowLim=float(os.environ.get("CALIB_MIP_LOW_LIM", "10")),
     MipHighLim=float(os.environ.get("CALIB_MIP_HIGH_LIM", "50")),
     MipLowLimLowGain=float(os.environ.get("CALIB_MIP_LOW_LIM_LOW_GAIN", "2")),
     MipHighLimLowGain=float(os.environ.get("CALIB_MIP_HIGH_LIM_LOW_GAIN", "20")),
@@ -75,4 +83,4 @@ ApplicationMgr(TopAlg=[calib],
                EvtSel="NONE",
                EvtMax=1,
                ExtSvc=[EventDataSvc("EventDataSvc")],
-               OutputLevel=INFO)
+               OutputLevel=_output_level)
