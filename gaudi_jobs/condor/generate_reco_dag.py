@@ -100,13 +100,26 @@ while read -r CHUNK OUT_DECODED; do
   [ -z "$CHUNK" ] && continue
   # Idempotent: a chunk already decoded is left alone, so a partial submit can
   # simply be resubmitted (and a DAG rescue re-runs only what is missing).
-  if [ -s "$OUT_DECODED" ]; then
+  #
+  # "Already decoded" means the ROOT file OPENS and has the tree -- not merely
+  # that it is non-empty. A k4run killed mid-write (OOM, eviction, an XRootD
+  # Close that timed out) leaves a multi-MB file with NO KEYS in it, which a
+  # `[ -s ]` test happily accepts. Those files then sail through every later
+  # stage until the calibration Fill finally chokes on them ("Tree
+  # 'siwecaldecoded' not found"), hours and thousands of jobs later. Verify the
+  # file, not its size.
+  if [ -s "$OUT_DECODED" ] && python3 -c "import ROOT,sys; ROOT.gErrorIgnoreLevel=ROOT.kFatal; f=ROOT.TFile.Open(sys.argv[1]); sys.exit(0 if f and not f.IsZombie() and f.Get('siwecaldecoded') else 1)" "$OUT_DECODED" >/dev/null 2>&1; then
     SKIPPED=$((SKIPPED+1))
     continue
   fi
 """ + "  " + mkdirs_line('$(dirname "$OUT_DECODED")') + f"""
   RAW_FILES="$CHUNK" RAW2ROOT_OUT="$OUT_DECODED" RAW2ROOT_RUN_SETTINGS_FILE="$RUN_SETTINGS" \\
     k4run "{OPTIONS_DIR}/run_raw2root.py"
+  # And check what we just wrote, before calling it done.
+  if ! python3 -c "import ROOT,sys; ROOT.gErrorIgnoreLevel=ROOT.kFatal; f=ROOT.TFile.Open(sys.argv[1]); sys.exit(0 if f and not f.IsZombie() and f.Get('siwecaldecoded') else 1)" "$OUT_DECODED" >/dev/null 2>&1; then
+    echo "ERROR: $OUT_DECODED was written but has no siwecaldecoded tree" >&2
+    exit 1
+  fi
   N=$((N+1))
 done < "$GROUPLIST"
 echo "decoded $N chunk(s), skipped $SKIPPED already done"
