@@ -31,13 +31,15 @@ PACKAGE_DIR = os.path.dirname(os.path.abspath(__file__))
 REPO_ROOT = os.path.dirname(PACKAGE_DIR)
 
 # Built-in defaults (used when a key is absent from settings.yml). Relative to
-# the repo root; mirror the keys documented in settings.example.yml.
+# the repo root, except reconstruction_dir; mirror the keys documented in
+# settings.example.yml.
 _DEFAULTS = {
     "data_dir": ["."],
     "calib_dir": "./calibration",
     "geometry_dir": "./mappings",
     "configs_dir": "./configs/data",
-    "output_dir": "./validation_output",
+    "reconstruction_dir": "/eos/experiment/drdcalo/siw-ecal/TB2026-06/Reconstruction",
+    "output_dir": None,          # None -> reconstruction_dir(), see output_dir()
     "cache_dir": None,
     "pid_dir": None,
 }
@@ -136,9 +138,30 @@ def config_file(name: str) -> str:
     return os.path.join(configs_dir(), name)
 
 
+def reconstruction_dir() -> str:
+    """Base of the reconstruction area: one directory per run, holding that run's
+    reconstructed events AND its validation output.
+
+    Deliberately NOT under Data/. Data/ is the raw + converted area (raw chunks,
+    decoded chunks); everything downstream of the event builder is a *product* of
+    this repo, is regenerated whenever the calibration or the geometry changes,
+    and belongs somewhere it can be wiped without touching a byte of data."""
+    return resolve(str(_get("reconstruction_dir")))
+
+
+def reconstruction_run_dir(run: str) -> str:
+    """That run's directory under :func:`reconstruction_dir`."""
+    return os.path.join(reconstruction_dir(), run)
+
+
 def output_dir() -> str:
-    """Default output base for validation plots/results."""
-    return resolve(str(_get("output_dir")))
+    """Default output base for validation plots/results.
+
+    Defaults to :func:`reconstruction_dir`: the validation labels its samples by
+    run name and writes to ``<base>/<label>/<category>/``, so a run's plots land
+    next to the very events they were made from, in Reconstruction/<RUN>/."""
+    value = _get("output_dir")
+    return resolve(str(value)) if value else reconstruction_dir()
 
 
 def cache_dir() -> Optional[str]:

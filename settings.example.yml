@@ -27,8 +27,22 @@ geometry_dir: ./mappings
 # Run-list configs (data_reference*.yml: energy/run -> events mapping).
 configs_dir: ./configs/data
 
+# Where the reconstruction lives: one folder per run, holding BOTH that run's
+# reconstructed events (ecal_<run>.root / ecal_<run>.edm4hep.root, written by the
+# CONVERT+RECO DAG) and the validation plots/results made from them.
+#
+# Deliberately OUTSIDE the Data/ tree. Data/ holds the raw chunks and the decoded
+# chunks -- what cannot be recreated. Everything below the event builder is a
+# product: it is regenerated whenever the calibration or the geometry changes, so
+# it belongs somewhere that can be wiped without risking a byte of data.
+reconstruction_dir: /eos/experiment/drdcalo/siw-ecal/TB2026-06/Reconstruction
+
 # Default output base for validation plots / results tables.
-output_dir: ./validation_output
+#   null -> reconstruction_dir (the default): the validation labels each sample by
+#           run name and writes <base>/<label>/<category>/, so a run's plots land
+#           in Reconstruction/<RUN>/, beside the events they were made from.
+#   path -> collect all validation output somewhere else instead.
+output_dir: null
 
 # Where gaudi_source writes (and siwecal_validation / event_viewer look for) the
 # per-run reconstruction output: ecal_<run>.edm4hep.root / ecal_<run>.valtree.root.
