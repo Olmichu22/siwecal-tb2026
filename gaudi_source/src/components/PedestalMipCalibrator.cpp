@@ -771,45 +771,29 @@ struct PedestalMipCalibrator final : Gaudi::Algorithm {
       }
     }
 
-    // Pass 3: global fallback for any channel that not even its slab could fit
-    // -- fill from the average MPV of every genuinely-fit channel (status 1/2)
-    // OR chip/slab-fit fallback (status 4/6, themselves real Langau fits at
-    // coarser granularity) in the whole calibration.
-    double globalSumMpv = 0.;
-    int nGlobalDonors = 0;
-    for (const auto& e : entries) {
-      if (e.status == 1 || e.status == 2 || e.status == 4 || e.status == 6) {
-        globalSumMpv += e.mpv;
-        ++nGlobalDonors;
-      }
-    }
-    int nGlobalFallback = 0;
+    // No global fallback. A channel that neither it, nor its chip, nor its slab
+    // could fit is MASKED -- it does not inherit a detector-wide average MPV.
+    //
+    // That average was a fiction. It pooled every fitted channel in the detector,
+    // including slab 12, the chip-on-board: by design its gain is ~1.65x every
+    // other slab's (MPV ~35 vs ~21.5), so the "average MIP" it produced belongs
+    // to no real channel anywhere. The one channel that ever reached it in th220
+    // (slab 14, chip 0, channel 27) was handed 22.62 while its own slab's mean is
+    // 25.11 and its immediate neighbours fit at 23-26 -- a ~10% error on every hit
+    // that channel would ever record. A wrong MIP is worse than no MIP: a masked
+    // channel is excluded downstream and its absence is visible, whereas a
+    // fabricated one silently miscalibrates every event it touches.
+    //
+    // If a channel fired but nothing at any granularity could be fitted from it,
+    // that is a fact worth surfacing, not papering over.
     int nStillMasked = 0;
     int nZeroEntryMasked = 0;
-    if (nGlobalDonors > 0) {
-      const double globalAvgMpv = globalSumMpv / nGlobalDonors;
-      for (auto& e : entries) {
-        if (e.status != 0) continue;
-        // Same rule as the chip-fallback pass: a channel with zero raw MIP
-        // entries never fired in this run, so it is left masked (mpv=0)
-        // rather than assigned a value it never earned.
-        if (e.integral == 0.) {
-          ++nZeroEntryMasked;
-          continue;
-        }
-        e.mpv = globalAvgMpv;
-        e.empv = -4.;
-        e.status = 5;
-        ++nGlobalFallback;
-      }
-    } else {
-      for (const auto& e : entries) {
-        if (e.status != 0) continue;
-        if (e.integral == 0.) {
-          ++nZeroEntryMasked;
-        } else {
-          ++nStillMasked;
-        }
+    for (const auto& e : entries) {
+      if (e.status != 0) continue;
+      if (e.integral == 0.) {
+        ++nZeroEntryMasked;  // never fired in this run
+      } else {
+        ++nStillMasked;      // fired, but unfittable at channel, chip AND slab level
       }
     }
 
@@ -817,7 +801,7 @@ struct PedestalMipCalibrator final : Gaudi::Algorithm {
     // like the reference tool's mpv_all (layer*20+chip, channel), plus a
     // per-channel status code map (0=masked/nothing available anywhere,
     // 1=genuine fit, 2=histogram-peak fallback, 3=fit-not-miplike,
-    // 4=chip-fit fallback, 5=global-average fallback) so the fallback
+    // 4=chip-fit fallback, 6=slab-fit fallback; there is no global fallback) so the fallback
     // policy's decisions are directly visible, and 1D distributions of the
     // written MPV/chi2ndf.
     std::unique_ptr<TFile> diagFile;
@@ -870,13 +854,16 @@ struct PedestalMipCalibrator final : Gaudi::Algorithm {
       info() << "PedestalMipCalibrator: wrote MIP diagnostics to " << m_diagnosticsFile.value() << endmsg;
     }
     info() << "PedestalMipCalibrator: MIP fallback summary: " << nChipFallback << " channel(s) filled from their "
-           << "chip fit, " << nSlabFallback << " channel(s) filled from their slab fit, " << nGlobalFallback
-           << " channel(s) filled from the global average, "
-           << nZeroEntryMasked << " channel(s) left masked (zero raw MIP entries -- never fired in this run)"
-           << (nStillMasked > 0 ? "; " + std::to_string(nStillMasked) + " channel(s) had some statistics but could "
-                                      "not be filled at all (no genuine fit anywhere in this calibration)"
-                                 : "")
-           << endmsg;
+           << "chip fit, " << nSlabFallback << " channel(s) filled from their slab fit, " << nZeroEntryMasked
+           << " channel(s) masked (zero raw MIP entries -- never fired in this run)" << endmsg;
+    if (nStillMasked > 0) {
+      // Not a detail: these channels DID fire, and nothing at any granularity
+      // could be fitted from them. They used to be quietly handed the
+      // detector-wide average MPV. Now they are masked, and said out loud.
+      warning() << "PedestalMipCalibrator: " << nStillMasked
+                << " channel(s) had MIP statistics but could not be fitted at channel, chip OR slab level -- "
+                << "MASKED (no MIP). Investigate before trusting this calibration." << endmsg;
+    }
     info() << "PedestalMipCalibrator: wrote MIP table to " << m_outputMipFile.value() << endmsg;
     return StatusCode::SUCCESS;
   }
