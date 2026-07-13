@@ -20,17 +20,18 @@ OPTIONS_DIR = os.path.join(REPO_ROOT, "gaudi_source", "options")
 # release so the AFS-resident gaudi_source/build is ABI-compatible.
 KEY4HEP_RELEASE = "2026-04-08"
 
-# EOS scratch area for the Condor pipeline's intermediate files. NEVER
-# auto-deleted by any script here (see the repo-wide "never delete anything
-# under /Data/" rule).
+# EOS scratch area for the Fill stage's histograms. NEVER auto-deleted by any
+# script here (see the repo-wide "never delete anything under /Data/" rule).
 #
-# Deliberately still under rundata_converted_test/ even though converted
-# events now go to rundata_converted_gaudi/: this holds ~1.1 TB of already
-# validated per-chunk/per-run/per-threshold histograms (incl. the merged
-# merged_th220/th230.root the current calibration tables were fitted from).
-# It is calibration scratch, not converted events, and repointing it would
-# orphan all of it and force a full re-fill for no gain.
-DEFAULT_FILL_SCRATCH_DIR = "/eos/experiment/drdcalo/siw-ecal/TB2026-06/Data/rundata_converted_test/calib_fill_scratch"
+# Sits at the top level of Data/, NOT under a rundata_converted_* area: these
+# are calibration histograms, not converted events, and the previous home
+# (rundata_converted_test/) was deleted wholesale in July 2026 precisely
+# because it looked like a scratch area for converted events. That took the
+# merged_th220/th230.root the current MIP/pedestal tables were fitted from with
+# it -- the tables themselves survived only because they live in git, under
+# calibration/MuonCalib_gaudi/. Re-fitting now means re-running Fill from the
+# chunks in rundata_converted_gaudi/<RUN>/chunks/.
+DEFAULT_FILL_SCRATCH_DIR = "/eos/experiment/drdcalo/siw-ecal/TB2026-06/Data/calib_fill_scratch"
 
 # IMPORTANT: shell `mkdir -p` reproducibly FAILS on this EOS FUSE mount --
 # even creating a single new level under an already-existing, writable
