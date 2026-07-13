@@ -33,6 +33,7 @@
 #include "TTree.h"
 
 #include <limits>
+#include <algorithm>
 #include <map>
 #include <memory>
 #include <regex>
@@ -200,8 +201,54 @@ struct EcalEventBuilder final : Gaudi::Algorithm {
     EcalTreeWriter writer(cfg.maxHitsPerEvent, runId, thresholdDac);
 
     const Long64_t nEntries = tree->GetEntries();
+
+    // A run's raw chunks are decoded independently, so an acquisition that spans
+    // a raw-chunk boundary comes out TWICE: once at the end of chunk N and once
+    // at the start of chunk N+1, each copy holding only the part of the readout
+    // that fell in that file. Measured on run_000060: 55 of 28,860 acquisitions
+    // (0.19%), and every one of them a pair of CONSECUTIVE chain entries.
+    //
+    // Keep the fuller copy, drop the fragment. Deliberately NOT "drop the second
+    // one": the fragment is the FIRST of the pair about half the time (run_000060:
+    // the first entry is the fuller one in only 27 of the 55 pairs, e.g. acq 1558
+    // is 4 hits followed by 35), so dropping by position would throw away the good
+    // copy in half the cases -- worse than the double counting it set out to fix.
+    std::vector<char> skipEntry(static_cast<std::size_t>(nEntries), 0);
+    long long duplicatesDropped = 0;
+    {
+      int prevAcq = -1;
+      Long64_t prevEntry = -1;
+      long long prevHits = -1;
+      for (Long64_t entry = 0; entry < nEntries; ++entry) {
+        tree->GetEntry(entry);
+        long long hits = 0;
+        for (int slb = 0; slb < buf->nSlboards && slb < kSlbDepth; ++slb) {
+          for (int chip = 0; chip < kSkirocsPerAsu; ++chip) {
+            for (int sca = 0; sca < kScasInSkiroc; ++sca) {
+              hits += std::max(0, buf->nhits[slb][chip][sca]);
+            }
+          }
+        }
+        if (prevEntry >= 0 && buf->acqNumber == prevAcq) {
+          skipEntry[static_cast<std::size_t>(hits > prevHits ? prevEntry : entry)] = 1;
+          ++duplicatesDropped;
+        }
+        prevAcq = buf->acqNumber;
+        prevEntry = entry;
+        prevHits = hits;
+      }
+    }
+    if (duplicatesDropped > 0) {
+      info() << "EcalEventBuilder: dropped " << duplicatesDropped
+             << " duplicate acquisition fragment(s) at raw-chunk boundaries (kept the fuller copy of each)"
+             << endmsg;
+    }
+
     long long totalEvents = 0;
     for (Long64_t entry = 0; entry < nEntries; ++entry) {
+      if (skipEntry[static_cast<std::size_t>(entry)]) {
+        continue;
+      }
       tree->GetEntry(entry);
       const k4siwecal::AcquisitionView acq(buf->nSlboards, buf->slboardId, buf->chipId, buf->bcid, buf->nhits,
                                             buf->hitbitHigh, buf->adcHigh, buf->adcLow);
@@ -284,6 +331,7 @@ struct EcalEventBuilder final : Gaudi::Algorithm {
   // Python AcquisitionReader but never referenced by the clustering/hit
   // collection algorithms themselves).
   struct TreeBuffers {
+    int acqNumber = -1;
     int nSlboards = 0;
     int slboardId[kSlbDepth];
     int chipId[kSlbDepth][kSkirocsPerAsu];
@@ -295,6 +343,7 @@ struct EcalEventBuilder final : Gaudi::Algorithm {
   };
 
   static void bindReadBranches(TTree& tree, TreeBuffers& buf) {
+    tree.SetBranchAddress("acqNumber", &buf.acqNumber);
     tree.SetBranchAddress("n_slboards", &buf.nSlboards);
     tree.SetBranchAddress("slboard_id", buf.slboardId);
     tree.SetBranchAddress("chipid", buf.chipId);
