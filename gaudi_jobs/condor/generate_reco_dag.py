@@ -129,6 +129,42 @@ echo "[reco] $RUN: done"
     write_executable(os.path.join(out_dir, "reco.sh"), content)
 
 
+def _validate_sh(out_dir):
+    # One job per run. --results-id is passed explicitly: the validation would
+    # otherwise pick the next id free on disk, and every job running at the same
+    # time would pick the SAME one and overwrite the others' results table.
+    content = f"""#!/bin/bash
+set -eo pipefail
+# validate.sh <run> <ecal_file> <out_base> <results_id>
+RUN="$1"; ECAL="$2"; OUT_BASE="$3"; RESULTS_ID="$4"
+
+""" + env_wrapper_preamble() + f"""
+echo "[validate] $RUN: $ECAL -> $OUT_BASE/$RUN/"
+python3 -m siwecal_validation --file "$ECAL" --run "$RUN" \\
+    --out "$OUT_BASE" --results-id "$RESULTS_ID"
+"""
+    write_executable(os.path.join(out_dir, "validate.sh"), content)
+
+
+def _validate_sub(out_dir, log_dir, request_memory, job_flavour):
+    content = f"""universe                = vanilla
+executable              = {out_dir}/validate.sh
+arguments               = "$(run) $(ecal) $(out_base) $(results_id)"
+log                     = {log_dir}/validate_$(run).log
+output                  = {log_dir}/validate_$(run).out
+error                   = {log_dir}/validate_$(run).err
+request_cpus            = 1
+request_memory          = ifthenelse(NumJobStarts <= 0, {request_memory}, {request_memory} * (NumJobStarts + 1))
+request_disk            = 4000M
+should_transfer_files   = NO
+getenv                  = False
+periodic_release        = (JobStatus == 5) && (HoldReasonCode == 34) && (NumJobStarts < 5)
++JobFlavour             = "{job_flavour}"
+queue
+"""
+    write_text(os.path.join(out_dir, "validate.sub"), content)
+
+
 def _convert_sub(out_dir, log_dir, run, request_memory, job_flavour):
     content = f"""universe                = vanilla
 executable              = {out_dir}/convert.sh
@@ -185,6 +221,11 @@ def main(argv=None):
                    help="request_memory in MB for a RECO job (event building holds a run's events in memory).")
     p.add_argument("--convert-job-flavour", default="microcentury", help="+JobFlavour for CONVERT (default 1h).")
     p.add_argument("--reco-job-flavour", default="workday", help="+JobFlavour for RECO (default 8h).")
+    p.add_argument("--no-validation", action="store_true",
+                   help="Stop after RECO; do not run the validation stage.")
+    p.add_argument("--validate-request-memory", type=int, default=6000,
+                   help="request_memory in MB for a VALIDATE job.")
+    p.add_argument("--validate-job-flavour", default="workday", help="+JobFlavour for VALIDATE (default 8h).")
     p.add_argument("--keep-job-logs", action="store_true",
                    help="Keep every job's .out/.err. By default they are deleted when the node succeeds, to "
                         "protect the AFS logs/ directory's entry limit (see calibration/condor/README.md).")
@@ -204,7 +245,7 @@ def main(argv=None):
     slab_z = os.path.join(_REPO, "event_display", "conversion", "slab_z_positions.yml")
 
     dag = []
-    for run, raw_dir in run_folders:
+    for results_id, (run, raw_dir) in enumerate(run_folders, 1):
         raw_chunks = raw_chunk_files(raw_dir, run)
         if not raw_chunks:
             print(f"ERROR: no raw chunks for {run} in {raw_dir}", file=sys.stderr)
@@ -243,6 +284,16 @@ def main(argv=None):
         dag.append(f"PARENT convert_{run} CHILD reco_{run}")
         if not args.keep_job_logs:
             dag.append(f"SCRIPT POST reco_{run} {_CLEANUP} $RETURN {os.path.join(log_dir, f'reco_{run}')}")
+
+        if not args.no_validation:
+            dag.append(f"JOB validate_{run} {out_dir}/validate.sub")
+            dag.append(f'VARS validate_{run} run="{run}" ecal="{ecal_out}" '
+                       f'out_base="{args.reco_dir}" results_id="{results_id}"')
+            dag.append(f"RETRY validate_{run} 2")
+            dag.append(f"PARENT reco_{run} CHILD validate_{run}")
+            if not args.keep_job_logs:
+                dag.append(f"SCRIPT POST validate_{run} {_CLEANUP} $RETURN "
+                           f"{os.path.join(log_dir, f'validate_{run}')}")
         dag.append("")
 
         print(f"[{run}] th={th}  {len(raw_chunks)} chunk(s) -> {cdir}/  reco -> {rdir}/")
@@ -252,6 +303,9 @@ def main(argv=None):
     _convert_sh(out_dir)
     _reco_sh(out_dir)
     _reco_sub(out_dir, log_dir, args.reco_request_memory, args.reco_job_flavour)
+    if not args.no_validation:
+        _validate_sh(out_dir)
+        _validate_sub(out_dir, log_dir, args.validate_request_memory, args.validate_job_flavour)
     dag_path = os.path.join(out_dir, "reco.dag")
     write_text(dag_path, "\n".join(dag) + "\n")
     print(f"\n{len(run_folders)} run(s). Submit with:\n  condor_submit_dag {dag_path}")
