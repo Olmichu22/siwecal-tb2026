@@ -59,13 +59,35 @@ interactively; they are just not how you process a campaign.
 
 ## Layout on EOS
 
+Two areas, split by *can this be recreated?*
+
 ```
-rundata_converted_gaudi/<RUN>/
-├── chunks/chunk_0000.root …     decoded (CONVERT). Keep: the calibration Fill
-│                                 reads these, and re-reco needs them.
-├── ecal_<RUN>.root              event-built (RECO)
-└── ecal_<RUN>.edm4hep.root      PID/EDM4hep (RECO)
+Data/rundata_converted_gaudi/<RUN>/          # data — cannot be recreated
+└── chunks/chunk_0000.root …                 decoded (CONVERT). Keep: the
+                                             calibration Fill reads these, and
+                                             so does every re-reco.
+
+Reconstruction/                              # products — regenerate at will
+├── <RUN>/
+│   ├── ecal_<RUN>.root                      event-built (RECO)
+│   ├── ecal_<RUN>.edm4hep.root              PID/EDM4hep (RECO)
+│   └── energy_dist/ weighte/ moliere/ …     validation plots for this run
+├── Draft/results_id<NN>.csv / .txt          cross-run results tables
+└── summary/                                 aggregate (all-energies) plots
 ```
+
+Everything below the event builder is a *product*: it is rebuilt whenever the
+calibration or the geometry changes, so it lives outside `Data/` and the whole
+`Reconstruction/` tree can be wiped without risking a byte of data. The
+validation labels each sample by run name and defaults its output base to
+`reconstruction_dir` (`settings.yml`), which is why a run's plots land beside the
+very events they were made from. Its results tables span runs, so they do not
+belong to any one of them; they go in `Draft/` — one pair of files per
+invocation, which loose at the top of `Reconstruction/` would quickly bury the
+run folders.
+
+Both locations come from `siwecal_common.paths` (`reconstruction_dir()` /
+`DEFAULT_CONVERTED_DIR`) — no script hard-codes them a second time.
 
 ## Restarting, retries, logs
 

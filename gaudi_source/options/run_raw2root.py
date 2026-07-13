@@ -31,6 +31,13 @@ else:
         raise SystemExit("Set RAW_FILES (comma list) or RAW_FILES_LIST (path to a newline-separated file)")
     input_files = [f for f in raw_files.split(",") if f.strip()]
 
+# Multi-file input is FINE. It was briefly believed to silently drop ~75% of the
+# acquisitions on some runs; that was measured against a ROOT file still being
+# written, and does not reproduce: run_000012's 292 chunks decoded in one process
+# give 119,211 entries, byte-for-byte the same acquisitions as 292 separate
+# processes. The pipeline still decodes one chunk per process, but for
+# parallelism, not correctness.
+
 from Gaudi.Configuration import INFO
 from Configurables import EventDataSvc
 from Configurables import EcalRawDecoder

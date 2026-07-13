@@ -33,6 +33,7 @@
 #include "TTree.h"
 
 #include <limits>
+#include <algorithm>
 #include <map>
 #include <memory>
 #include <regex>
@@ -200,11 +201,65 @@ struct EcalEventBuilder final : Gaudi::Algorithm {
     EcalTreeWriter writer(cfg.maxHitsPerEvent, runId, thresholdDac);
 
     const Long64_t nEntries = tree->GetEntries();
+
+    // A run's raw chunks are decoded independently, so an acquisition that spans
+    // a raw-chunk boundary comes out TWICE: once at the end of chunk N and once
+    // at the start of chunk N+1, each copy holding only the part of the readout
+    // that fell in that file. Measured on run_000060: 55 of 28,860 acquisitions
+    // (0.19%), and every one of them a pair of CONSECUTIVE chain entries.
+    //
+    // The two copies are COMPLEMENTARY, not redundant: in all 55 pairs their
+    // populated (slab, chip, SCA) cells are entirely disjoint, so splicing them
+    // back together recovers the whole readout window and loses nothing. Dropping
+    // either copy would throw away real hits (~0.29% of a run's) -- and dropping
+    // "the second one" would be worse still, since the fragment is the FIRST of
+    // the pair in 34 of those 55 (acq 1558 is 4 hits followed by 35).
+    //
+    // The pre-pass reads only acqNumber, so it costs one cheap scan of the chain.
+    std::vector<char> mergeWithNext(static_cast<std::size_t>(nEntries), 0);
+    std::vector<char> absorbed(static_cast<std::size_t>(nEntries), 0);
+    long long spliced = 0;
+    {
+      tree->SetBranchStatus("*", false);
+      tree->SetBranchStatus("acqNumber", true);
+      int prevAcq = -1;
+      for (Long64_t entry = 0; entry < nEntries; ++entry) {
+        tree->GetEntry(entry);
+        if (entry > 0 && buf->acqNumber == prevAcq && !absorbed[static_cast<std::size_t>(entry - 1)]) {
+          mergeWithNext[static_cast<std::size_t>(entry - 1)] = 1;
+          absorbed[static_cast<std::size_t>(entry)] = 1;
+          ++spliced;
+        }
+        prevAcq = buf->acqNumber;
+      }
+      tree->SetBranchStatus("*", true);
+    }
+    if (spliced > 0) {
+      info() << "EcalEventBuilder: spliced " << spliced
+             << " acquisition(s) split across a raw-chunk boundary (both halves kept)" << endmsg;
+    }
+
+    // Only materialised when an acquisition actually needs splicing (a few dozen
+    // per run): TreeBuffers is a couple of MB, far too big to copy per entry.
+    auto splice = std::make_unique<TreeBuffers>();
+
     long long totalEvents = 0;
     for (Long64_t entry = 0; entry < nEntries; ++entry) {
+      if (absorbed[static_cast<std::size_t>(entry)]) {
+        continue;  // already folded into the previous entry
+      }
       tree->GetEntry(entry);
-      const k4siwecal::AcquisitionView acq(buf->nSlboards, buf->slboardId, buf->chipId, buf->bcid, buf->nhits,
-                                            buf->hitbitHigh, buf->adcHigh, buf->adcLow);
+
+      const TreeBuffers* src = buf.get();
+      if (mergeWithNext[static_cast<std::size_t>(entry)]) {
+        *splice = *buf;
+        tree->GetEntry(entry + 1);
+        mergeAcquisition(*splice, *buf);
+        src = splice.get();
+      }
+
+      const k4siwecal::AcquisitionView acq(src->nSlboards, src->slboardId, src->chipId, src->bcid, src->nhits,
+                                            src->hitbitHigh, src->adcHigh, src->adcLow);
       auto events = builder.build(acq);
       for (int eventIndex = 0; eventIndex < static_cast<int>(events.size()); ++eventIndex) {
         writer.write(events[eventIndex], static_cast<int>(entry), eventIndex);
@@ -284,6 +339,7 @@ struct EcalEventBuilder final : Gaudi::Algorithm {
   // Python AcquisitionReader but never referenced by the clustering/hit
   // collection algorithms themselves).
   struct TreeBuffers {
+    int acqNumber = -1;
     int nSlboards = 0;
     int slboardId[kSlbDepth];
     int chipId[kSlbDepth][kSkirocsPerAsu];
@@ -294,7 +350,41 @@ struct EcalEventBuilder final : Gaudi::Algorithm {
     int adcLow[kSlbDepth][kSkirocsPerAsu][kScasInSkiroc][kChannelsInSkiroc];
   };
 
+  /// Splice the other half of a boundary-split acquisition into `dst`.
+  ///
+  /// The two halves are disjoint (verified on every one of run_000060's 55 pairs:
+  /// no populated (slab, chip, SCA) cell appears in both), so this is a union, not
+  /// a sum -- a cell is taken from `src` only where `dst` has nothing. Written that
+  /// way rather than as a blind add so that an overlap, if one ever occurs, keeps
+  /// `dst`'s value instead of silently double-counting the hits.
+  static void mergeAcquisition(TreeBuffers& dst, const TreeBuffers& src) {
+    dst.nSlboards = std::max(dst.nSlboards, src.nSlboards);
+    for (int slb = 0; slb < kSlbDepth; ++slb) {
+      if (dst.slboardId[slb] < 0 && src.slboardId[slb] >= 0) {
+        dst.slboardId[slb] = src.slboardId[slb];
+      }
+      for (int chip = 0; chip < kSkirocsPerAsu; ++chip) {
+        if (dst.chipId[slb][chip] < 0 && src.chipId[slb][chip] >= 0) {
+          dst.chipId[slb][chip] = src.chipId[slb][chip];
+        }
+        for (int sca = 0; sca < kScasInSkiroc; ++sca) {
+          if (dst.nhits[slb][chip][sca] > 0 || src.nhits[slb][chip][sca] <= 0) {
+            continue;  // dst already holds this cell, or src has nothing to give
+          }
+          dst.nhits[slb][chip][sca] = src.nhits[slb][chip][sca];
+          dst.bcid[slb][chip][sca] = src.bcid[slb][chip][sca];
+          for (int ch = 0; ch < kChannelsInSkiroc; ++ch) {
+            dst.hitbitHigh[slb][chip][sca][ch] = src.hitbitHigh[slb][chip][sca][ch];
+            dst.adcHigh[slb][chip][sca][ch] = src.adcHigh[slb][chip][sca][ch];
+            dst.adcLow[slb][chip][sca][ch] = src.adcLow[slb][chip][sca][ch];
+          }
+        }
+      }
+    }
+  }
+
   static void bindReadBranches(TTree& tree, TreeBuffers& buf) {
+    tree.SetBranchAddress("acqNumber", &buf.acqNumber);
     tree.SetBranchAddress("n_slboards", &buf.nSlboards);
     tree.SetBranchAddress("slboard_id", buf.slboardId);
     tree.SetBranchAddress("chipid", buf.chipId);
