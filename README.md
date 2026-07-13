@@ -6,18 +6,29 @@ takes the decoded raw data, builds physics events, validates them, and lets you
 inspect them interactively — three packages that share one geometry, one
 calibration and one configuration file.
 
+The whole reconstruction is **C++/Gaudi** (`gaudi_source`), driven on the batch
+farm by one Condor DAG. `siwecal_eventbuilder/` is the ORIGINAL Python event
+builder: it is **not** what the pipeline runs — see "Two event builders" below.
+
 ```
- RAW2ROOT (.root, siwecaldecoded tree)        <-- produced upstream (not in this repo)
+ RAW  <run>_raw.bin_NNNN                      <-- read-only, under Data/rundata/
         │
-        ▼
- ┌─────────────────────────┐   reconstructed events
- │  siwecal_eventbuilder   │   ─────────────────────►  ecal_<run>.root  (ecal tree)
+        ▼  CONVERT — one k4run per raw chunk, in parallel (EcalRawDecoder)
+ ┌─────────────────────────┐
+ │  gaudi_source (C++)     │  ───────────────►  Data/rundata_converted_gaudi/
+ │  EcalRawDecoder         │                      <run>/chunks/chunk_NNNN.root
+ └─────────────────────────┘                      (siwecaldecoded tree)
+        │
+        ▼  RECO — event building: chains the chunks, no merge step
+ ┌─────────────────────────┐
+ │  gaudi_source (C++)     │  ───────────────►  Reconstruction/<run>/
+ │  EcalEventBuilder       │                      ecal_<run>.root  (ecal tree)
  └─────────────────────────┘
         │
-        ▼
- ┌─────────────────────────┐   per-event metrics + cuts (C++), one of two formats:
- │      gaudi_source       │   ─────────────────────►  ecal_<run>.edm4hep.root
- │  shower vars + selection│                           ecal_<run>.valtree.root
+        ▼  RECO — shower vars + selection (same job, second k4run)
+ ┌─────────────────────────┐
+ │  gaudi_source (C++)     │  ───────────────►  Reconstruction/<run>/
+ │  EcalToEDM4hep + PID    │                      ecal_<run>.edm4hep.root
  └─────────────────────────┘
         │                                   │
         ▼                                   ▼
@@ -36,7 +47,7 @@ that output — neither recomputes metrics nor writes any tree.
 
 | Package | What it does | Docs |
 |---|---|---|
-| [`siwecal_eventbuilder`](siwecal_eventbuilder/README.md) | Turns the decoded raw tree into reconstructed `ecal` events (BCID clustering, calibration, pad/geometry mapping). | builder README |
+| [`siwecal_eventbuilder`](siwecal_eventbuilder/README.md) | **Legacy Python event builder — the pipeline does NOT use it.** Kept as a reference implementation; the production event builder is `gaudi_source`'s C++ `EcalEventBuilder`. See "Two event builders". | builder README |
 | [`siwecal_validation`](siwecal_validation/README.md) | Validation plots only: reads the per-event metrics from the `gaudi_source` output (EDM4hep / valtree), applies cuts, fits the energy peak, writes PNGs + results. Generates no trees. | validation README |
 | [`event_viewer`](event_viewer/README.md) | Plotly Dash app to browse events one by one and explore file-level distributions with dynamic cuts and clustering. | viewer README |
 | [`event_display`](event_display/README.md) | Standalone ROOT TEve 3-D single-event display. Runs directly under key4hep (no virtualenv needed) — just `source setup.sh` and launch. | display README |
@@ -358,17 +369,57 @@ Heavy per-run data (`ecal_<run>.root`, the `gaudi_source` outputs
 `ecal_<run>.edm4hep.root` / `ecal_<run>.valtree.root`, raw inputs) live
 **outside** the repo, under `data_dir`.
 
+## Two event builders
+
+There are two implementations of the event builder, and **only one of them runs**:
+
+| | `gaudi_source` — `EcalEventBuilder` | `siwecal_eventbuilder` |
+|---|---|---|
+| Language | C++ (Gaudi component) | Python |
+| Used by the pipeline | **YES** — this is production | no |
+| Entry point | `k4run gaudi_source/options/run_event_builder.py` | `python -m siwecal_eventbuilder` |
+| Source | `gaudi_source/include/k4SiWEcalReco/EventBuilder.h` (logic) + `src/components/EcalEventBuilder.cpp` (Gaudi wrapper) | `siwecal_eventbuilder/event_builder.py` |
+
+Everything the reconstruction depends on lives in the **C++** one: low-gain
+recovery for saturated hits, the ADC saturation threshold, `hit_w_energy`, and the
+splicing of acquisitions split across a raw-chunk boundary. The Python one has
+**none of it** and has drifted.
+
+This has already bitten us: a low-gain-saturation fix was once committed to the
+Python builder only, so the pipeline — which runs the C++ one — silently did not
+have it. If you change event-building behaviour, change `EventBuilder.h`. The
+only part of `siwecal_eventbuilder` the pipeline still imports is
+`cli.resolve_gaudi_calib_files()`, which picks the calibration tables for a
+threshold.
+
+### Note on Gaudi's event loop
+
+`EcalEventBuilder` is a plain `Gaudi::Algorithm` that does **all** its work in
+`initialize()`, with `EvtSel="NONE"`, `EvtMax=1` and a no-op `execute()`. It does
+not use Gaudi's event loop, and cannot: one DAQ *acquisition* (a SKIROC readout
+cycle) contains **many** physics events, separated by BCID clustering — run_000060
+turns 28,915 acquisitions into 66,958 events. Gaudi needs `EvtMax` fixed before
+the process starts, and that count only exists once the events are built.
+
+That is also why PID runs as a **second** `k4run` process: `EcalToEDM4hep` /
+`EcalPidTransformer` *are* k4FWCore components that follow the event loop, so
+`run_pid.py` opens the `ecal` file, reads `GetEntries()`, and only then sets
+`EvtMax`.
+
 ## End-to-end example
 
 ```bash
 source setup.sh
 
-# 1. Build events for one run (or a whole energy point with --energy / --all)
-python -m siwecal_eventbuilder --run TB2026CERN_run_000013 --th 220
+# The whole campaign, on the batch farm: CONVERT (one job per raw chunk) ->
+# RECO (event building + PID) -> VALIDATE, one folder per run.
+python gaudi_jobs/condor/generate_reco_dag.py \
+    --runs TB2026CERN_run_000012,TB2026CERN_run_000013 \
+    --out-dir gaudi_jobs/condor/generated/electrons
+condor_submit_dag gaudi_jobs/condor/generated/electrons/reco.dag
 
-# 2. Reconstruct: shower variables + cuts -> ecal_<run>.edm4hep.root (needs key4hep,
-#    see the gaudi_source README; add --validation for the viewer's slider blocks)
-python gaudi_jobs/run_pid_batch.py --run TB2026CERN_run_000007
+# Or one run interactively (same three stages, no farm):
+python gaudi_jobs/run_full_pipeline_batch.py --run TB2026CERN_run_000013
 
 # 3. Validate it: plots + fits with the cuts you want (reads the step-2 output)
 python -m siwecal_validation --run TB2026CERN_run_000007 --nhit-min 20
