@@ -65,7 +65,7 @@ from calib_run_utils import parse_run_folder_list, raw_chunk_files
 from condor_common import DEFAULT_CONVERTED_DIR, OPTIONS_DIR, chunks_dir, condor_log_dir, env_wrapper_preamble, \
     mkdirs_line, write_executable, write_text
 from siwecal_common import paths
-from siwecal_eventbuilder.cli import resolve_gaudi_calib_files
+from siwecal_eventbuilder.cli import MIP_CALIB_TH, resolve_gaudi_calib_files
 from siwecal_eventbuilder.run_settings import read_threshold_dac
 
 _CLEANUP = os.path.join(_REPO, "gaudi_jobs", "calibration", "condor", "cleanup_job_logs.sh")
@@ -248,6 +248,12 @@ def main(argv=None):
     p.add_argument("--reco-dir", default=paths.reconstruction_dir(),
                    help=f"Where <RUN>/ecal_*.root go (outside Data/). "
                         f"Default: {paths.reconstruction_dir()}")
+    p.add_argument("--mip-th", default=MIP_CALIB_TH,
+                   help=f"Threshold whose MIP tables every run is calibrated against, whatever threshold it "
+                        f"was taken at. Default: {MIP_CALIB_TH}. A high trigger cuts into the MIP peak and "
+                        f"inflates the fitted MPV (th230 reads 1.47x th220 for identical electronics), so "
+                        f"th220's table is the unbiased one for every run. Pedestals are unaffected by the "
+                        f"trigger and stay on each run's own threshold.")
     p.add_argument("--out-dir", required=True, help="Directory to write the DAG, subs, wrappers and logs into.")
     p.add_argument("--chunks-per-job", type=int, default=20,
                    help="Raw chunks decoded by ONE Condor job, each in its own k4run (default 20). "
@@ -311,7 +317,7 @@ def main(argv=None):
         if args.convert_only:
             ped = mip = ped_lg = mip_lg = ""
         else:
-            ped, mip, ped_lg, mip_lg = resolve_gaudi_calib_files(th)
+            ped, mip, ped_lg, mip_lg = resolve_gaudi_calib_files(th, mip_th=args.mip_th)
 
         cdir = chunks_dir(args.converted_dir, run)
         os.makedirs(cdir, exist_ok=True)

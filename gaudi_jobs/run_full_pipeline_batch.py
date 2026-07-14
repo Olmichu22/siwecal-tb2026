@@ -45,7 +45,7 @@ import sys
 import ROOT
 
 from siwecal_common import paths
-from siwecal_eventbuilder.cli import resolve_gaudi_calib_files
+from siwecal_eventbuilder.cli import MIP_CALIB_TH, resolve_gaudi_calib_files
 from siwecal_eventbuilder.run_settings import read_threshold_dac
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
@@ -67,6 +67,13 @@ def main(argv=None):
     p.add_argument("--th", default=None,
                    help="Threshold label used to resolve the MuonCalib_gaudi calibration folder (e.g. 230). "
                         "Default: read the run's ThresholdDAC from its Run_Settings.txt")
+    p.add_argument("--mip-th", default=MIP_CALIB_TH,
+                   help=f"Threshold whose MIP tables to calibrate against, whatever threshold the run was "
+                        f"taken at. Default: {MIP_CALIB_TH}. The MIP MPV in ADC is a property of the preamp, "
+                        "not of the discriminator, but a HIGH trigger cuts into the MIP peak and inflates the "
+                        "fit (th230's MPV is 1.47x th220's for identical electronics). th220's is the "
+                        "unbiased one. Pedestals are NOT affected and stay on the run's own threshold. "
+                        "Pass --mip-th <th> to use a run's own MIP table instead.")
     p.add_argument("--run-id", type=int, default=None, help="Numeric run id for the ecal tree's `run` branch "
                                                               "(default: parsed from the run name)")
     p.add_argument("--raw-dir", default=None,
@@ -121,7 +128,8 @@ def main(argv=None):
                 print(f"[calib] {run}: ThresholdDAC={th} (from {run_settings_file})")
             else:
                 print(f"[calib] {run}: ThresholdDAC={th} (forced via --th)")
-            auto_pedestal, auto_mip, auto_pedestal_lg, auto_mip_lg = resolve_gaudi_calib_files(th)
+            auto_pedestal, auto_mip, auto_pedestal_lg, auto_mip_lg = resolve_gaudi_calib_files(
+                th, mip_th=args.mip_th)
             pedestal_file = pedestal_file or auto_pedestal
             mip_file = mip_file or auto_mip
             pedestal_file_lg = pedestal_file_lg or auto_pedestal_lg

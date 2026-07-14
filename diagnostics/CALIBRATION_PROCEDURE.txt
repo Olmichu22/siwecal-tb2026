@@ -1,0 +1,230 @@
+================================================================================
+ SiW-ECAL TB2026 -- HOW A HIT BECOMES AN ENERGY
+ The calibration procedure as it stands, and why each step is what it is.
+ Last measured: 2026-07-14, on run_000012 (th230) and run_000072 (th220).
+================================================================================
+
+THE ONE-LINE VERSION
+--------------------
+  adc_high < 1500 :  energy = (adc_high - ped_hg) / MIP_hg
+  adc_high >= 1500:  energy = ((adc_low - ped_lg - c) / k) / MIP_hg
+
+  with  k = 0.0962,  c = 1.45,  and MIP_hg ALWAYS taken from the th220 tables,
+  whatever threshold the run was actually taken at.
+
+  MIP_lg is not used anywhere. That is the point of the whole thing.
+
+
+--------------------------------------------------------------------------------
+1. THE PEDESTAL  --  from the run's OWN threshold
+--------------------------------------------------------------------------------
+Measured per (slab, chip, channel, SCA) from the samples where the channel did NOT
+fire. The trigger cannot bias it, because the trigger is what defines the samples
+it is NOT measured from.
+
+Each threshold keeps its own pedestal table, and that is deliberate. The th220 and
+th230 tables genuinely differ -- median 1.27 ADC in the high gain, RMS 3.3, with
+68% of channel-SCAs apart by more than 1 ADC -- and that is real run-to-run drift,
+not error. Forcing one threshold's pedestals onto another run would inject an error
+that does not exist today.
+
+  VERIFIED: the low-gain baseline of non-triggering samples sits at -0.25 ADC
+  relative to the table, i.e. at zero. The pedestal table is correct.
+  (diagnostics/compare/pedestal_shift_*.png)
+
+
+--------------------------------------------------------------------------------
+2. THE MIP (high gain)  --  ALWAYS from th220, for EVERY run
+--------------------------------------------------------------------------------
+This is the step that looks wrong and is not. A run taken at th230 is calibrated
+against th220's MIP table.
+
+The reason: the MIP MPV, in ADC, is a property of the PREAMP, not of the
+discriminator. run_000060 (DAC 220) and run_000004 (DAC 230) have identical
+FeedbackCap (15), HoldDelay (110) and FSPeakTime (2) -- only ThresholdDAC differs --
+so one MIP has to give the same ADC in both. It does not:
+
+    th220   MIP_hg = 21.69 ADC     agrees with the reference tool to 1.6%
+    th230   MIP_hg = 32.40 ADC     inflated x1.47
+
+The MIP histogram is only filled when the channel FIRES, so the discriminator cuts
+the spectrum from the LEFT. At th230 that cut lands at 18-22 ADC -- on top of the
+MIP peak itself (~22) -- removing 70-83% of the peak-region entries and dragging the
+fit upward. At th220 it cuts at 11-13, well below the peak, and the fit is clean.
+
+  PROOF that the gains really are equal: normalise the two MIP spectra on their
+  TAILS (ADC > 40), which no trigger reaches. They overlap (ratio 1.12; it would be
+  1.49 if the gains differed). What does NOT overlap is the peak region -- exactly
+  where th230's trigger ate the data.
+  (diagnostics/compare/th220_vs_th230_slab11_split30.png)
+
+  So th230's MIP table is not correct even for th230. th220's is correct for
+  everyone. Code: siwecal_eventbuilder/cli.py::MIP_CALIB_TH = "220".
+  Override with --mip-th <th> if you ever need the old behaviour.
+
+
+--------------------------------------------------------------------------------
+3. THE SWITCH  --  raw adc_high >= 1500
+--------------------------------------------------------------------------------
+Above this, the high-gain ADC no longer tracks the deposit and the energy is read
+from the low gain instead.
+
+1500 is measured, not guessed. Use the LOW gain as the ruler (it is linear over this
+whole range), slice in adc_low, take the median adc_high per slice, and see where it
+falls below the straight line:
+
+    raw adc_high     1200     1500     1700     1900
+    non-linearity    0.4%     1.2%     1.9%     3.9%     (both runs agree)
+
+The switch used to be 1900, where the high gain is ALREADY 4% low -- a one-sided
+under-read on every hit in the 1500-1900 band, and a bias does not average away over
+the hits of an event the way noise does.
+
+1900 was chosen to keep hits AWAY from the low gain, back when the low gain meant
+MIP_lg (step 4). That reason is now gone. What moving the switch down costs instead
+is noise -- low-gain noise (~1 ADC) is amplified by 1/k = 10.4 -- and the trade
+crosses over right here:
+
+    switch           1200     1500     1900
+    bias  (syst.)    0.35%    1.15%    3.85%
+    noise (random)   0.87%    0.69%    0.55%
+
+  (diagnostics/th230/hg_linearity_000012_th230.png, and th220/ for run72)
+
+
+--------------------------------------------------------------------------------
+4. THE LOW GAIN  --  anchored to the high gain, NOT calibrated on its own MIP
+--------------------------------------------------------------------------------
+This is the substantive change.
+
+WHY THE OLD WAY IS BROKEN. Above the switch the old code did energy = (adc_low -
+ped_lg) / MIP_lg. But MIP_lg cannot be measured:
+
+    a low-gain MIP  = 2.08 ADC   (= k * MIP_hg)
+    low-gain noise  = 0.92-1.59 ADC
+    -> signal-to-noise = 1.4-2.8, and in 14-23% of channels the NOISE EXCEEDS A
+       WHOLE MIP.
+
+The Landau fit has nothing to grip. It lands on 3.16-4.46 ADC instead of 2.08 --
+inflated 1.5x to 2x -- in EVERY ONE of the 7 muon runs, quiet ones included. Dividing
+by an inflated MIP UNDER-READS the energy of every saturated hit.
+
+WHAT WE DO INSTEAD. Anchor the low gain to the high gain, which IS well calibrated.
+In the FIDUCIAL REGION -- adc_high - pedestal between 150 and 1200, which sits below
+both the switch and the onset of non-linearity, so the bend cannot contaminate the
+line meant to replace it -- the two branches trace out a straight line:
+
+    adc_low - ped_lg  =  k * (adc_high - ped_hg)  +  c
+
+Invert it to recover the high-gain ADC an unsaturated preamp would have given, and
+divide by MIP_hg:
+
+    adc_high_equiv = (adc_low - ped_lg - c) / k
+    energy         = adc_high_equiv / MIP_hg
+
+MIP_lg never appears. This is standard dual-gain intercalibration: the low gain's job
+is to EXTEND THE DYNAMIC RANGE, not to be a second independent calibration.
+
+HOW THE LINE IS FITTED. By the MEDIAN of adc_low in each slice of adc_high -- never
+by least squares on the hits, which is dragged off the band by its tails and reports
+c = +3.13 where the medians say +1.60. Both lines are drawn in the plot so you can
+see the red one miss the data.
+
+    parameter        run_000012 (th230)   run_000072 (th220)   USED
+    k                     0.0961               0.0963          0.0962
+    1/k                   10.41                10.39           10.4
+    c  [ADC]              +1.60                +1.29           +1.45
+
+  k is solid: two runs, two thresholds, agreeing to 0.2%.
+  c is real but only good to ~0.5 ADC, and the error is SYSTEMATIC (it moves with
+  the fit region), not the +/-0.03 a least-squares covariance would claim. It
+  matters little: c shifts the energy by c/k ~ 15 high-gain ADC ~ 0.7 MIP against a
+  switch at 1500 ADC ~ 58 MIP.
+
+  (diagnostics/th220/gain_anchor_fit_000072_th220.png, and th230/ for run12)
+
+
+--------------------------------------------------------------------------------
+5. WHAT IT DID, AND WHAT IT DID NOT
+--------------------------------------------------------------------------------
+run_000012 (74 GeV electrons, th230), same 108,624 events throughout:
+
+    calibration                                    mu        sigma/mu
+    ------------------------------------------------------------------
+    old: th230 MIP + MIP_lg switch at 1900        2157      0.343
+    th220 MIP + MIP_lg switch at 1900             3065      0.341
+    th220 MIP + ANCHORED low gain, switch 1500    3290      0.350
+
+  THE ABSOLUTE SCALE MOVES +52%. Most of it (+42%) is dropping th230's inflated
+  MIP_hg; the rest (+7%) is dropping MIP_lg on the saturated hits. Both were
+  under-reads, so both push the same way.
+
+  THE RESOLUTION DOES NOT IMPROVE. sigma/mu goes 0.343 -> 0.350, 2% WORSE. This was
+  predicted to improve and it does not. The reason: MIP_lg's inflation is close to a
+  common factor across channels, so it was a SCALE error, not a scatter source, and
+  fixing a scale error moves the mean, not the width. Anchoring also raises the
+  saturated hits ~50%, and those are the shower-core hits that fluctuate most, so
+  sigma grows with them.
+
+  YOU GAINED SCALE, NOT RESOLUTION. Scale was what was broken.
+
+THE STRONGEST EVIDENCE THAT THE ANCHORING IS RIGHT is not the mean -- it is the
+insensitivity. Moving the switch 1900 -> 1500:
+
+    anchored energy:   mu 3285 -> 3290   (+0.16%)
+    old MIP_lg energy: mu 3065 -> 2983   (-2.68%)
+
+A correct intercalibration makes the two branches agree in their overlap, so it
+should not matter where you cross between them. It doesn't -- 17x less than the old
+one. A broken calibration makes your answer depend on an arbitrary tuning knob, and
+that is exactly what MIP_lg did.
+
+  (diagnostics/th230/energy_calib_000012.png -- panel 3 is the control: the 8,472
+   events with no saturated hit are bit-for-bit identical, so nothing moved that
+   should not have.)
+
+
+--------------------------------------------------------------------------------
+6. WHAT IS STILL OPEN
+--------------------------------------------------------------------------------
+* NO ABSOLUTE REFERENCE YET. We know 3290 MIP is more correct than 2157 for 74 GeV.
+  We do NOT know it is correct. The test is run_000072: same 74 GeV beam, taken at
+  th220, whose MIP was never biased. If run12 and run72 now converge on the same mu,
+  the fix is validated. Until then, quote the change, not the number.
+
+* c DEPENDS ON THE RUN and we do not know why (+1.60 vs +1.29). The gap is the size
+  of the systematic, so it may be nothing. Do not build on it.
+
+* WHY THE LOW-GAIN BASELINE SHIFTS AT ALL. c is not an artefact -- the low-gain
+  baseline really sits ~1-2 ADC high on a hit that fired (measured directly, with a
+  control that comes out at 0.00). Plausibly crosstalk from the discriminator into
+  the analogue branch, but that is a hypothesis, not a measurement.
+
+* th210 IS BLOCKED. 13 of its 14 runs decode to zero acquisitions (the raw files are
+  <run>.bin, not <run>_raw.bin, and the frame layout differs). Needs the format spec.
+
+* hit_energy_nocalib is written alongside hit_energy on every event, holding the old
+  MIP_lg value. They differ ONLY above the switch. Use it to reproduce any of the
+  comparisons above without re-reconstructing.
+
+
+--------------------------------------------------------------------------------
+7. WHERE THE KNOBS LIVE
+--------------------------------------------------------------------------------
+  gaudi_source/include/k4SiWEcalReco/EventBuilder.h   BuilderConfig:
+      adcSaturationThreshold = 1500        the switch
+      gainRatio              = 0.0962      k
+      gainIntercept          = 1.45        c
+
+  Gaudi properties (EcalEventBuilder):  AdcSaturationThreshold, GainRatio,
+                                        GainIntercept
+  Environment (run_event_builder.py):   EVBLD_ADC_SATURATION
+  MIP threshold:  siwecal_eventbuilder/cli.py::MIP_CALIB_TH = "220"
+                  override per run with  --mip-th <th>
+
+  Reproduce every plot cited here:
+      RUN=TB2026CERN_run_000012 TH=230 python3 diagnostics/plot_gain_anchor_fit.py
+      RUN=TB2026CERN_run_000012 TH=230 python3 diagnostics/plot_hg_linearity.py
+      RUN=TB2026CERN_run_000012 TH=230 python3 diagnostics/plot_energy_calib.py
+      RUN=TB2026CERN_run_000012 TH=230 python3 diagnostics/plot_pedestal_shift.py
+================================================================================

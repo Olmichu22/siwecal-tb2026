@@ -138,7 +138,11 @@ struct EcalEventBuilder final : Gaudi::Algorithm {
       }
       if (calib.hasLowGain()) {
         info() << "Low-gain calibration loaded: hits with raw adc_high >= " << m_adcSaturationThreshold.value()
-               << " take their energy from the low-gain branch" << endmsg;
+               << " take their energy from the low-gain branch, anchored to the high gain through "
+                  "adc_low - ped_lg = "
+               << m_gainRatio.value() << "*(adc_high - ped_hg) + " << m_gainIntercept.value()
+               << " (MIP_lg is NOT used; hit_energy_nocalib keeps the old MIP_lg-based value for comparison)"
+               << endmsg;
       } else {
         warning() << "No low-gain calibration given: saturated high-gain hits will be under-read "
                      "(set PedestalFileLowGain/MipFileLowGain to enable saturation recovery)"
@@ -174,6 +178,8 @@ struct EcalEventBuilder final : Gaudi::Algorithm {
     cfg.badValue = m_badValue.value();
     cfg.adcUnderflowThreshold = m_adcUnderflowThreshold.value();
     cfg.adcSaturationThreshold = m_adcSaturationThreshold.value();
+    cfg.gainRatio = m_gainRatio.value();
+    cfg.gainIntercept = m_gainIntercept.value();
     cfg.maxHitsPerSca = m_maxHitsPerSca.value();
     cfg.maxHitsPerEvent = m_maxHitsPerEvent.value();
 
@@ -320,10 +326,21 @@ struct EcalEventBuilder final : Gaudi::Algorithm {
   Gaudi::Property<int> m_badValue{this, "BadValue", -999, ""};
   Gaudi::Property<int> m_adcUnderflowThreshold{this, "AdcUnderflowThreshold", 11, ""};
   Gaudi::Property<int> m_adcSaturationThreshold{
-      this, "AdcSaturationThreshold", 1900,
+      this, "AdcSaturationThreshold", 1500,
       "Raw (not pedestal-subtracted) high-gain ADC at/above which the high-gain preamp is taken to be "
       "saturated and the energy is read from the low-gain branch instead. Only has an effect when the "
       "low-gain tables are loaded."};
+  Gaudi::Property<double> m_gainRatio{
+      this, "GainRatio", 0.0962,
+      "k in adc_low - ped_lg = k*(adc_high - ped_hg) + c. Above AdcSaturationThreshold the hit energy is "
+      "the low-gain reading anchored back onto the high gain through this line, so MIP_lg is never used "
+      "(it is unmeasurable: a low-gain MIP is 2.08 ADC against ~1 ADC of noise). Measured 0.0974 on "
+      "run_000012/th230 and 0.0967 on run_000072/th220 by tracing the band with medians."};
+  Gaudi::Property<double> m_gainIntercept{
+      this, "GainIntercept", 1.45,
+      "c in the same line: the low-gain ADC left over at zero high-gain signal. Real (+1 to +2 ADC, always "
+      "positive, seen by two independent robust methods) but only good to ~0.5 ADC -- the error is "
+      "systematic, not statistical. It shifts the energy by c/k ~ 0.7 MIP, under 1% at the switch point."};
   // config.py's BuilderConfig.max_hits_per_sca defaults to math.inf ("disabled"),
   // but Gaudi's confdb2 generator can't serialize an infinite double property
   // default (emits invalid Python "inf.0" and fails the build) -- use a huge
@@ -409,6 +426,7 @@ struct EcalEventBuilder final : Gaudi::Algorithm {
       m_hitHg.resize(maxHitsPerEvent);
       m_hitLg.resize(maxHitsPerEvent);
       m_hitEnergy.resize(maxHitsPerEvent);
+      m_hitEnergyNoCalib.resize(maxHitsPerEvent);
       m_hitWEnergy.resize(maxHitsPerEvent);
       m_hitX.resize(maxHitsPerEvent);
       m_hitY.resize(maxHitsPerEvent);
@@ -426,6 +444,7 @@ struct EcalEventBuilder final : Gaudi::Algorithm {
       m_tree->Branch("nhit_chan", &m_nChan, "nhit_chan/I");
       m_tree->Branch("sum_hg", &m_sumHg, "sum_hg/F");
       m_tree->Branch("sum_energy", &m_sumEnergy, "sum_energy/F");
+      m_tree->Branch("sum_energy_nocalib", &m_sumEnergyNoCalib, "sum_energy_nocalib/F");
       m_tree->Branch("sum_w_energy", &m_sumWEnergy, "sum_w_energy/F");
       m_tree->Branch("hit_slab", m_hitSlab.data(), "hit_slab[nhit_chan]/I");
       m_tree->Branch("hit_chip", m_hitChip.data(), "hit_chip[nhit_chan]/I");
@@ -434,6 +453,10 @@ struct EcalEventBuilder final : Gaudi::Algorithm {
       m_tree->Branch("hit_hg", m_hitHg.data(), "hit_hg[nhit_chan]/F");
       m_tree->Branch("hit_lg", m_hitLg.data(), "hit_lg[nhit_chan]/F");
       m_tree->Branch("hit_energy", m_hitEnergy.data(), "hit_energy[nhit_chan]/F");
+      // The old, MIP_lg-based energy, alongside the new one on the same events: the
+      // two differ only for hits above AdcSaturationThreshold, so any difference in
+      // a distribution built from them is entirely the saturated hits.
+      m_tree->Branch("hit_energy_nocalib", m_hitEnergyNoCalib.data(), "hit_energy_nocalib[nhit_chan]/F");
       m_tree->Branch("hit_w_energy", m_hitWEnergy.data(), "hit_w_energy[nhit_chan]/F");
       m_tree->Branch("hit_x", m_hitX.data(), "hit_x[nhit_chan]/F");
       m_tree->Branch("hit_y", m_hitY.data(), "hit_y[nhit_chan]/F");
@@ -455,6 +478,7 @@ struct EcalEventBuilder final : Gaudi::Algorithm {
       m_nChip = event.nChips();
       m_sumHg = static_cast<float>(event.sumAdcHigh());
       m_sumEnergy = static_cast<float>(event.sumEnergy());
+      m_sumEnergyNoCalib = static_cast<float>(event.sumEnergyNoCalib());
       m_sumWEnergy = static_cast<float>(event.sumWEnergy());
 
       for (int i = 0; i < event.nChannels(); ++i) {
@@ -466,6 +490,7 @@ struct EcalEventBuilder final : Gaudi::Algorithm {
         m_hitHg[i] = hit.adcHighPedsub;
         m_hitLg[i] = hit.adcLowPedsub;
         m_hitEnergy[i] = hit.energyMip;
+        m_hitEnergyNoCalib[i] = hit.energyMipNoCalib;
         m_hitWEnergy[i] = hit.wEnergy;
         m_hitX[i] = hit.x;
         m_hitY[i] = hit.y;
@@ -481,9 +506,10 @@ struct EcalEventBuilder final : Gaudi::Algorithm {
     TTree* m_tree = nullptr;
     int m_run = -1, m_thresholdDac = -1, m_event = 0, m_spill = 0, m_bcid = 0;
     int m_nSlab = 0, m_nChip = 0, m_nChan = 0;
-    float m_sumHg = 0.f, m_sumEnergy = 0.f, m_sumWEnergy = 0.f;
+    float m_sumHg = 0.f, m_sumEnergy = 0.f, m_sumEnergyNoCalib = 0.f, m_sumWEnergy = 0.f;
     std::vector<int> m_hitSlab, m_hitChip, m_hitChan, m_hitSca, m_hitIsMasked;
-    std::vector<float> m_hitHg, m_hitLg, m_hitEnergy, m_hitWEnergy, m_hitX, m_hitY, m_hitZ, m_hitX0;
+    std::vector<float> m_hitHg, m_hitLg, m_hitEnergy, m_hitEnergyNoCalib, m_hitWEnergy, m_hitX, m_hitY,
+        m_hitZ, m_hitX0;
   };
 };
 
