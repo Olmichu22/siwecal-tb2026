@@ -21,6 +21,7 @@
  * reference. All chunks' decoded cycles are appended into one shared output
  * tree, replacing the reference's separate-file-per-chunk + hadd step.
  */
+#include "k4SiWEcalReco/AcquisitionTreeIO.h"
 #include "k4SiWEcalReco/RunSettings.h"
 #include "k4SiWEcalReco/SlbFrameDecoder.h"
 
@@ -67,7 +68,7 @@ struct EcalRawDecoder final : Gaudi::Algorithm {
     if (!m_runSettingsFile.value().empty()) {
       runSettings = k4siwecal::parseRunSettings(m_runSettingsFile.value());
     }
-    bindBranches(*tree, *acq, runSettings);
+    k4siwecal::bindAcquisitionBranches(*tree, *acq, runSettings);
 
     // Stream each flushed acquisition straight into the tree and drop it,
     // instead of collecting a whole file's worth in a vector first: an
@@ -140,55 +141,6 @@ struct EcalRawDecoder final : Gaudi::Algorithm {
       "branches are written with their -1 sentinel default"};
 
  private:
-  static void bindBranches(TTree& tree, k4siwecal::Acquisition& acq, k4siwecal::RunSettings& runSettings) {
-    using k4siwecal::kChannelsInSkiroc;
-    using k4siwecal::kScasInSkiroc;
-    using k4siwecal::kSkirocsPerAsu;
-    using k4siwecal::kSlbDepth;
-
-    tree.Branch("acqNumber", &acq.acqNumber, "acqNumber/I");
-    tree.Branch("n_slboards", &acq.nSlboards, "n_slboards/I");
-    tree.Branch("slot", acq.slot, Form("slot[%d]/I", kSlbDepth));
-    tree.Branch("slboard_id", acq.slboardId, Form("slboard_id[%d]/I", kSlbDepth));
-    tree.Branch("chipid", acq.chipId, Form("chipid[%d][%d]/I", kSlbDepth, kSkirocsPerAsu));
-    tree.Branch("nColumns", acq.numCol, Form("nColumns[%d][%d]/I", kSlbDepth, kSkirocsPerAsu));
-    tree.Branch("startACQ", acq.startAcq, Form("startACQ[%d]/F", kSlbDepth));
-    tree.Branch("rawTSD", acq.rawTsd, Form("rawTSD[%d]/I", kSlbDepth));
-    tree.Branch("TSD", acq.tsd, Form("TSD[%d]/F", kSlbDepth));
-    tree.Branch("rawAVDD0", acq.rawAvdd0, Form("rawAVDD0[%d]/I", kSlbDepth));
-    tree.Branch("rawAVDD1", acq.rawAvdd1, Form("rawAVDD1[%d]/I", kSlbDepth));
-    tree.Branch("AVDD0", acq.avdd0, Form("AVDD0[%d]/F", kSlbDepth));
-    tree.Branch("AVDD1", acq.avdd1, Form("AVDD1[%d]/F", kSlbDepth));
-    tree.Branch("bcid", acq.bcid, Form("bcid[%d][%d][%d]/I", kSlbDepth, kSkirocsPerAsu, kScasInSkiroc));
-    tree.Branch("corrected_bcid", acq.correctedBcid,
-                Form("corrected_bcid[%d][%d][%d]/I", kSlbDepth, kSkirocsPerAsu, kScasInSkiroc));
-    tree.Branch("badbcid", acq.badbcid, Form("badbcid[%d][%d][%d]/I", kSlbDepth, kSkirocsPerAsu, kScasInSkiroc));
-    tree.Branch("nhits", acq.nhits, Form("nhits[%d][%d][%d]/I", kSlbDepth, kSkirocsPerAsu, kScasInSkiroc));
-    tree.Branch("adc_low", acq.adcLow,
-                Form("adc_low[%d][%d][%d][%d]/I", kSlbDepth, kSkirocsPerAsu, kScasInSkiroc, kChannelsInSkiroc));
-    tree.Branch("adc_high", acq.adcHigh,
-                Form("adc_high[%d][%d][%d][%d]/I", kSlbDepth, kSkirocsPerAsu, kScasInSkiroc, kChannelsInSkiroc));
-    tree.Branch(
-        "autogainbit_low", acq.autogainbitLow,
-        Form("autogainbit_low[%d][%d][%d][%d]/I", kSlbDepth, kSkirocsPerAsu, kScasInSkiroc, kChannelsInSkiroc));
-    tree.Branch(
-        "autogainbit_high", acq.autogainbitHigh,
-        Form("autogainbit_high[%d][%d][%d][%d]/I", kSlbDepth, kSkirocsPerAsu, kScasInSkiroc, kChannelsInSkiroc));
-    tree.Branch("hitbit_low", acq.hitbitLow,
-                Form("hitbit_low[%d][%d][%d][%d]/I", kSlbDepth, kSkirocsPerAsu, kScasInSkiroc, kChannelsInSkiroc));
-    tree.Branch("hitbit_high", acq.hitbitHigh,
-                Form("hitbit_high[%d][%d][%d][%d]/I", kSlbDepth, kSkirocsPerAsu, kScasInSkiroc, kChannelsInSkiroc));
-
-    // Run_Settings.txt-derived metadata (RunSettings.h), same value on every
-    // entry -- see siwecal_eventbuilder/run_settings.py::read_threshold_dac
-    // for the ThresholdDAC precedent this generalizes.
-    tree.Branch("acqWindowMs", &runSettings.acqWindowMs, "acqWindowMs/F");
-    tree.Branch("delayBetweenCycleMs", &runSettings.delayBetweenCycleMs, "delayBetweenCycleMs/F");
-    tree.Branch("thresholdDac", &runSettings.thresholdDac, "thresholdDac/I");
-    tree.Branch("holdDelay", &runSettings.holdDelay, "holdDelay/I");
-    tree.Branch("fsPeakTime", &runSettings.fsPeakTime, "fsPeakTime/I");
-    tree.Branch("gainSelectionThreshold", &runSettings.gainSelectionThreshold, "gainSelectionThreshold/I");
-  }
 
   // Streams one raw file's frames into `assembler`, invoking `sink` for each
   // acquisition the moment it flushes (the transient `flushed` vector holds at
