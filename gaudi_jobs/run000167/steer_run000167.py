@@ -1,18 +1,18 @@
 #
-# Gaudi/k4FWCore steering for TB2026CERN_run_000091 (th220, electrons):
-# siwecaldecoded chunks -> event-built `ecal` tree, with the FULL th220
+# Gaudi/k4FWCore steering for TB2026CERN_eudaq_run_000167 (th210, electrons):
+# siwecaldecoded chunks -> event-built `ecal` tree, with the FULL th210
 # calibration taken from this project's calibration/MuonCalib_gaudi/ folder:
-#   pedestals/th220/  MIP mips/th220/  and the LG->HG anchor anchor/th220/.
+#   pedestals/th210/  MIP mips/th210/  and the LG->HG anchor anchor/th210/.
 #
-# Every table is th220's own (per-threshold calibration; nothing is borrowed
+# Every table is th210's own (per-threshold calibration; nothing is borrowed
 # from another threshold). The anchor line (k, c) and the pedestal-subtracted
-# switch are read from anchor/th220/gain_anchor_th220.txt.
+# switch are read from anchor/th210/gain_anchor_th210.txt.
 #
 # Usage (from the repo root):
 #   source setup.sh
 #   export LD_LIBRARY_PATH=$PWD/gaudi_source/build:$LD_LIBRARY_PATH
 #   export PYTHONPATH=$PWD/gaudi_source/build/genConfDir:$PWD:$PYTHONPATH
-#   k4run gaudi_jobs/run000091/steer_run000091.py
+#   k4run gaudi_jobs/run000167/steer_run000167.py
 #
 import glob
 import os
@@ -24,8 +24,8 @@ from k4FWCore import ApplicationMgr
 
 _HERE = os.path.dirname(os.path.abspath(__file__))
 _REPO = os.path.abspath(os.path.join(_HERE, "..", ".."))
-_RUN = "TB2026CERN_run_000091"
-_TH = "220"
+_RUN = "TB2026CERN_eudaq_run_000167"
+_TH = "210"
 _CALIB = os.path.join(_REPO, "calibration", "MuonCalib_gaudi")
 _MAPPINGS = os.path.join(_REPO, "mappings")
 

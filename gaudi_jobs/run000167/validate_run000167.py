@@ -1,16 +1,18 @@
 #
-# Gaudi/k4FWCore steering for TB2026CERN_run_000091 (th220): the VALIDATION /
-# EDM4hep stage. Reads the event-built `ecal` tree produced by
-# steer_run000091.py and writes the EDM4hep + PID output next to it, in
-# <run>/events/ -- NOT in the shared Reconstruction/ area.
+# Gaudi/k4FWCore steering for TB2026CERN_eudaq_run_000167 (th210, electrons --
+# the TEST run twinned with run000166): the VALIDATION / EDM4hep stage. Reads the
+# event-built `ecal` tree in <run>/events/ and writes the EDM4hep + PID output
+# next to it -- NOT in the shared Reconstruction/ area.
 #
-# Run steer_run000091.py first (it makes <run>/events/ecal_<run>.root).
+# The event-built ecal is produced the same way as run000166 (steer with the
+# th210 calibration from calibration/MuonCalib_gaudi/); this stage only adds the
+# EDM4hep + PID pass on top of it.
 #
 # Usage (from the repo root):
 #   source setup.sh
 #   export LD_LIBRARY_PATH=$PWD/gaudi_source/build:$LD_LIBRARY_PATH
 #   export PYTHONPATH=$PWD/gaudi_source/build/genConfDir:$PWD:$PYTHONPATH
-#   k4run gaudi_jobs/run000091/validate_run000091.py
+#   k4run gaudi_jobs/run000167/validate_run000167.py
 #
 import os
 
@@ -20,7 +22,7 @@ from Configurables import EventDataSvc
 from Configurables import EcalToEDM4hep, EcalPidTransformer
 from k4FWCore import ApplicationMgr, IOSvc
 
-_RUN = "TB2026CERN_run_000091"
+_RUN = "TB2026CERN_eudaq_run_000167"
 _CONVERTED = os.environ.get(
     "EVBLD_CONVERTED_DIR",
     "/eos/experiment/drdcalo/siw-ecal/TB2026-06/Data/rundata_converted_gaudi")
@@ -31,7 +33,7 @@ os.makedirs(os.path.dirname(_OUTPUT), exist_ok=True)
 
 _f = ROOT.TFile.Open(_INPUT)
 if not _f or _f.IsZombie():
-    raise SystemExit(f"input not found (run steer_run000091.py first): {_INPUT}")
+    raise SystemExit(f"input not found (event-build run 167 first): {_INPUT}")
 n_events = int(_f.Get("ecal").GetEntries())
 _f.Close()
 
