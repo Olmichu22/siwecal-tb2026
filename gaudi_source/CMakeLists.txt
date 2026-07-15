@@ -17,12 +17,15 @@ find_package(EDM4HEP REQUIRED)
 find_package(podio REQUIRED)
 find_package(ROOT REQUIRED COMPONENTS Core RIO Tree Spectrum)
 find_package(DD4hep REQUIRED COMPONENTS DDCore)
+# LCIO: only EcalLcioDecoder needs it (reads the EUDAQ ROC_run_*_tp.slcio files).
+find_package(LCIO REQUIRED)
 
 gaudi_add_module(k4SiWEcalRecoPlugins
   SOURCES
     src/components/EcalToEDM4hep.cpp
     src/components/EcalPidTransformer.cpp
     src/components/EcalRawDecoder.cpp
+    src/components/EcalLcioDecoder.cpp
     src/components/PedestalMipCalibrator.cpp
     src/components/EcalEventBuilder.cpp
   LINK
@@ -33,6 +36,7 @@ gaudi_add_module(k4SiWEcalRecoPlugins
     podio::podioRootIO
     ROOT::Core ROOT::RIO ROOT::Tree ROOT::TreePlayer ROOT::Spectrum
     DD4hep::DDCore
+    LCIO::lcio
 )
 
 target_include_directories(k4SiWEcalRecoPlugins

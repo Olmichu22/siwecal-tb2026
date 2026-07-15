@@ -61,15 +61,83 @@ struct BuilderConfig {
   // preamp is taken to be saturated, so the hit energy is computed from the
   // low-gain branch instead.
   //
-  // 1900, not the 1200 hit_collector.py uses: correlating adc_high against
-  // adc_low hit by hit on run_000013, the high gain stays linear all the way to
-  // adc_high ~= 1950 and only bends over there (see diagnostics/
-  // saturation_hg_vs_lg.png). At 1200 about 2% of hits -- most of them still
-  // perfectly linear in the high gain -- were being handed to the low gain,
-  // whose MIP is only ~4 ADC and is therefore far coarser; that LOWERED
-  // run_000013's mean energy by 1.3%, the opposite of what recovering saturated
-  // hits can do.
-  int adcSaturationThreshold = 1900;
+  // 1500, measured -- not the 1900 this used to be, and not the 1200 of
+  // hit_collector.py. Using the LOW gain as the ruler (it is linear over this
+  // whole range; the high gain is the one that saturates), slice in adc_low, take
+  // the median adc_high per slice, and compare against the straight line the two
+  // trace out well below any turn-over. The high gain falls short of that line by:
+  //
+  //     raw adc_high    1200     1500     1700     1900
+  //     non-linearity   0.4%     1.2%     1.9%     3.9%      (run_000012 and
+  //                                                            run_000072 agree)
+  //
+  // At the old 1900 the high gain was ALREADY 4% low, and every hit between 1500
+  // and 1900 was read with that one-sided bias -- a systematic under-read, which
+  // does not average out over the hits of an event the way noise does.
+  //
+  // 1900 was chosen to keep hits AWAY from the low gain, because the low gain was
+  // calibrated through MIP_lg and MIP_lg is broken (see gainRatio below). That
+  // reason is gone: the low gain is now anchored to the high gain and MIP_lg is
+  // never used, so handing it a hit is cheap. What it costs is noise -- the
+  // low-gain noise (~1 ADC) is amplified by 1/k = 10.4 -- and that trade crosses
+  // over right around here:
+  //
+  //     switch          1200     1500     1900
+  //     bias (syst.)    0.35%    1.15%    3.85%
+  //     LG noise (rnd)  0.87%    0.69%    0.55%
+  //
+  // Measured effect of the move on run_000012: mean +0.16%, sigma/mu unchanged
+  // (0.3499 -> 0.3500). Small -- but note that is itself the point. The anchored
+  // energy barely depends on where the switch sits (+0.16% between 1500 and 1900)
+  // whereas the old MIP_lg energy moved -2.68% over the same change. A correct
+  // intercalibration is insensitive to the switch point; that insensitivity is the
+  // evidence that it IS correct.
+  int adcSaturationThreshold = 1500;
+
+  // GAIN INTERCALIBRATION. This is how the hit energy is calibrated above the
+  // saturation threshold; energyMipNoCalib keeps the old way, for comparison only.
+  //
+  // The old way calibrated the low-gain branch on its OWN MIP scale, and that scale
+  // is not measurable: a MIP in the low gain is 2.08 ADC against ~1 ADC of noise
+  // (S/N ~ 2), so the Landau fit lands on 3.2-4.5 ADC instead -- inflated 1.5x to
+  // 2x -- and every run inflates it. Energy read through MIP_lg is wrong by that
+  // factor.
+  //
+  // So do not calibrate the low gain against itself. Anchor it to the high gain,
+  // which IS well calibrated, using the line the two branches trace out in the
+  // FIDUCIAL REGION, where both are valid: adc_high - pedestal in [150, 1200].
+  // That upper bound is not arbitrary -- it sits below the switch (no point fitting
+  // where the high gain is no longer used) AND below the onset of high-gain
+  // non-linearity, so the bend the switch exists to avoid cannot contaminate the
+  // line meant to replace it.
+  //
+  //     adc_low - ped_lg  =  k * (adc_high - ped_hg)  +  c
+  //
+  // Inverting it turns a low-gain reading into the high-gain ADC the unsaturated
+  // preamp WOULD have given, and the energy then comes from MIP_hg alone:
+  //
+  //     adc_high_equiv = (adc_low - ped_lg - c) / k
+  //     energy         = adc_high_equiv / MIP_hg
+  //
+  // MIP_lg never appears. This is standard dual-gain intercalibration, not a fudge:
+  // the low gain's job is to extend the dynamic range, not to be a second
+  // independent calibration.
+  //
+  // The line is traced by the MEDIAN of adc_low in each slice of adc_high, never by
+  // a least-squares fit to the hits: least squares on this band is dragged off the
+  // data by its tails and reports c = +3.13 where the medians say +1.60.
+  //
+  // k = 0.0962 (1/k = 10.4) is solid: run_000012 (th230) gives 0.0961 and
+  // run_000072 (th220) 0.0963 -- two runs, two thresholds, agreeing to 0.2%.
+  //
+  // c = +1.45 ADC is real (always positive, seen by two independent robust methods:
+  // this line, and the low-gain baseline measured directly on hits that fired with
+  // no high-gain signal) but only good to ~0.5 ADC. The error is SYSTEMATIC -- the
+  // value moves with the fit region -- not the +/-0.03 a least-squares covariance
+  // would claim. It matters little: c shifts the energy by c/k ~ 15 high-gain ADC
+  // ~ 0.7 MIP, against a switch point of 1500 ADC ~ 58 MIP, so ~1%.
+  double gainRatio = 0.0962;     // k: adc_low per unit adc_high
+  double gainIntercept = 1.45;   // c: low-gain ADC at zero high-gain signal
   double maxHitsPerSca = 1.0e18;  // math.inf equivalent; see EcalEventBuilder.cpp for why not literal infinity
   int maxHitsPerEvent = 15360;  // 15 slabs * 16 chips * 64 channels
 };
@@ -84,7 +152,16 @@ struct Hit {
   int sca = 0;            // -> hit_sca
   float adcHighPedsub = 0.f;  // -> hit_hg
   float adcLowPedsub = 0.f;   // -> hit_lg
+  // The hit energy, in MIP units. Above the saturation threshold it comes from the
+  // low gain anchored to the high gain (see BuilderConfig::gainRatio). Everything
+  // downstream -- sumEnergy, wEnergy, sumWEnergy, the shower variables -- is built
+  // from THIS one.
   float energyMip = 0.f;      // -> hit_energy
+  // The same hit, calibrated the old way: above the threshold, the low gain on its
+  // own MIP_lg scale. Kept ONLY so the two can be compared on the same events; it
+  // is not used to build anything. MIP_lg is inflated 1.5x-2x (see gainRatio), so
+  // this systematically under-reads the energy of every saturated hit.
+  float energyMipNoCalib = 0.f;  // -> hit_energy_nocalib
   float wEnergy = 0.f;        // -> hit_w_energy (sampling-corrected: energyMip * W[slab]/X0)
   float x = std::numeric_limits<float>::quiet_NaN();   // -> hit_x
   float y = std::numeric_limits<float>::quiet_NaN();   // -> hit_y
@@ -125,6 +202,13 @@ struct ReconstructedEvent {
   double sumEnergy() const {
     double s = 0.0;
     for (const auto& h : hits) s += h.energyMip;
+    return s;
+  }
+  // The event energy the OLD way, for the side-by-side comparison. Not used to
+  // build anything.
+  double sumEnergyNoCalib() const {
+    double s = 0.0;
+    for (const auto& h : hits) s += h.energyMipNoCalib;
     return s;
   }
   double sumWEnergy() const {
@@ -422,23 +506,47 @@ class HitCollector {
     const double adcHighPedsub = adcHigh - pedestalHg;
     const double adcLowPedsub = adcLow - pedestalLg;
 
-    // The high-gain preamp saturates on large deposits, flattening adc_high and
-    // so under-reading the energy; above the saturation threshold the low-gain
-    // branch (which is still linear there) is used instead, with its own
-    // pedestal and MIP scale. Port of hit_collector.py:78-93.
+    // The high-gain preamp saturates on large deposits, flattening adc_high and so
+    // under-reading the energy; above the saturation threshold the low-gain branch
+    // (which is still linear there) is used instead. The switch is decided on the
+    // PEDESTAL-SUBTRACTED high-gain value (adc_high - ped_hg) -- the ADC quantity we
+    // use everywhere else and are familiar with at user level -- not the raw ADC.
     const bool isMasked = m_calib.isMasked(slabId, chipId, channel);
-    const bool saturated = m_calib.hasLowGain() && adcHigh >= m_cfg.adcSaturationThreshold;
+    const bool saturated = m_calib.hasLowGain() && adcHighPedsub >= m_cfg.adcSaturationThreshold;
+
+    // The energy, and the same energy the old way. They differ ONLY for saturated
+    // hits: below the threshold both read the high gain and are identical.
     double energyMip = 0.0;
+    double energyMipNoCalib = 0.0;
+    const double hgEnergy = (mipHg > 0) ? (adcHighPedsub / mipHg) : 0.0;
+
     if (isMasked) {
       energyMip = 0.0;
+      energyMipNoCalib = 0.0;
     } else if (!saturated) {
-      energyMip = (mipHg > 0) ? (adcHighPedsub / mipHg) : 0.0;
-    } else if (!m_calib.isMaskedLg(slabId, chipId, channel) && mipLg > 0) {
-      energyMip = adcLowPedsub / mipLg;
+      energyMip = hgEnergy;
+      energyMipNoCalib = hgEnergy;
+    } else {
+      // DEFAULT: anchor the low gain to the high gain. Invert the line the two
+      // branches trace out, adc_low - ped_lg = k*(adc_high - ped_hg) + c, to get
+      // the high-gain ADC an unsaturated preamp would have given, then divide by
+      // MIP_hg. MIP_lg -- the number we cannot measure -- never enters.
+      //
+      // Only the low-gain PEDESTAL has to be good for this, not the low-gain MIP,
+      // so it gates on isPedestalMaskedLg and not on isMaskedLg (which also masks
+      // every channel whose MIP_lg fit failed -- and those fits fail precisely
+      // because MIP_lg is unmeasurable, which is the whole reason we are here).
+      if (mipHg > 0 && m_cfg.gainRatio > 0 && !m_calib.isPedestalMaskedLg(slabId, chipId, channel)) {
+        const double adcHighEquiv = (adcLowPedsub - m_cfg.gainIntercept) / m_cfg.gainRatio;
+        energyMip = adcHighEquiv / mipHg;
+      }
+      // The old way, for comparison: the low gain on its own inflated MIP scale.
+      if (!m_calib.isMaskedLg(slabId, chipId, channel) && mipLg > 0) {
+        energyMipNoCalib = adcLowPedsub / mipLg;
+      }
     }
-    // else: saturated in high gain AND unusable in low gain -> no energy can be
-    // assigned, so it stays 0 rather than being silently under-read from the
-    // flattened high-gain ADC.
+    // A saturated hit with no usable low-gain pedestal gets no energy at all (0),
+    // rather than being silently under-read from the flattened high-gain ADC.
 
     float x = std::numeric_limits<float>::quiet_NaN();
     float y = std::numeric_limits<float>::quiet_NaN();
@@ -455,6 +563,7 @@ class HitCollector {
     hit.adcHighPedsub = static_cast<float>(adcHighPedsub);
     hit.adcLowPedsub = static_cast<float>(adcLowPedsub);
     hit.energyMip = static_cast<float>(energyMip);
+    hit.energyMipNoCalib = static_cast<float>(energyMipNoCalib);
     hit.x = x;
     hit.y = y;
     hit.z = static_cast<float>(m_geom.slabZ(slab));

@@ -133,7 +133,7 @@ struct PedestalMipCalibrator final : Gaudi::Algorithm {
   Gaudi::Property<double> m_minMipIntegral{this, "MinMipIntegral", 200.,
                                            "Combined per-channel MIP histogram integral required to ATTEMPT a fit. "
                                            "A channel below this (but with >0 entries) is not masked -- it is handed "
-                                           "to the chip/global fallback pass. A channel is only left masked when it "
+                                           "to the chip/slab fallback pass. A channel is only left masked when it "
                                            "had exactly 0 entries."};
   Gaudi::Property<double> m_chipFallbackMinIntegral{
       this, "ChipFallbackMinIntegral", 2000.,
@@ -149,22 +149,46 @@ struct PedestalMipCalibrator final : Gaudi::Algorithm {
       "When the Langau fit fails (ndf<=0), fall back to the combined histogram's peak bin as the MPV if it is "
       "positive and at or below this ceiling; otherwise the channel is masked as before. Tune down for low "
       "gain (e.g. ~30) where a real MIP peak sits at a much smaller ADC value"};
-  Gaudi::Property<double> m_maxMipChi2Ndf{
-      this, "MaxMipChi2Ndf", 1.1,
-      "Fit-quality gate: a Langau fit whose chi2/ndf exceeds this is rejected (treated as a bad fit and sent "
-      "to the chip/global fallback), even if it converged and its MPV is in range. Applies to both the "
-      "per-channel fit and the chip-level fallback fit."};
+  // ------------------------------------------------------------ fit quality ---
+  // There is deliberately NO chi2/ndf gate. chi2/ndf answers "is the model
+  // exactly right, given only Poisson noise", and the Langau is an approximation
+  // of the real MIP response -- so at high statistics the answer is always "no",
+  // however good the MPV. Measured on run_000060's slab 14, growing the same
+  // spectrum by aggregating channels:
+  //
+  //     N entries    chi2/ndf    fitted MPV    |MPV-peak|/MPV (rebin 4)
+  //           639        1.16         27.00                      0.093
+  //         1,448        1.49         26.27                      0.123
+  //         9,565        3.78         26.13                      0.024
+  //        55,225       12.25         25.41                      0.004
+  //        74,555       17.20         25.58                      0.003
+  //
+  // chi2/ndf climbs 1.2 -> 17 while the MPV sits still at 25-27. The old ceilings
+  // (1.1 per channel, 25 for chip/slab) therefore rejected every fit above ~600
+  // entries and EVERY chip/slab fit -- which is why the slab fallback fired
+  // exactly zero times across all of th220, and one channel with 11,570 entries
+  // and neighbours fitting at chi2/ndf 0.87 fell all the way to the global
+  // average. The gates below are scale-free instead: they mean the same thing for
+  // a 600-entry channel and a 12M-entry slab.
   Gaudi::Property<double> m_mipHistMaxTol{
-      this, "MipHistMaxTol", 0.25,
-      "Histogram-max consistency gate: if the fitted MPV disagrees with the combined histogram's peak bin by "
-      "more than this fraction of the MPV (|hist_max - mpv| > tol*mpv), the fit is considered bad and the "
-      "channel falls back to the histogram peak bin (status 2, empv=-2) instead of using the fitted MPV."};
-  Gaudi::Property<double> m_maxMipChi2NdfFallback{
-      this, "MaxMipChi2NdfFallback", 25.0,
-      "LOOSE chi2/ndf ceiling for the chip- and slab-level fallback fits. chi2/ndf grows with statistics for "
-      "an imperfect model (Langau vs the real MIP shape): a single channel sits ~0.3, a chip (~64x stats) "
-      "~2-3, a slab (~1000x) ~8-17, all with a perfectly good MPV. So the tight per-channel MaxMipChi2Ndf "
-      "would reject every chip/slab fit; this much looser ceiling only catches genuinely broken fallback fits."};
+      this, "MipHistMaxTol", 0.20,
+      "Peak-consistency gate, the PRIMARY fit-quality test: the fitted MPV must land within this fraction of "
+      "the peak the spectrum actually shows (|peak - mpv| <= tol*mpv), or the fit is not believed. Scale-free "
+      "-- across 639..74,555 entries a good fit never exceeded 0.123 (see table above), so 0.20 accepts every "
+      "good fit measured with room to spare. Failing it, the channel falls back to the histogram peak itself "
+      "(status 2, empv=-2)."};
+  Gaudi::Property<int> m_mipPeakRebin{
+      this, "MipPeakRebin", 4,
+      "ADC per bin used to locate the spectrum's peak (the histograms are 1 ADC/bin). The raw maximum bin is a "
+      "fluctuation when statistics are thin -- rebinning makes the peak a property of the distribution rather "
+      "than of the luckiest bin. Measured: at ~640 entries the peak deviation of a good fit drops from 0.148 "
+      "(1 ADC/bin) to 0.093 (4 ADC/bin)."};
+  Gaudi::Property<double> m_maxMipRelErr{
+      this, "MaxMipRelErr", 0.10,
+      "Relative-error gate, which dominates at LOW statistics: the MPV is what every hit's ADC is divided by, "
+      "so a 10% error on it is a 10% error on that channel's energy scale. Measured: empv/mpv is 0.45 at 49 "
+      "entries, 0.053 at 167, 0.003 at 9,565 -- so this rejects exactly the spectra where the MPV is not "
+      "determined, and is silent everywhere else."};
   Gaudi::Property<double> m_mipLowLim{
       this, "MipLowLim", 10.0,
       "'Looks like a real MIP' range check, high gain (pllohigh in the reference tool, originally a single "
@@ -482,16 +506,46 @@ struct PedestalMipCalibrator final : Gaudi::Algorithm {
     return writeMipTable(pedHist, mipHist, highGain);
   }
 
-  // One (layer,chip,channel) MIP result, before the chip/global fallback
+  // One (layer,chip,channel) MIP result, before the chip/slab fallback
   // pass below is applied. status: 0=masked/lowstats/bad-fit (mpv==0, needs
   // fallback), 1=genuine fit, 2=histogram-peak fallback. (status 3 -- "fit
   // succeeded but the MPV is outside the plausible MIP range" -- is no longer
-  // produced: such a fit is now considered bad and routed to the chip/global
+  // produced: such a fit is now considered bad and routed to the chip/slab
   // fallback like any other low-stats channel, rather than kept as-is.)
   struct MipEntry {
     double mpv = 0., empv = -10., width = 0., chi2ndf = 0., integral = 0.;
     int status = 0;
   };
+
+  /// The peak of a MIP spectrum, located on a REBINNED copy so that it is a
+  /// property of the distribution and not of whichever bin happened to get lucky.
+  double robustPeak(const TH1F& hist) const {
+    std::unique_ptr<TH1F> reb(static_cast<TH1F*>(hist.Clone("mip_peak_tmp")));
+    reb->SetDirectory(nullptr);
+    if (m_mipPeakRebin.value() > 1) {
+      reb->Rebin(m_mipPeakRebin.value());
+    }
+    reb->GetXaxis()->SetRangeUser(0., 100.);
+    return reb->GetXaxis()->GetBinCenter(reb->GetMaximumBin());
+  }
+
+  /// Do we believe this Langau fit's MPV?
+  ///
+  /// Scale-free by construction: the same two numbers mean the same thing for a
+  /// 600-entry channel and a 12M-entry slab -- which is exactly what chi2/ndf
+  /// could never do (see the fit-quality property block). Applied at ALL THREE
+  /// granularities, so a chip or slab fallback fit is now judged by the same
+  /// standard as a per-channel one, instead of by a looser ceiling that in
+  /// practice rejected every single one of them.
+  bool mpvIsTrustworthy(const k4siwecal::MipFitResult& r, const TH1F& hist, double lowlim, double highlim) const {
+    if (r.ndf <= 0 || r.mpv <= lowlim || r.mpv >= highlim) {
+      return false;
+    }
+    if (r.empv > 0. && r.empv > m_maxMipRelErr.value() * r.mpv) {
+      return false;  // the MPV is simply not determined (this is the low-statistics gate)
+    }
+    return std::fabs(robustPeak(hist) - r.mpv) <= m_mipHistMaxTol.value() * r.mpv;
+  }
 
   // Fits + writes the MIP table from already-populated pedestal-like and
   // MIP-like histogram grids -- same rationale as writePedestalTable:
@@ -525,12 +579,12 @@ struct PedestalMipCalibrator final : Gaudi::Algorithm {
     // MaxMipChi2Ndf -- is NOT written as its own value: it is treated as a bad
     // fit and routed to the -3/-4 fallback instead.
     //
-    // IMPORTANT: the -3/-4 chip/global fallbacks are applied to any channel
+    // IMPORTANT: the -3/-6 chip/slab fallbacks are applied to any channel
     // that has SOME raw statistics (Integral > 0) but either not enough to fit
     // (Integral <= MinMipIntegral), or whose own fit was bad (out of range or
     // chi2/ndf too high). Only a channel with Integral==0 (it never fired at all in this
     // run) is left masked (mpv=0, empv=-10) permanently -- it never reaches
-    // pass 2/3, however dry its chip or the global average is. There is
+    // the fallback passes, however dry its chip is. There is
     // nothing to calibrate
     // for a channel that produced zero MIP-tagged hits, and inventing a
     // value for it would silently misrepresent a dead/unread channel as a
@@ -547,7 +601,7 @@ struct PedestalMipCalibrator final : Gaudi::Algorithm {
 
     // Pass 1: compute the raw per-channel result (fit, histogram-peak
     // fallback, or masked) exactly as before, but store it instead of
-    // writing it out immediately -- the chip/global fallback pass below
+    // writing it out immediately -- the chip/slab fallback pass below
     // needs every channel's result available before it can average them.
     std::vector<MipEntry> entries(static_cast<size_t>(kSlbDepth) * kSkirocsPerAsu * kChannelsInSkiroc);
     auto chanIndex = [](int layer, int chip, int chn) {
@@ -587,47 +641,43 @@ struct PedestalMipCalibrator final : Gaudi::Algorithm {
           if (entry.integral > m_minMipIntegral.value()) {
             const auto r = k4siwecal::fitLangau(hmips, highGain);
             if (r.ndf > 0) {
-              // Report the Langau fit's own MPV (the fitted curve's most-
-              // probable value, r.mpv = fit parameter "MP") for a genuine fit.
-              // The fit must actually be GOOD to be accepted: enough entries in
-              // the peak region, MPV inside the plausible MIP window, AND
-              // chi2/ndf under the ceiling. Any of these failing -> treat as a
-              // BAD fit and hand the channel to the chip/global fallback pass
-              // (`entry` is left at its default status 0, integral set, so
-              // pass 2/3 fill it; only a 0-entry channel is ever masked).
-              const double histMax = hmips.GetXaxis()->GetBinCenter(hmips.GetMaximumBin());
+              // Accept the fitted MPV only if we believe it: mpvIsTrustworthy()
+              // checks the MPV's own relative error (the low-statistics gate) and
+              // that the fit landed on the peak the data actually shows (the
+              // high-statistics gate). chi2/ndf is still computed and written out,
+              // but it no longer decides anything -- it cannot, it is not
+              // comparable across statistics.
+              //
+              // Failing that, prefer the spectrum's own peak over a fit we do not
+              // trust; and failing even that, leave status 0 for the chip/slab
+              // fallback (only a 0-entry channel is masked here).
+              const double histMax = robustPeak(hmips);
               double mip1 = 0.;
               for (int k = 0; k < 900; ++k) {
                 if (hmips.GetBinCenter(k) < r.mpv * 4) {
                   mip1 += hmips.GetBinContent(k);
                 }
               }
-              if (mip1 > 4. && r.mpv > lowlim && r.mpv < highlim && r.chi2ndf <= m_maxMipChi2Ndf.value()) {
-                if (std::fabs(histMax - r.mpv) <= m_mipHistMaxTol.value() * r.mpv) {
-                  // Fit is good AND consistent with the visible peak: keep it.
-                  entry = {r.mpv, r.empv, r.width, r.chi2ndf, entry.integral, 1};
-                } else if (histMax > 0.0 && histMax <= m_mipFallbackMaxAdc.value()) {
-                  // Fit passed the quality gates but its MPV disagrees with the
-                  // histogram's peak bin by more than MipHistMaxTol -- distrust
-                  // the fit and fall back to the histogram peak (status 2).
-                  entry = {histMax, -2., 0., 0., entry.integral, 2};
-                }
-                // else: fit inconsistent AND histMax itself unreasonable ->
-                // leave status 0 for the chip/global fallback.
+              if (mip1 > 4. && mpvIsTrustworthy(r, hmips, lowlim, highlim)) {
+                entry = {r.mpv, r.empv, r.width, r.chi2ndf, entry.integral, 1};
+              } else if (histMax > 0.0 && histMax <= m_mipFallbackMaxAdc.value()) {
+                entry = {histMax, -2., 0., 0., entry.integral, 2};
               }
+              // else: fit not believed AND the peak itself is unreasonable ->
+              // status 0, resolved by the chip/slab fallback.
             } else {
               // Fit failed (ndf<=0): instead of masking immediately, check
               // the combined histogram's peak bin as a rough MPV estimate
               // (the same idea as the pre-Gaudi Python
               // Calibration._compute_mips histogram-peak method). Accepted
               // only if positive and within MipFallbackMaxAdc; otherwise
-              // leave it masked for the chip/global fallback pass below.
+              // leave it masked for the chip/slab fallback pass below.
               const int peakBin = hmips.GetMaximumBin();
               const double peakValue = hmips.GetXaxis()->GetBinCenter(peakBin);
               if (peakValue > 0.0 && peakValue <= m_mipFallbackMaxAdc.value()) {
                 entry = {peakValue, -2., 0., 0., entry.integral, 2};
               } else {
-                entry.status = 0;  // masked/lowstats -- resolved in pass 2/3
+                entry.status = 0;  // masked/lowstats -- resolved by the chip/slab fallback
               }
             }
           }
@@ -683,11 +733,12 @@ struct PedestalMipCalibrator final : Gaudi::Algorithm {
         if (hmipsChip.Integral() <= m_chipFallbackMinIntegral.value()) continue;  // still dry -- pass 2.5/3 handle it
         const auto rChip = k4siwecal::fitLangau(hmipsChip, highGain);
         // The chip-level fit must converge, have its MPV in range, and pass the
-        // LOOSE fallback chi2 ceiling (a chip histogram's chi2/ndf is naturally
-        // ~2-3 for a good fit -- see MaxMipChi2NdfFallback). If not, pass 2.5
-        // (slab) / pass 3 (global) handle these channels. Report the fit MPV.
-        if (rChip.ndf <= 0 || rChip.chi2ndf > m_maxMipChi2NdfFallback.value() ||
-            rChip.mpv <= lowlim || rChip.mpv >= highlim) {
+        // Judged by exactly the same standard as a per-channel fit. It used to be
+        // judged by a looser chi2/ndf ceiling instead -- which was the wrong axis
+        // entirely: a chip carries ~64x a channel's statistics, so its chi2/ndf is
+        // inflated by that alone, not by being a worse fit. If not believed, the
+        // slab pass gets these channels; if that fails too, they are masked.
+        if (!mpvIsTrustworthy(rChip, hmipsChip, lowlim, highlim)) {
           continue;
         }
         const double peakMpvChip = rChip.mpv;
@@ -755,9 +806,14 @@ struct PedestalMipCalibrator final : Gaudi::Algorithm {
 
       if (hmipsSlab.Integral() <= m_chipFallbackMinIntegral.value()) continue;
       const auto rSlab = k4siwecal::fitLangau(hmipsSlab, highGain);
-      if (rSlab.ndf <= 0 || rSlab.chi2ndf > m_maxMipChi2NdfFallback.value() ||
-          rSlab.mpv <= lowlim || rSlab.mpv >= highlim) {
-        continue;  // slab fit unusable -- pass 3 (global) handles these
+      // Same standard again. This is the gate that used to be impossible to pass:
+      // a slab carries ~1000x a channel's statistics, so its chi2/ndf sat around
+      // 8-17 for a perfectly good fit and the ceiling of 25 was still routinely
+      // exceeded -- the slab fallback fired ZERO times across all of th220, and
+      // channels that should have inherited their own slab's MPV (~25 in slab 14)
+      // fell through to the detector-wide average (22.6) instead.
+      if (!mpvIsTrustworthy(rSlab, hmipsSlab, lowlim, highlim)) {
+        continue;  // slab fit not believed -- the channel is masked
       }
       for (int chip = 0; chip < kSkirocsPerAsu; ++chip) {
         for (int chn = 0; chn < kChannelsInSkiroc; ++chn) {
@@ -771,45 +827,29 @@ struct PedestalMipCalibrator final : Gaudi::Algorithm {
       }
     }
 
-    // Pass 3: global fallback for any channel that not even its slab could fit
-    // -- fill from the average MPV of every genuinely-fit channel (status 1/2)
-    // OR chip/slab-fit fallback (status 4/6, themselves real Langau fits at
-    // coarser granularity) in the whole calibration.
-    double globalSumMpv = 0.;
-    int nGlobalDonors = 0;
-    for (const auto& e : entries) {
-      if (e.status == 1 || e.status == 2 || e.status == 4 || e.status == 6) {
-        globalSumMpv += e.mpv;
-        ++nGlobalDonors;
-      }
-    }
-    int nGlobalFallback = 0;
+    // No global fallback. A channel that neither it, nor its chip, nor its slab
+    // could fit is MASKED -- it does not inherit a detector-wide average MPV.
+    //
+    // That average was a fiction. It pooled every fitted channel in the detector,
+    // including slab 12, the chip-on-board: by design its gain is ~1.65x every
+    // other slab's (MPV ~35 vs ~21.5), so the "average MIP" it produced belongs
+    // to no real channel anywhere. The one channel that ever reached it in th220
+    // (slab 14, chip 0, channel 27) was handed 22.62 while its own slab's mean is
+    // 25.11 and its immediate neighbours fit at 23-26 -- a ~10% error on every hit
+    // that channel would ever record. A wrong MIP is worse than no MIP: a masked
+    // channel is excluded downstream and its absence is visible, whereas a
+    // fabricated one silently miscalibrates every event it touches.
+    //
+    // If a channel fired but nothing at any granularity could be fitted from it,
+    // that is a fact worth surfacing, not papering over.
     int nStillMasked = 0;
     int nZeroEntryMasked = 0;
-    if (nGlobalDonors > 0) {
-      const double globalAvgMpv = globalSumMpv / nGlobalDonors;
-      for (auto& e : entries) {
-        if (e.status != 0) continue;
-        // Same rule as the chip-fallback pass: a channel with zero raw MIP
-        // entries never fired in this run, so it is left masked (mpv=0)
-        // rather than assigned a value it never earned.
-        if (e.integral == 0.) {
-          ++nZeroEntryMasked;
-          continue;
-        }
-        e.mpv = globalAvgMpv;
-        e.empv = -4.;
-        e.status = 5;
-        ++nGlobalFallback;
-      }
-    } else {
-      for (const auto& e : entries) {
-        if (e.status != 0) continue;
-        if (e.integral == 0.) {
-          ++nZeroEntryMasked;
-        } else {
-          ++nStillMasked;
-        }
+    for (const auto& e : entries) {
+      if (e.status != 0) continue;
+      if (e.integral == 0.) {
+        ++nZeroEntryMasked;  // never fired in this run
+      } else {
+        ++nStillMasked;      // fired, but unfittable at channel, chip AND slab level
       }
     }
 
@@ -817,7 +857,7 @@ struct PedestalMipCalibrator final : Gaudi::Algorithm {
     // like the reference tool's mpv_all (layer*20+chip, channel), plus a
     // per-channel status code map (0=masked/nothing available anywhere,
     // 1=genuine fit, 2=histogram-peak fallback, 3=fit-not-miplike,
-    // 4=chip-fit fallback, 5=global-average fallback) so the fallback
+    // 4=chip-fit fallback, 6=slab-fit fallback; there is no global fallback) so the fallback
     // policy's decisions are directly visible, and 1D distributions of the
     // written MPV/chi2ndf.
     std::unique_ptr<TFile> diagFile;
@@ -835,7 +875,7 @@ struct PedestalMipCalibrator final : Gaudi::Algorithm {
       hMpvMap = new TH2F("mip_mpv_map", "MIP MPV; layer*20+chip; channel", 300, -0.5, 299.5, 64, -0.5, 63.5);
       hStatusMap = new TH2F("mip_status_map",
                              "MIP status (0=masked, 1=fit, 2=histfallback, "
-                             "4=chip-fallback, 5=global-fallback, 6=slab-fallback); layer*20+chip; channel",
+                             "4=chip-fallback, 6=slab-fallback; no global fallback); layer*20+chip; channel",
                              300, -0.5, 299.5, 64, -0.5, 63.5);
       hMpvDist = new TH1F("mip_mpv_dist", "MIP MPV distribution (fit or fallback); ADC", 200, 0.0, 400.0);
       hChi2NdfDist = new TH1F("mip_chi2ndf_dist", "MIP fit chi2/ndf distribution (genuine fits only)", 100, 0.0, 20.0);
@@ -870,13 +910,16 @@ struct PedestalMipCalibrator final : Gaudi::Algorithm {
       info() << "PedestalMipCalibrator: wrote MIP diagnostics to " << m_diagnosticsFile.value() << endmsg;
     }
     info() << "PedestalMipCalibrator: MIP fallback summary: " << nChipFallback << " channel(s) filled from their "
-           << "chip fit, " << nSlabFallback << " channel(s) filled from their slab fit, " << nGlobalFallback
-           << " channel(s) filled from the global average, "
-           << nZeroEntryMasked << " channel(s) left masked (zero raw MIP entries -- never fired in this run)"
-           << (nStillMasked > 0 ? "; " + std::to_string(nStillMasked) + " channel(s) had some statistics but could "
-                                      "not be filled at all (no genuine fit anywhere in this calibration)"
-                                 : "")
-           << endmsg;
+           << "chip fit, " << nSlabFallback << " channel(s) filled from their slab fit, " << nZeroEntryMasked
+           << " channel(s) masked (zero raw MIP entries -- never fired in this run)" << endmsg;
+    if (nStillMasked > 0) {
+      // Not a detail: these channels DID fire, and nothing at any granularity
+      // could be fitted from them. They used to be quietly handed the
+      // detector-wide average MPV. Now they are masked, and said out loud.
+      warning() << "PedestalMipCalibrator: " << nStillMasked
+                << " channel(s) had MIP statistics but could not be fitted at channel, chip OR slab level -- "
+                << "MASKED (no MIP). Investigate before trusting this calibration." << endmsg;
+    }
     info() << "PedestalMipCalibrator: wrote MIP table to " << m_outputMipFile.value() << endmsg;
     return StatusCode::SUCCESS;
   }

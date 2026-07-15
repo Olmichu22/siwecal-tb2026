@@ -65,7 +65,7 @@ from calib_run_utils import parse_run_folder_list, raw_chunk_files
 from condor_common import DEFAULT_CONVERTED_DIR, OPTIONS_DIR, chunks_dir, condor_log_dir, env_wrapper_preamble, \
     mkdirs_line, write_executable, write_text
 from siwecal_common import paths
-from siwecal_eventbuilder.cli import resolve_gaudi_calib_files
+from siwecal_eventbuilder.cli import MIP_CALIB_TH, resolve_gaudi_calib_files
 from siwecal_eventbuilder.run_settings import read_threshold_dac
 
 _CLEANUP = os.path.join(_REPO, "gaudi_jobs", "calibration", "condor", "cleanup_job_logs.sh")
@@ -100,13 +100,26 @@ while read -r CHUNK OUT_DECODED; do
   [ -z "$CHUNK" ] && continue
   # Idempotent: a chunk already decoded is left alone, so a partial submit can
   # simply be resubmitted (and a DAG rescue re-runs only what is missing).
-  if [ -s "$OUT_DECODED" ]; then
+  #
+  # "Already decoded" means the ROOT file OPENS and has the tree -- not merely
+  # that it is non-empty. A k4run killed mid-write (OOM, eviction, an XRootD
+  # Close that timed out) leaves a multi-MB file with NO KEYS in it, which a
+  # `[ -s ]` test happily accepts. Those files then sail through every later
+  # stage until the calibration Fill finally chokes on them ("Tree
+  # 'siwecaldecoded' not found"), hours and thousands of jobs later. Verify the
+  # file, not its size.
+  if [ -s "$OUT_DECODED" ] && python3 -c "import ROOT,sys; ROOT.gErrorIgnoreLevel=ROOT.kFatal; f=ROOT.TFile.Open(sys.argv[1]); sys.exit(0 if f and not f.IsZombie() and f.Get('siwecaldecoded') else 1)" "$OUT_DECODED" >/dev/null 2>&1; then
     SKIPPED=$((SKIPPED+1))
     continue
   fi
 """ + "  " + mkdirs_line('$(dirname "$OUT_DECODED")') + f"""
   RAW_FILES="$CHUNK" RAW2ROOT_OUT="$OUT_DECODED" RAW2ROOT_RUN_SETTINGS_FILE="$RUN_SETTINGS" \\
     k4run "{OPTIONS_DIR}/run_raw2root.py"
+  # And check what we just wrote, before calling it done.
+  if ! python3 -c "import ROOT,sys; ROOT.gErrorIgnoreLevel=ROOT.kFatal; f=ROOT.TFile.Open(sys.argv[1]); sys.exit(0 if f and not f.IsZombie() and f.Get('siwecaldecoded') else 1)" "$OUT_DECODED" >/dev/null 2>&1; then
+    echo "ERROR: $OUT_DECODED was written but has no siwecaldecoded tree" >&2
+    exit 1
+  fi
   N=$((N+1))
 done < "$GROUPLIST"
 echo "decoded $N chunk(s), skipped $SKIPPED already done"
@@ -235,15 +248,25 @@ def main(argv=None):
     p.add_argument("--reco-dir", default=paths.reconstruction_dir(),
                    help=f"Where <RUN>/ecal_*.root go (outside Data/). "
                         f"Default: {paths.reconstruction_dir()}")
+    p.add_argument("--mip-th", default=MIP_CALIB_TH,
+                   help="Threshold whose MIP tables every run is calibrated against. Default: the run's OWN "
+                        "threshold (same as its pedestals). MIPs and pedestals both shift with the trigger "
+                        "threshold, so each run auto-calibrates from its own th. Pass --mip-th <th> only for "
+                        "a deliberate cross-threshold study.")
     p.add_argument("--out-dir", required=True, help="Directory to write the DAG, subs, wrappers and logs into.")
     p.add_argument("--chunks-per-job", type=int, default=20,
                    help="Raw chunks decoded by ONE Condor job, each in its own k4run (default 20). "
                         "A job costs ~14s of fixed overhead (slot, CVMFS, key4hep) for ~1.5s of "
                         "decoding, so one chunk per job wastes ~90%% of the farm time it uses and "
                         "floods the schedd; 20 keeps jobs under a minute and cuts both by ~8x.")
-    p.add_argument("--convert-request-memory", type=int, default=7000,
-                   help="request_memory in MB for a CONVERT (one-chunk decode) job. Default 7000; see "
-                        "generate_convert_jobs.py for why it is this high.")
+    p.add_argument("--convert-request-memory", type=int, default=2000,
+                   help="request_memory in MB for a CONVERT job (default 2000). Measured peak RSS of a "
+                        "chunk decode is ~790 MB -- including run_000004's chunk 0100, the sparse muon "
+                        "chunk that used to peak at 22.7 GB and OOM-kill the job. That is what the old "
+                        "7000 was sized for; e74be8b made the decoder stream acquisitions into the tree "
+                        "instead of buffering a whole file, and the request was never brought back down. "
+                        "Asking 9x what you use does not just waste the farm -- it starves you of slots: "
+                        "few machines have 7 GB free per core, so 532 queued jobs were getting 12.")
     p.add_argument("--reco-request-memory", type=int, default=8000,
                    help="request_memory in MB for a RECO job (event building holds a run's events in memory).")
     p.add_argument("--convert-job-flavour", default="microcentury", help="+JobFlavour for CONVERT (default 1h).")
@@ -293,7 +316,7 @@ def main(argv=None):
         if args.convert_only:
             ped = mip = ped_lg = mip_lg = ""
         else:
-            ped, mip, ped_lg, mip_lg = resolve_gaudi_calib_files(th)
+            ped, mip, ped_lg, mip_lg = resolve_gaudi_calib_files(th, mip_th=args.mip_th)
 
         cdir = chunks_dir(args.converted_dir, run)
         os.makedirs(cdir, exist_ok=True)

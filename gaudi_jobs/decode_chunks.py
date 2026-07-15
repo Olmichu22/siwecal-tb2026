@@ -57,6 +57,28 @@ def chunk_files(converted_dir, run):
                   if n.startswith("chunk_") and n.endswith(".root"))
 
 
+def is_valid_chunk(path, tree="siwecaldecoded"):
+    """Does this decoded chunk actually OPEN and hold the tree?
+
+    Not `os.path.getsize(path) > 0`. A k4run killed mid-write -- OOM, eviction, an
+    XRootD Close that timed out -- leaves a multi-megabyte ROOT file with NO KEYS
+    in it. A size check waves that through, and it then survives every stage until
+    the calibration Fill finally chokes on it ("Tree 'siwecaldecoded' not found"),
+    thousands of jobs and hours later. Ask the file, not the filesystem.
+    """
+    if not (os.path.exists(path) and os.path.getsize(path) > 0):
+        return False
+    import ROOT  # local: callers that never decode need no ROOT
+
+    ROOT.gErrorIgnoreLevel = ROOT.kFatal
+    handle = ROOT.TFile.Open(path)
+    if not handle or handle.IsZombie():
+        return False
+    ok = bool(handle.Get(tree))
+    handle.Close()
+    return ok
+
+
 def assert_not_under(path, readonly_root):
     """Refuse to write anywhere inside the read-only raw data tree."""
     real_path = os.path.realpath(path)
@@ -85,7 +107,7 @@ def decode_run(run, raw_dir, converted_dir, force=False, dry_run=False,
     for i, raw_chunk in enumerate(raw):
         out = os.path.join(cdir, f"chunk_{i:04d}.root")
         outputs.append(out)
-        if force or not (os.path.exists(out) and os.path.getsize(out) > 0):
+        if force or not is_valid_chunk(out, tree):
             todo.append((raw_chunk, out))
 
     if verbose:
