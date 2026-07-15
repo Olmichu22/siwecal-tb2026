@@ -32,7 +32,11 @@ _CONVERTED = os.environ.get(
     "EVBLD_CONVERTED_DIR",
     "/eos/experiment/drdcalo/siw-ecal/TB2026-06/Data/rundata_converted_gaudi")
 _INPUT_GLOB = os.path.join(_CONVERTED, _RUN, "chunks", "chunk_*.root")
-_OUTPUT = os.environ.get("EVBLD_OUTPUT", os.path.join(_HERE, f"ecal_{_RUN}.root"))
+# Event-builder output goes to <run>/events/, alongside the run's <run>/chunks/,
+# NOT to the shared Reconstruction/ area. Override with EVBLD_OUTPUT.
+_EVENTS_DIR = os.path.join(_CONVERTED, _RUN, "events")
+_OUTPUT = os.environ.get("EVBLD_OUTPUT", os.path.join(_EVENTS_DIR, f"ecal_{_RUN}.root"))
+os.makedirs(os.path.dirname(_OUTPUT), exist_ok=True)
 
 
 def _latest(pattern):
