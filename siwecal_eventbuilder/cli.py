@@ -117,9 +117,13 @@ def resolve_muon_calib_files(th: str):
     return pedestal_path_hg, pedestal_path_lg, mip_path_hg, mip_path_lg
 
 
-# Which threshold's MIP tables every run is calibrated against, whatever threshold it
-# was taken at. NOT the run's own -- see resolve_gaudi_calib_files.
-MIP_CALIB_TH = "220"
+# Default threshold whose MIP tables a run is calibrated against. ``None`` means
+# "the run's OWN threshold" -- each pipeline auto-calibrates from its own th, both
+# pedestal and MIP. A caller may still pass an explicit --mip-th to override, but
+# nothing borrows another threshold's MIP by default anymore (see
+# resolve_gaudi_calib_files). The old th220-for-everything bypass is retired: MIPs
+# and pedestals genuinely shift with threshold, so every threshold needs its own fit.
+MIP_CALIB_TH = None
 
 
 def resolve_gaudi_calib_files(th, mip_th=None):
@@ -130,28 +134,26 @@ def resolve_gaudi_calib_files(th, mip_th=None):
     run they came from (``*_run_000004_highgain.txt``), not after the threshold,
     so the files are globbed rather than spelled out.
 
-    THE PEDESTAL COMES FROM ``th``; THE MIP COMES FROM ``mip_th`` (th220 by default).
-    They are deliberately not the same table, because the two quantities depend on
-    the trigger threshold in opposite ways:
+    THE PEDESTAL AND THE MIP BOTH COME FROM ``th`` by default (``mip_th is None``).
+    Each pipeline auto-calibrates from its own threshold: both the pedestal and the
+    MIP MPV genuinely shift with the trigger threshold, so borrowing another
+    threshold's MIP does not hold up. ``mip_th`` still exists as an explicit override
+    for deliberate cross-threshold studies, but it is no longer defaulted to th220.
 
-    * The MIP MPV, in ADC, is a property of the PREAMP, not of the discriminator.
-      run_000060 (DAC 220) and run_000004 (DAC 230) have identical FeedbackCap (15),
-      HoldDelay (110) and FSPeakTime (2) -- only ThresholdDAC differs -- so a MIP has
-      to give the same ADC in both. It does not: the fitted MPV is 21.69 ADC at th220
-      and 32.40 at th230, inflated 1.47x. The reason is that the MIP histogram is only
-      filled when the channel FIRES, so the discriminator cuts the spectrum from the
-      left; at th230 that cut lands at 18-22 ADC, right on the peak (~22), removing
-      70-83% of the peak-region entries and dragging the fit up. th220 cuts at 11-13,
-      well below the peak, and its MPV agrees with the reference tool to 1.6%.
-      So th220's MIP table is the correct one FOR EVERY THRESHOLD, and th230's is not
-      correct even for th230.
+    Why per-threshold, for both quantities:
 
-    * The PEDESTAL is measured from the samples that did NOT fire, so the threshold
-      does not bias it -- but it does drift between runs. The th220 and th230 tables
-      really differ (median 1.27 ADC in the high gain, RMS 3.3; 68% of channel-SCAs
-      differ by more than 1 ADC), and that is genuine run-to-run drift, not error.
-      Forcing th220's pedestals onto a th230 run would inject an error that does not
-      exist today, so each threshold keeps its own.
+    * The MIP MPV, in ADC, is NOT the same across thresholds. It has to be fit
+      separately for each: the MIP histogram is only filled when the channel FIRES,
+      so the discriminator cuts the spectrum from the left, and where that cut lands
+      relative to the peak differs by threshold. Assuming one ADC MIP value serves
+      every threshold is wrong -- so each threshold gets its own MIP table, produced
+      by a fit that accounts for its own trigger cut.
+
+    * The PEDESTAL is measured from the samples that did NOT fire, and it drifts
+      between runs (the th220 and th230 tables differ by a median 1.27 ADC in the
+      high gain, RMS 3.3; 68% of channel-SCAs by more than 1 ADC). Forcing one
+      threshold's pedestals onto another injects an error that does not exist, so
+      each threshold keeps its own.
 
     A missing ``th{th}`` folder, or one holding no high-gain table, is a hard error:
     silently falling back to another threshold's tables is exactly how a run ends up
@@ -162,7 +164,7 @@ def resolve_gaudi_calib_files(th, mip_th=None):
     instead of the threshold becoming unusable. They are returned as a pair or
     not at all: half a low-gain calibration is worse than none.
     """
-    mip_th = MIP_CALIB_TH if mip_th is None else str(mip_th)
+    mip_th = str(th) if mip_th is None else str(mip_th)
 
     def _one(kind, pattern, required, folder_th):
         folder = os.path.join(GAUDI_CALIB_DIR, kind, f"th{folder_th}")
@@ -189,8 +191,8 @@ def resolve_gaudi_calib_files(th, mip_th=None):
     if not (ped_lg and mip_lg):
         ped_lg = mip_lg = ""
     if str(mip_th) != str(th):
-        print(f"[calib] threshold {th}: pedestals from th{th}, MIP from th{mip_th} "
-              f"(th{th}'s own MIP is biased by its trigger cutting into the peak)")
+        print(f"[calib] threshold {th}: pedestals from th{th}, but MIP OVERRIDDEN to "
+              f"th{mip_th} via explicit --mip-th (cross-threshold study; not the default)")
     return ped_hg, mip_hg, ped_lg, mip_lg
 
 

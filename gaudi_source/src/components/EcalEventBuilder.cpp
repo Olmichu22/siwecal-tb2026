@@ -137,7 +137,7 @@ struct EcalEventBuilder final : Gaudi::Algorithm {
         return error() << calibError << endmsg, StatusCode::FAILURE;
       }
       if (calib.hasLowGain()) {
-        info() << "Low-gain calibration loaded: hits with raw adc_high >= " << m_adcSaturationThreshold.value()
+        info() << "Low-gain calibration loaded: hits with (adc_high - ped_hg) >= " << m_adcSaturationThreshold.value()
                << " take their energy from the low-gain branch, anchored to the high gain through "
                   "adc_low - ped_lg = "
                << m_gainRatio.value() << "*(adc_high - ped_hg) + " << m_gainIntercept.value()
@@ -327,9 +327,9 @@ struct EcalEventBuilder final : Gaudi::Algorithm {
   Gaudi::Property<int> m_adcUnderflowThreshold{this, "AdcUnderflowThreshold", 11, ""};
   Gaudi::Property<int> m_adcSaturationThreshold{
       this, "AdcSaturationThreshold", 1500,
-      "Raw (not pedestal-subtracted) high-gain ADC at/above which the high-gain preamp is taken to be "
-      "saturated and the energy is read from the low-gain branch instead. Only has an effect when the "
-      "low-gain tables are loaded."};
+      "Pedestal-subtracted high-gain ADC (adc_high - ped_hg) at/above which the high-gain preamp is taken "
+      "to be saturated and the energy is read from the low-gain branch instead. This is the ADC quantity "
+      "used everywhere else in the reconstruction. Only has an effect when the low-gain tables are loaded."};
   Gaudi::Property<double> m_gainRatio{
       this, "GainRatio", 0.0962,
       "k in adc_low - ped_lg = k*(adc_high - ped_hg) + c. Above AdcSaturationThreshold the hit energy is "

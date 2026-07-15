@@ -68,12 +68,10 @@ def main(argv=None):
                    help="Threshold label used to resolve the MuonCalib_gaudi calibration folder (e.g. 230). "
                         "Default: read the run's ThresholdDAC from its Run_Settings.txt")
     p.add_argument("--mip-th", default=MIP_CALIB_TH,
-                   help=f"Threshold whose MIP tables to calibrate against, whatever threshold the run was "
-                        f"taken at. Default: {MIP_CALIB_TH}. The MIP MPV in ADC is a property of the preamp, "
-                        "not of the discriminator, but a HIGH trigger cuts into the MIP peak and inflates the "
-                        "fit (th230's MPV is 1.47x th220's for identical electronics). th220's is the "
-                        "unbiased one. Pedestals are NOT affected and stay on the run's own threshold. "
-                        "Pass --mip-th <th> to use a run's own MIP table instead.")
+                   help="Threshold whose MIP tables to calibrate against. Default: the run's OWN threshold "
+                        "(same as the pedestals). MIPs and pedestals both shift with the trigger threshold, so "
+                        "each run auto-calibrates from its own th. Pass --mip-th <th> only for a deliberate "
+                        "cross-threshold study.")
     p.add_argument("--run-id", type=int, default=None, help="Numeric run id for the ecal tree's `run` branch "
                                                               "(default: parsed from the run name)")
     p.add_argument("--raw-dir", default=None,

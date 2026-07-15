@@ -60,3 +60,6 @@ k4SiWEcalReco/build/
 diagnostics/*
 !diagnostics/*.py
 !diagnostics/*.txt
+
+# Agents
+claude_orders.txt
