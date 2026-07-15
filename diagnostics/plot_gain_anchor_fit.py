@@ -22,10 +22,9 @@ MIP_lg never appears. This is what the plot shows: the line is measured only in 
 shaded fiducial band, and used only beyond the switch -- an extrapolation of a
 straight line into the region where the other branch has gone blind.
 
-The line is traced by the MEDIAN of adc_low in each slice of adc_high, NOT by a
-least-squares fit to the hits. Least squares on this band is pulled off the data by its
-tails: it reports c = +3.13 where the medians say +1.60, and you can see it miss the
-dense part of the band. Both lines are drawn, so you can.
+The line is traced by the MEDIAN of adc_low in each slice of adc_high, not by a
+least-squares fit to the hits (least squares on this band is pulled off the data by its
+tails).
 
 Usage:  RUN=TB2026CERN_run_000072 TH=220 python3 diagnostics/plot_gain_anchor_fit.py
 """
@@ -53,7 +52,7 @@ N_ACQ = int(os.environ.get("N_ACQ", "8000"))
 # non-linearity, which plot_hg_linearity measures at raw adc_high ~ 1270 (1% level).
 # 1200 pedestal-subtracted is raw ~1445 -- inside both bounds.
 FID_LO, FID_HI = 150, 1200
-SWITCH_RAW = 1500                   # AdcSaturationThreshold, on the RAW high-gain ADC
+SWITCH = 1500                       # AdcSaturationThreshold, on the pedestal-subtracted high-gain ADC
 MIP_LG = 2.08
 MIP_HG = 21.69
 
@@ -84,12 +83,10 @@ def read_ped(path):
 
 
 G = f"calibration/MuonCalib_gaudi/pedestals/th{TH}"
-tag = "TB2026CERN_run_000004" if TH == "230" else "TB2026CERN_run_000th220"
+tag = "TB2026CERN_run_000004" if TH == "230" else f"TB2026CERN_run_000th{TH}"
 PH = read_ped(f"{G}/Pedestal_{tag}_highgain.txt")
 PL = read_ped(f"{G}/Pedestal_{tag}_lowgain.txt")
 HAVE = (PH > 0) & (PL > 0)
-PED_HG_MED = float(np.median(PH[HAVE]))
-SWITCH = SWITCH_RAW - PED_HG_MED     # the switch, on the pedestal-subtracted axis
 
 chain = ROOT.TChain("siwecaldecoded")
 for c in sorted(glob.glob(f"/eos/experiment/drdcalo/siw-ecal/TB2026-06/Data/"
@@ -109,8 +106,8 @@ chain.SetBranchAddress("slboard_id", slbid)
 H = np.zeros((NX, NY), dtype=np.int64)
 sca_ax = np.arange(NSCA).reshape(1, NSCA, 1)
 n_ent = min(N_ACQ, chain.GetEntries())
-print(f"[read] {RUN} (th{TH}): {n_ent:,} acquisitions, pedestal-subtracted switch at "
-      f"{SWITCH:.0f} ADC (raw {SWITCH_RAW})")
+print(f"[read] {RUN} (th{TH}): {n_ent:,} acquisitions, switch at "
+      f"{SWITCH:.0f} ADC (adc_high - pedestal)")
 
 for e in range(n_ent):
     chain.GetEntry(e)
@@ -157,20 +154,13 @@ for i in range(NX):
             fy.append(m)
 K, C0 = np.polyfit(np.array(fx), np.array(fy), 1)
 
-# The bad fit, for contrast: least squares on the hits over the same region.
-wi, wj = np.nonzero(H)
-sel = (XC[wi] >= FID_LO) & (XC[wi] <= FID_HI)
-K_LS, C_LS = np.polyfit(XC[wi][sel], YC[wj][sel], 1,
-                        w=np.sqrt(H[wi, wj][sel].astype(float)))
-
 print(f"\n  fiducial region: adc_high - ped in [{FID_LO}, {FID_HI}]  ({len(fx)} slices)")
 print(f"  MEDIAN line   : adc_low - ped = {K:.4f} * (adc_high - ped) + {C0:+.2f}   (1/k = {1 / K:.2f})")
-print(f"  least squares : adc_low - ped = {K_LS:.4f} * (adc_high - ped) + {C_LS:+.2f}")
 
-c = ROOT.TCanvas("c", "anchor fit", 1700, 780)
-c.Divide(2, 1, 0.005, 0.005)
+c = ROOT.TCanvas("c", "anchor fit", 1000, 820)
+c.Divide(1, 1)
 keep = []
-RED, GREEN, ORANGE = ROOT.kRed + 1, ROOT.kGreen + 2, ROOT.kOrange + 7
+GREEN, ORANGE = ROOT.kGreen + 2, ROOT.kOrange + 7
 
 
 def draw(pad_id, xlo, xhi, ylo, yhi, title, zoom):
@@ -228,14 +218,6 @@ def draw(pad_id, xlo, xhi, ylo, yhi, title, zoom):
     f_ex.Draw("same")
     keep += [f_in, f_ex]
 
-    f_ls = ROOT.TF1(f"fls{pad_id}", "[0]*x+[1]", xlo, xhi)
-    f_ls.SetParameters(K_LS, C_LS)
-    f_ls.SetLineColor(RED)
-    f_ls.SetLineWidth(3)
-    f_ls.SetLineStyle(7)
-    f_ls.Draw("same")
-    keep.append(f_ls)
-
     sw = None
     if xlo <= SWITCH <= xhi:
         sw = ROOT.TLine(SWITCH, ylo, SWITCH, yhi)
@@ -250,36 +232,15 @@ def draw(pad_id, xlo, xhi, ylo, yhi, title, zoom):
     leg.SetTextSize(0.028)
     leg.AddEntry(med, "median of adc_low per slice", "p")
     leg.AddEntry(f_in, f"FIT (medians): k = {K:.4f}, c = {C0:+.2f}   1/k = {1 / K:.2f}", "l")
-    leg.AddEntry(f_ls, f"least squares on hits: k = {K_LS:.4f}, c = {C_LS:+.2f}", "l")
     if sw:
-        leg.AddEntry(sw, f"switch to low gain (raw adc_high = {SWITCH_RAW})", "l")
-    leg.AddEntry(band, f"fiducial region: the line is fitted HERE ONLY", "f")
+        leg.AddEntry(sw, f"switch to low gain (adc_high - ped = {SWITCH})", "l")
+    leg.AddEntry(band, "fiducial region", "f")
     leg.Draw()
     keep.append(leg)
 
 
 draw(1, -50, 2350, -20, 300,
      f"{RUN} (th{TH}): the line that anchors the low gain to the high gain", False)
-draw(2, -30, 260, -8, 30,
-     f"{RUN} (th{TH}): zoom on the pedestal point -- the intercept c", True)
-
-pad = c.cd(2)
-zero = ROOT.TMarker(0, 0, 29)
-zero.SetMarkerColor(ROOT.kCyan + 1)
-zero.SetMarkerSize(3.2)
-zero.Draw()
-mip = ROOT.TLine(-30, MIP_LG, 260, MIP_LG)
-mip.SetLineColor(ROOT.kMagenta + 1)
-mip.SetLineStyle(3)
-mip.SetLineWidth(3)
-mip.Draw()
-lab = ROOT.TLatex()
-lab.SetTextSize(0.030)
-lab.SetTextColor(ROOT.kMagenta + 1)
-lab.DrawLatex(150, MIP_LG + 1.0, f"1 low-gain MIP = {MIP_LG:.2f} ADC")
-lab.SetTextColor(ROOT.kCyan + 1)
-lab.DrawLatex(10, -5.5, "(0,0): both pedestals")
-keep += [zero, mip, lab]
 
 out = os.path.join(OUT, f"gain_anchor_fit_{RUN.split('_')[-1]}_th{TH}.png")
 c.SaveAs(out)
@@ -287,7 +248,7 @@ c.SaveAs(out)
 print(f"\n  the event builder inverts this line:")
 print(f"     adc_high_equiv = (adc_low - ped_lg - {C0:.2f}) / {K:.4f}")
 print(f"     energy         = adc_high_equiv / MIP_hg")
-print(f"  applied only past the switch (raw adc_high >= {SWITCH_RAW}). MIP_lg is never used.")
+print(f"  applied only past the switch (adc_high - ped >= {SWITCH}). MIP_lg is never used.")
 print(f"\n  the intercept c is {C0 / MIP_LG:.2f} low-gain MIPs, and shifts the energy by "
       f"c/k = {C0 / K:.1f} high-gain ADC = {C0 / K / MIP_HG:.2f} MIP per saturated hit")
 print(f"\nsaved {out}")

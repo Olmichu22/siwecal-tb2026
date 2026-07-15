@@ -72,6 +72,10 @@ builder = EcalEventBuilder(
     PedestalFileLowGain=pedestal_file_lg,
     MipFileLowGain=mip_file_lg,
     AdcSaturationThreshold=int(os.environ.get("EVBLD_ADC_SATURATION", "1500")),
+    # LG->HG anchor line (per threshold, from calibration/MuonCalib_gaudi/anchor/thN/).
+    # Defaults keep the previous global values if unset.
+    GainRatio=float(os.environ.get("EVBLD_GAIN_RATIO", "0.0962")),
+    GainIntercept=float(os.environ.get("EVBLD_GAIN_INTERCEPT", "1.45")),
     PadMapDefaultFile=os.environ.get("EVBLD_PADMAP_DEFAULT", ""),
     PadMapSlabOverrides=pad_map_overrides,
     SlabZFile=os.environ.get("EVBLD_SLAB_Z_FILE", ""),

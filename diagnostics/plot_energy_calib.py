@@ -1,6 +1,6 @@
 """Does anchoring the low gain to the high gain give a better energy distribution?
 
-hit_energy now takes saturated hits (raw adc_high >= 1900) from the low-gain branch
+hit_energy now takes saturated hits ((adc_high - ped_hg) >= 1500) from the low-gain branch
 ANCHORED to the high gain -- adc_high_equiv = (adc_low - ped_lg - c)/k, energy =
 adc_high_equiv / MIP_hg -- so MIP_lg never enters. hit_energy_nocalib keeps the old
 value, the low gain on its own MIP_lg scale, on the SAME events.

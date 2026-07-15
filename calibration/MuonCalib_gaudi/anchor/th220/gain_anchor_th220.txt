@@ -1,0 +1,12 @@
+# LG -> HG anchoring line for th220 (SiW-ECAL TB2026CERN)
+# Maps a low-gain reading back onto the high gain in the fiducial region:
+#     adc_low - ped_lg = k * (adc_high - ped_hg) + c
+# The event builder inverts it for saturated hits and divides by MIP_hg:
+#     adc_high_equiv = (adc_low - ped_lg - c) / k ;  energy = adc_high_equiv / MIP_hg
+# A hit switches to the low gain when (adc_high - ped_hg) >= switch (pedestal-subtracted ADC).
+# Fitted by the MEDIAN of adc_low per adc_high slice in the fiducial band
+# (adc_high - ped in [150, 1200]). See diagnostics/plot_gain_anchor_fit.py.
+k 0.0963
+c 1.29
+switch 1500
+source_run TB2026CERN_run_000072

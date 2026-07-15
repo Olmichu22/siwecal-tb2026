@@ -20,9 +20,14 @@ source /cvmfs/sw.hsf.org/key4hep/setup.sh -r "${KEY4HEP_RELEASE}"
 export PYTHONPATH="${REPO_ROOT}:${PYTHONPATH}"
 
 # --- optional k4SiWEcalReco build (so k4run finds the compiled plugin) -------
-# Built once by install.sh (or by hand, see k4SiWEcalReco/README.md). Without
-# these run_pid_batch.py's `k4run` cannot load libk4SiWEcalRecoPlugins.so.
-if [ -d "${REPO_ROOT}/k4SiWEcalReco/build" ]; then
+# Built once by install.sh (or by hand, see gaudi_source/README.md). Without
+# these `k4run` cannot load libk4SiWEcalRecoPlugins.so. The source tree is
+# gaudi_source/ (the batch jobs export exactly this path); an older name,
+# k4SiWEcalReco/build, is kept as a fallback for pre-rename checkouts.
+if [ -d "${REPO_ROOT}/gaudi_source/build" ]; then
+    export LD_LIBRARY_PATH="${REPO_ROOT}/gaudi_source/build:${LD_LIBRARY_PATH}"
+    export PYTHONPATH="${REPO_ROOT}/gaudi_source/build/genConfDir:${PYTHONPATH}"
+elif [ -d "${REPO_ROOT}/k4SiWEcalReco/build" ]; then
     export LD_LIBRARY_PATH="${REPO_ROOT}/k4SiWEcalReco/build:${LD_LIBRARY_PATH}"
     export PYTHONPATH="${REPO_ROOT}/k4SiWEcalReco/build/genConfDir:${PYTHONPATH}"
 fi

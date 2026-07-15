@@ -508,9 +508,11 @@ class HitCollector {
 
     // The high-gain preamp saturates on large deposits, flattening adc_high and so
     // under-reading the energy; above the saturation threshold the low-gain branch
-    // (which is still linear there) is used instead.
+    // (which is still linear there) is used instead. The switch is decided on the
+    // PEDESTAL-SUBTRACTED high-gain value (adc_high - ped_hg) -- the ADC quantity we
+    // use everywhere else and are familiar with at user level -- not the raw ADC.
     const bool isMasked = m_calib.isMasked(slabId, chipId, channel);
-    const bool saturated = m_calib.hasLowGain() && adcHigh >= m_cfg.adcSaturationThreshold;
+    const bool saturated = m_calib.hasLowGain() && adcHighPedsub >= m_cfg.adcSaturationThreshold;
 
     // The energy, and the same energy the old way. They differ ONLY for saturated
     // hits: below the threshold both read the high gain and are identical.
