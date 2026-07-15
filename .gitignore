@@ -63,3 +63,6 @@ diagnostics/*
 
 # Agents
 claude_orders.txt
+
+# Private credential (grid/condor token) -- must never be tracked
+marquezh.cc
