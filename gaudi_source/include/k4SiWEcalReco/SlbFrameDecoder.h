@@ -355,6 +355,28 @@ inline void recordFrame(Acquisition& acq, const DecodedFrame& frame, bool zeroSu
   }
 }
 
+// The loopBcid overflow-correction that recordFrame applies inline while
+// decoding raw frames, extracted so a decoder that fills the Acquisition from
+// an already-decoded source (e.g. EcalLcioDecoder reading EUDAQ LCIO) can
+// reproduce corrected_bcid identically -- validated to match the raw decoder
+// bit-for-bit on run_000254 (0 mismatches over 19985 frames). Same per-
+// (slab,chip) scan, same previousBcid=-1000/loopBcid=0 seeding as recordFrame.
+inline void computeCorrectedBcid(Acquisition& acq) {
+  for (int slab = 0; slab < kSlbDepth; ++slab) {
+    for (int chip = 0; chip < kSkirocsPerAsu; ++chip) {
+      if (acq.chipId[slab][chip] < 0) continue;
+      int previousBcid = -1000;
+      int loopBcid = 0;
+      for (int isca = 0; isca < acq.numCol[slab][chip]; ++isca) {
+        const int b = acq.bcid[slab][chip][isca];
+        if (b > 0 && b - previousBcid < 0) ++loopBcid;
+        if (b > 0) acq.correctedBcid[slab][chip][isca] = b + loopBcid * 4096;
+        previousBcid = b;
+      }
+    }
+  }
+}
+
 // Port of SLBraw2ROOT::GetBadBCID (SLBraw2ROOT.cc:840-963), verbatim
 // translation of the per-(slab,chip) consecutive-SCA state machine that
 // classifies each SCA slot as good(0)/empty-before(1)/empty-after(2)/

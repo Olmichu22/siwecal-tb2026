@@ -76,6 +76,12 @@ class CalibrationTables {
       }
       std::set<std::tuple<int, int, int>> mipMaskedLg;
       t.readMipFile(mipPathLg, defaultMipFallback, t.m_mipMapLg, t.m_defaultMipLg, mipMaskedLg);
+      // Kept SEPARATELY, not just unioned: the default hit energy anchors the low
+      // gain to the high gain and so needs only the low-gain PEDESTAL, never
+      // MIP_lg. Gating it on the union would throw away every channel whose MIP_lg
+      // fit failed -- and those fits fail because MIP_lg is unmeasurable (S/N ~ 2),
+      // which is the very reason the anchored energy exists.
+      t.m_pedMaskedLg = pedMaskedLg;
       t.m_maskedLg = pedMaskedLg;
       t.m_maskedLg.insert(mipMaskedLg.begin(), mipMaskedLg.end());
       t.m_hasLowGain = true;
@@ -128,11 +134,19 @@ class CalibrationTables {
     return m_masked.count({slabId, chipId, channel}) > 0;
   }
 
-  // True when the LOW gain has no usable calibration for this channel, so a
-  // saturated hit there cannot be recovered.
+  // True when the LOW gain has no usable calibration for this channel -- pedestal
+  // OR MIP. Gates the OLD, MIP_lg-based energy (Hit::energyMipNoCalib).
   bool isMaskedLg(int slabId, int chipId, int channel) const {
     if (!m_enabled || !m_hasLowGain) return false;
     return m_maskedLg.count({slabId, chipId, channel}) > 0;
+  }
+
+  // True when the low-gain PEDESTAL is unusable for this channel, ignoring MIP_lg.
+  // Gates the default, gain-anchored energy (Hit::energyMip), which needs the
+  // low-gain pedestal but never MIP_lg. Strictly weaker than isMaskedLg().
+  bool isPedestalMaskedLg(int slabId, int chipId, int channel) const {
+    if (!m_enabled || !m_hasLowGain) return false;
+    return m_pedMaskedLg.count({slabId, chipId, channel}) > 0;
   }
 
  private:
@@ -230,7 +244,9 @@ class CalibrationTables {
   double m_defaultMipLg = 1.0;
   std::map<std::tuple<int, int, int, int>, double> m_pedestalMap, m_pedestalMapLg;
   std::map<std::tuple<int, int, int>, double> m_mipMap, m_mipMapLg;
-  std::set<std::tuple<int, int, int>> m_masked, m_maskedLg;
+  // m_pedMaskedLg is the low-gain PEDESTAL mask alone; m_maskedLg additionally
+  // folds in the MIP_lg mask. See isPedestalMaskedLg().
+  std::set<std::tuple<int, int, int>> m_masked, m_maskedLg, m_pedMaskedLg;
 };
 
 }  // namespace k4siwecal

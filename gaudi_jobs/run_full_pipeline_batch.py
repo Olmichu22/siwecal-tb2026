@@ -45,7 +45,7 @@ import sys
 import ROOT
 
 from siwecal_common import paths
-from siwecal_eventbuilder.cli import resolve_gaudi_calib_files
+from siwecal_eventbuilder.cli import MIP_CALIB_TH, resolve_gaudi_calib_files
 from siwecal_eventbuilder.run_settings import read_threshold_dac
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
@@ -67,6 +67,11 @@ def main(argv=None):
     p.add_argument("--th", default=None,
                    help="Threshold label used to resolve the MuonCalib_gaudi calibration folder (e.g. 230). "
                         "Default: read the run's ThresholdDAC from its Run_Settings.txt")
+    p.add_argument("--mip-th", default=MIP_CALIB_TH,
+                   help="Threshold whose MIP tables to calibrate against. Default: the run's OWN threshold "
+                        "(same as the pedestals). MIPs and pedestals both shift with the trigger threshold, so "
+                        "each run auto-calibrates from its own th. Pass --mip-th <th> only for a deliberate "
+                        "cross-threshold study.")
     p.add_argument("--run-id", type=int, default=None, help="Numeric run id for the ecal tree's `run` branch "
                                                               "(default: parsed from the run name)")
     p.add_argument("--raw-dir", default=None,
@@ -121,7 +126,8 @@ def main(argv=None):
                 print(f"[calib] {run}: ThresholdDAC={th} (from {run_settings_file})")
             else:
                 print(f"[calib] {run}: ThresholdDAC={th} (forced via --th)")
-            auto_pedestal, auto_mip, auto_pedestal_lg, auto_mip_lg = resolve_gaudi_calib_files(th)
+            auto_pedestal, auto_mip, auto_pedestal_lg, auto_mip_lg = resolve_gaudi_calib_files(
+                th, mip_th=args.mip_th)
             pedestal_file = pedestal_file or auto_pedestal
             mip_file = mip_file or auto_mip
             pedestal_file_lg = pedestal_file_lg or auto_pedestal_lg

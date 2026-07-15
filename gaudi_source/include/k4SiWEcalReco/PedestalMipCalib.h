@@ -192,6 +192,10 @@ inline MipFitResult fitLangau(TH1F& hist, bool highGain) {
     // fitted MPV low (it sat on the rising edge, left of the visible peak) and
     // made chi2/ndf meaningless -- computed over too few bins, so a fit that
     // missed the peak still scored a good chi2. A full-range fit fixes both.
+    // (A truncated-range "falling-edge" variant was tried for the highest
+    // threshold, where the trigger cuts into the peak, but abandoned: it threw
+    // away the turnover and railed the MP -- we fit the whole available region
+    // and accept that some high-threshold channels fit poorly.)
     fr[0] = 0.;
     fr[1] = 100.;
     hist.GetXaxis()->SetRangeUser(fr[0], fr[1]);

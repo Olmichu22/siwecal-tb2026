@@ -67,9 +67,14 @@ calib = PedestalMipCalibrator(
     ChipFallbackMinIntegral=float(os.environ.get("CALIB_CHIP_FALLBACK_MIN_INTEGRAL", "2000")),
     PedestalMaxMeanAdc=float(os.environ.get("CALIB_PEDESTAL_MAX_MEAN_ADC", "300")),
     MipFallbackMaxAdc=float(os.environ.get("CALIB_MIP_FALLBACK_MAX_ADC", "300")),
-    MaxMipChi2Ndf=float(os.environ.get("CALIB_MAX_MIP_CHI2NDF", "1.1")),
-    MaxMipChi2NdfFallback=float(os.environ.get("CALIB_MAX_MIP_CHI2NDF_FALLBACK", "25")),
-    MipHistMaxTol=float(os.environ.get("CALIB_MIP_HISTMAX_TOL", "0.25")),
+    # Fit quality. There is no chi2/ndf gate any more: chi2/ndf is not comparable
+    # across statistics (it grew 1.2 -> 17 on the same spectrum as it went from
+    # 639 to 74,555 entries, with the MPV unmoved), so the old ceilings rejected
+    # every fit above ~600 entries and every chip/slab fit. These two are
+    # scale-free. See PedestalMipCalibrator.cpp's fit-quality property block.
+    MipHistMaxTol=float(os.environ.get("CALIB_MIP_HISTMAX_TOL", "0.20")),
+    MipPeakRebin=int(os.environ.get("CALIB_MIP_PEAK_REBIN", "4")),
+    MaxMipRelErr=float(os.environ.get("CALIB_MAX_MIP_REL_ERR", "0.10")),
     MipLowLim=float(os.environ.get("CALIB_MIP_LOW_LIM", "10")),
     MipHighLim=float(os.environ.get("CALIB_MIP_HIGH_LIM", "50")),
     MipLowLimLowGain=float(os.environ.get("CALIB_MIP_LOW_LIM_LOW_GAIN", "2")),

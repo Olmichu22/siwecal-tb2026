@@ -53,5 +53,13 @@ settings.yml
 build/
 k4SiWEcalReco/build/
 
-# local diagnostic plots (not versioned)
-diagnostics/
+# Diagnostic PLOTS are local scratch and are not versioned. The scripts that make
+# them are: they are the measurements the calibration constants come from (the
+# switch point, k, c, the th220 MIP decision), and a constant whose derivation has
+# been deleted is a magic number. Same for the procedure note.
+diagnostics/*
+!diagnostics/*.py
+!diagnostics/*.txt
+
+# Agents
+claude_orders.txt

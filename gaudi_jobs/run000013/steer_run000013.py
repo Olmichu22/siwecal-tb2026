@@ -17,7 +17,14 @@ from k4FWCore import ApplicationMgr, IOSvc
 _RUN   = "TB2026CERN_run_000013"
 # Event-builder output with real calibration (MuonCalib_it2, th220)
 _INPUT = f"/eos/user/o/oarquero/TB2026CERN/data/{_RUN}/ecal_{_RUN}_realvalues.root"
-_OUT   = f"/eos/experiment/drdcalo/siw-ecal/TB2026-06/Reconstruction/ecal_{_RUN}.edm4hep.root"
+# EDM4hep output goes to <run>/events/, alongside the run's chunks -- NOT the
+# shared Reconstruction/ area. Override with EDM4HEP_OUTPUT.
+import os  # noqa: E402
+_EVENTS = os.path.join(os.environ.get(
+    "EVBLD_CONVERTED_DIR",
+    "/eos/experiment/drdcalo/siw-ecal/TB2026-06/Data/rundata_converted_gaudi"), _RUN, "events")
+os.makedirs(_EVENTS, exist_ok=True)
+_OUT   = os.environ.get("EDM4HEP_OUTPUT", os.path.join(_EVENTS, f"ecal_{_RUN}.edm4hep.root"))
 
 _f = ROOT.TFile.Open(_INPUT)
 n_events = int(_f.Get("ecal").GetEntries())
