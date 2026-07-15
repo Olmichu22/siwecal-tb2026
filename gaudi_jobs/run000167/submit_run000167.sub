@@ -1,0 +1,14 @@
+universe                = vanilla
+executable              = /afs/cern.ch/user/m/marquezh/public/siwecal-tb2026/gaudi_jobs/condor/steer_validate.sh
+arguments               = "/afs/cern.ch/user/m/marquezh/public/siwecal-tb2026/gaudi_jobs/run000167 run000167"
+log                     = /afs/cern.ch/user/m/marquezh/public/siwecal-tb2026/gaudi_jobs/run000167/logs/pipeline.log
+output                  = /afs/cern.ch/user/m/marquezh/public/siwecal-tb2026/gaudi_jobs/run000167/logs/pipeline.out
+error                   = /afs/cern.ch/user/m/marquezh/public/siwecal-tb2026/gaudi_jobs/run000167/logs/pipeline.err
+request_cpus            = 1
+request_memory          = ifthenelse(NumJobStarts <= 0, 8000, 8000 * (NumJobStarts + 1))
+request_disk            = 8000M
+should_transfer_files   = NO
+getenv                  = False
+periodic_release        = (JobStatus == 5) && (HoldReasonCode == 34) && (NumJobStarts < 5)
++JobFlavour             = "workday"
+queue

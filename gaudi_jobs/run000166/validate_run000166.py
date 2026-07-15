@@ -46,7 +46,7 @@ source = EcalToEDM4hep("EcalToEDM4hep",
 pid = EcalPidTransformer("EcalPidTransformer",
                           InputCaloHits=["ECalHits"],
                           OutputClusters=["ECalPid"],
-                          MipThresholds=[])        # [0.5, 1.0] for validation-slider mode
+                          MipThresholds=[0.5, 1.0])  # validation mode: mip05_/mip1_ shape blocks
 
 ApplicationMgr(TopAlg=[source, pid],
                EvtSel="NONE",

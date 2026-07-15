@@ -27,6 +27,7 @@ _REPO = os.path.abspath(os.path.join(_HERE, "..", ".."))
 _RUN = "TB2026CERN_eudaq_run_000166"
 _TH = "210"
 _CALIB = os.path.join(_REPO, "calibration", "MuonCalib_gaudi")
+_MAPPINGS = os.path.join(_REPO, "mappings")
 
 _CONVERTED = os.environ.get(
     "EVBLD_CONVERTED_DIR",
@@ -80,6 +81,12 @@ builder = EcalEventBuilder(
     AdcSaturationThreshold=switch,   # on (adc_high - ped_hg)
     GainRatio=k,
     GainIntercept=c,
+    # Geometry: pad (x,y) mapping + per-slab z. Without these the hits have no
+    # position and the event display comes up empty. Slab 12 is the COB and uses
+    # its own pad map (fev11), every other slab the default fev10.
+    PadMapDefaultFile=os.path.join(_MAPPINGS, "fev10_rotate_chip_channel_x_y_mapping.txt"),
+    PadMapSlabOverrides=[f"12:{os.path.join(_MAPPINGS, 'fev11_cob_good_rotate_chip_channel_x_y_mapping.txt')}"],
+    SlabZFile=os.path.join(_MAPPINGS, "slab_z_positions.yml"),
 )
 
 ApplicationMgr(TopAlg=[builder],
