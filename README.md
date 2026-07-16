@@ -192,7 +192,15 @@ by `siwecal_common.edm4hep_pid`) is shown in parentheses.
 | `ECalHitHG` (UserData)                    | high-gain ADC minus pedestal (→ `hit_hg`)                      |
 | `ECalHitLG` (UserData)                    | low-gain ADC minus the low-gain pedestal (→ `hit_lg`)          |
 | `ECalHitWE` (UserData)                    | sampling-corrected energy (→ `hit_w_energy`)                   |
+| `ECalHitX0` (UserData)                    | cumulative W radiation lengths up to the hit's slab (→ `hit_X0`) |
 | `ECalPid` (`Cluster`) `.shapeParameters`  | the per-event metrics, one cluster/event (see table below)      |
+
+`ECalHitWE` / `ECalHitX0` are always written, even from an `ecal` file predating
+the `hit_w_energy` / `hit_X0` branches: `EcalToEDM4hep` then recomputes them from
+the same `SlabGeometry` the event builder would have used, which is exact (both
+are pure functions of `hit_slab`). PID files written **before** those two
+collections existed stay readable — `siwecal_common.edm4hep_pid` reports them via
+`PidFileReader.perhit_fields()` and simply omits what a file does not carry.
 
 The `shapeParameters` floats are stored in a fixed order (names listed once in
 the `metadata` frame parameter `ECalPid_shapeParameterNames`):
@@ -247,6 +255,8 @@ per-hit arrays, and the per-event metrics.
 | hit_hg/lg               | per-hit high/low-gain ADC minus pedestal                        |
 | hit_energy              | per-hit signal in MIP units                                     |
 | hit_x/y/z               | per-hit position in mm                                          |
+| hit_w_energy            | sampling-corrected energy, from `ECalHitWE` (omitted when the source PID file predates that collection) |
+| hit_X0                  | cumulative W radiation lengths up to the hit's slab, from `ECalHitX0` (same caveat) |
 | nhit … e_over_nhit      | the 21 per-event scalar metrics — same as the EDM4hep `shapeParameters` table |
 | hits/energy/weighte_per_layer | the three `[n_layers]` per-layer profiles                  |
 | mip05_*, mip1_*         | per-hit-cut scalar variants (validation mode only, as above)     |

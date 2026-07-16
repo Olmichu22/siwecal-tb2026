@@ -12,10 +12,17 @@
  *   - EventHeaderCollection EventHeader : run/event (+ bcid in timeStamp, spill
  *     in weight).
  *   - UserDataCollections (parallel to ECalHits, same order): ECalHitChip,
- *     ECalHitChan, ECalHitSca (int) and ECalHitHG, ECalHitLG, ECalHitWE
- *     (float; ECalHitWE = hit_w_energy, the sampling-corrected energy). These
+ *     ECalHitChan, ECalHitSca (int) and ECalHitHG, ECalHitLG, ECalHitWE,
+ *     ECalHitX0 (float; ECalHitWE = hit_w_energy, the sampling-corrected energy,
+ *     ECalHitX0 = hit_X0, the cumulative W depth up to the hit's slab). These
  *     carry the per-hit quantities EDM4hep CalorimeterHit has no native field
  *     for, kept as podio-native collections (no cellID decode needed downstream).
+ *
+ * hit_w_energy / hit_X0 postdate the earliest ecal files, so both branches are
+ * optional on input: when absent they are recomputed here from the SAME
+ * SlabGeometry the event builder used to write them, which is exact because both
+ * are pure functions of hit_slab (and hit_energy for w_energy). The output
+ * collections are therefore always present regardless of the input's vintage.
  *
  * NOTE: ROOT TTree reading is not thread-safe; the sequential entry cursor is
  * guarded by a mutex. Run single-threaded for now (one source).
@@ -30,16 +37,20 @@
 
 #include "Gaudi/Property.h"
 
+#include "k4SiWEcalReco/PadMapGeometry.h"  // SlabGeometry: the ONE tungsten geometry
+
 #include "TFile.h"
 #include "TTreeReader.h"
 #include "TTreeReaderArray.h"
 #include "TTreeReaderValue.h"
 
 #include <atomic>
+#include <limits>
 #include <memory>
 #include <mutex>
 #include <string>
 #include <tuple>
+#include <vector>
 
 using OutputType = std::tuple<edm4hep::CalorimeterHitCollection, edm4hep::EventHeaderCollection,
                               podio::UserDataCollection<std::int32_t>,   // chip
@@ -47,7 +58,8 @@ using OutputType = std::tuple<edm4hep::CalorimeterHitCollection, edm4hep::EventH
                               podio::UserDataCollection<std::int32_t>,   // sca
                               podio::UserDataCollection<float>,          // hg
                               podio::UserDataCollection<float>,          // lg
-                              podio::UserDataCollection<float>>;         // w_energy
+                              podio::UserDataCollection<float>,          // w_energy
+                              podio::UserDataCollection<float>>;         // x0
 
 struct EcalToEDM4hep final : k4FWCore::Producer<OutputType()> {
   EcalToEDM4hep(const std::string& name, ISvcLocator* svcLoc)
@@ -59,7 +71,8 @@ struct EcalToEDM4hep final : k4FWCore::Producer<OutputType()> {
                   KeyValues("OutputHitSca", {"ECalHitSca"}),
                   KeyValues("OutputHitHG", {"ECalHitHG"}),
                   KeyValues("OutputHitLG", {"ECalHitLG"}),
-                  KeyValues("OutputHitWE", {"ECalHitWE"})}) {}
+                  KeyValues("OutputHitWE", {"ECalHitWE"}),
+                  KeyValues("OutputHitX0", {"ECalHitX0"})}) {}
 
   StatusCode initialize() override {
     m_file.reset(TFile::Open(m_inputFile.value().c_str(), "READ"));
@@ -82,15 +95,44 @@ struct EcalToEDM4hep final : k4FWCore::Producer<OutputType()> {
     m_hitEnergy = std::make_unique<TTreeReaderArray<float>>(*m_reader, "hit_energy");
     m_hitHG = std::make_unique<TTreeReaderArray<float>>(*m_reader, "hit_hg");
     m_hitLG = std::make_unique<TTreeReaderArray<float>>(*m_reader, "hit_lg");
-    m_hitWE = std::make_unique<TTreeReaderArray<float>>(*m_reader, "hit_w_energy");
     m_hitX = std::make_unique<TTreeReaderArray<float>>(*m_reader, "hit_x");
     m_hitY = std::make_unique<TTreeReaderArray<float>>(*m_reader, "hit_y");
     m_hitZ = std::make_unique<TTreeReaderArray<float>>(*m_reader, "hit_z");
+    // hit_w_energy / hit_X0 postdate the earliest ecal files; bind them only
+    // when present and recompute from the geometry otherwise (see m_slabWOverX0
+    // below). An unguarded TTreeReaderArray on a missing branch does not fail
+    // loudly -- it silently reports GetSize()==0 while nhit_chan still counts
+    // the hits, so the fill loop would read out of bounds on every hit.
+    if (tree->GetBranch("hit_w_energy"))
+      m_hitWE = std::make_unique<TTreeReaderArray<float>>(*m_reader, "hit_w_energy");
+    if (tree->GetBranch("hit_X0"))
+      m_hitX0 = std::make_unique<TTreeReaderArray<float>>(*m_reader, "hit_X0");
     // Masked (uncalibrated) channels are flagged by the event builder and
     // dropped here so the downstream PID sees only calibrated hits. Older ecal
     // files predate the branch; bind it only when present (else keep all hits).
     if (tree->GetBranch("hit_ismasked"))
       m_hitMasked = std::make_unique<TTreeReaderArray<int>>(*m_reader, "hit_ismasked");
+
+    // Fallback sampling weights / cumulative depths for inputs that predate the
+    // branches. Taken from the SAME SlabGeometry the event builder writes them
+    // with (EventBuilder.h: hit.x0 = slabX0, hit.wEnergy = energy * slabWOverX0),
+    // so a recomputed value is identical to a stored one -- an independent list
+    // here would be an independent chance to disagree.
+    const k4siwecal::SlabGeometry geom = m_slabZFile.value().empty()
+                                             ? k4siwecal::SlabGeometry::defaults()
+                                             : k4siwecal::SlabGeometry::fromYamlFile(m_slabZFile.value());
+    m_slabWOverX0.clear();
+    m_slabX0.clear();
+    for (int slab = 0; slab < m_nLayers.value(); ++slab) {
+      m_slabWOverX0.push_back(static_cast<float>(geom.slabWOverX0(slab)));
+      m_slabX0.push_back(static_cast<float>(geom.slabX0(slab)));
+    }
+    if (!m_hitWE)
+      info() << "hit_w_energy absent from '" << m_treeName.value()
+             << "'; recomputing ECalHitWE from the slab geometry" << endmsg;
+    if (!m_hitX0)
+      info() << "hit_X0 absent from '" << m_treeName.value()
+             << "'; recomputing ECalHitX0 from the slab geometry" << endmsg;
 
     m_coder = std::make_unique<dd4hep::DDSegmentation::BitFieldCoder>(m_cellIDEncoding.value());
     info() << "EcalToEDM4hep: " << m_reader->GetEntries(false) << " entries in '"
@@ -102,14 +144,15 @@ struct EcalToEDM4hep final : k4FWCore::Producer<OutputType()> {
     edm4hep::CalorimeterHitCollection hits;
     edm4hep::EventHeaderCollection headers;
     podio::UserDataCollection<std::int32_t> chip, chan, sca;
-    podio::UserDataCollection<float> hg, lg, we;
+    podio::UserDataCollection<float> hg, lg, we, x0;
 
     std::scoped_lock lock(m_mutex);
     const Long64_t entry = m_cursor.fetch_add(1);
     if (m_reader->SetEntry(entry) != TTreeReader::kEntryValid) {
       warning() << "Failed to read entry " << entry << endmsg;
       return std::make_tuple(std::move(hits), std::move(headers), std::move(chip), std::move(chan),
-                             std::move(sca), std::move(hg), std::move(lg), std::move(we));
+                             std::move(sca), std::move(hg), std::move(lg), std::move(we),
+                             std::move(x0));
     }
 
     auto header = headers.create();
@@ -148,10 +191,26 @@ struct EcalToEDM4hep final : k4FWCore::Producer<OutputType()> {
       sca.push_back((*m_hitSca)[i]);
       hg.push_back((*m_hitHG)[i]);
       lg.push_back((*m_hitLG)[i]);
-      we.push_back((*m_hitWE)[i]);
+      // Stored when the input has the branch, else recomputed from the slab --
+      // both are pure functions of it, so the two paths agree exactly.
+      const int slab = (*m_hitSlab)[i];
+      we.push_back(m_hitWE ? (*m_hitWE)[i] : (*m_hitEnergy)[i] * slabWOverX0(slab));
+      x0.push_back(m_hitX0 ? (*m_hitX0)[i] : slabX0(slab));
     }
     return std::make_tuple(std::move(hits), std::move(headers), std::move(chip), std::move(chan),
-                           std::move(sca), std::move(hg), std::move(lg), std::move(we));
+                           std::move(sca), std::move(hg), std::move(lg), std::move(we),
+                           std::move(x0));
+  }
+
+  // Per-slab lookups for the recompute fallback. Out-of-range slabs mirror
+  // SlabGeometry: 0 weight (no sampling correction) and NaN depth.
+  float slabWOverX0(int slab) const {
+    return (slab >= 0 && static_cast<std::size_t>(slab) < m_slabWOverX0.size()) ? m_slabWOverX0[slab] : 0.f;
+  }
+  float slabX0(int slab) const {
+    return (slab >= 0 && static_cast<std::size_t>(slab) < m_slabX0.size())
+               ? m_slabX0[slab]
+               : std::numeric_limits<float>::quiet_NaN();
   }
 
   Gaudi::Property<std::string> m_inputFile{this, "InputFile", "", "Path to the ecal ROOT file"};
@@ -162,6 +221,12 @@ struct EcalToEDM4hep final : k4FWCore::Producer<OutputType()> {
   Gaudi::Property<double> m_hitMipCut{
       this, "HitMipCut", -1.0,
       "Drop hits with energy < this MIP threshold; <0 disables the cut"};
+  Gaudi::Property<int> m_nLayers{this, "NLayers", 15, "Number of ECAL layers"};
+  Gaudi::Property<std::string> m_slabZFile{
+      this, "SlabZFile", "",
+      "slab_z_positions.yml; empty = the compiled-in geometry defaults. Only used to recompute "
+      "ECalHitWE/ECalHitX0 for inputs that predate hit_w_energy/hit_X0. Same file/defaults the "
+      "event builder uses, so a recomputed value matches the stored one."};
 
 private:
   std::unique_ptr<TFile> m_file;
@@ -169,7 +234,10 @@ private:
   std::unique_ptr<TTreeReaderValue<int>> m_nhit, m_run, m_event, m_spill, m_bcid;
   std::unique_ptr<TTreeReaderArray<int>> m_hitSlab, m_hitChip, m_hitChan, m_hitSca;
   std::unique_ptr<TTreeReaderArray<int>> m_hitMasked;   // null for pre-mask ecal files
-  std::unique_ptr<TTreeReaderArray<float>> m_hitEnergy, m_hitHG, m_hitLG, m_hitWE, m_hitX, m_hitY, m_hitZ;
+  std::unique_ptr<TTreeReaderArray<float>> m_hitEnergy, m_hitHG, m_hitLG, m_hitX, m_hitY, m_hitZ;
+  // null for ecal files predating the branch -> recomputed from the geometry.
+  std::unique_ptr<TTreeReaderArray<float>> m_hitWE, m_hitX0;
+  std::vector<float> m_slabWOverX0, m_slabX0;   // per-slab, for the recompute
   std::unique_ptr<dd4hep::DDSegmentation::BitFieldCoder> m_coder;
   mutable std::mutex m_mutex;
   mutable std::atomic<Long64_t> m_cursor{0};
