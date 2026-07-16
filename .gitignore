@@ -33,6 +33,9 @@ _logs/
 
 # --- Generated reports (gaudi_jobs/calibration/list_run_thresholds.py --output) ---
 gaudi_jobs/calibration/run_thresholds*.txt
+gaudi_jobs/run000166/logs
+gaudi_jobs/run000167/logs
+
 
 # --- Generated Condor pipeline artifacts (gaudi_jobs/calibration/condor/generate_*.py) ---
 gaudi_jobs/calibration/condor/generated/
@@ -66,3 +69,5 @@ claude_orders.txt
 
 # Private credential (grid/condor token) -- must never be tracked
 marquezh.cc
+claude*
+core.*
