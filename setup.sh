@@ -22,14 +22,15 @@ export PYTHONPATH="${REPO_ROOT}:${PYTHONPATH}"
 # --- optional k4SiWEcalReco build (so k4run finds the compiled plugin) -------
 # Built once by install.sh (or by hand, see gaudi_source/README.md). Without
 # these `k4run` cannot load libk4SiWEcalRecoPlugins.so. The source tree is
-# gaudi_source/ (the batch jobs export exactly this path); an older name,
-# k4SiWEcalReco/build, is kept as a fallback for pre-rename checkouts.
+# gaudi_source/ (the batch jobs export exactly this path).
+#
+# There is deliberately NO fallback to the pre-rename k4SiWEcalReco/build. That
+# directory survives the rename as an untracked leftover, so a fallback fires
+# precisely when gaudi_source/build is missing -- silently putting a months-old
+# .so on LD_LIBRARY_PATH at the one moment you need to notice the build is gone.
 if [ -d "${REPO_ROOT}/gaudi_source/build" ]; then
     export LD_LIBRARY_PATH="${REPO_ROOT}/gaudi_source/build:${LD_LIBRARY_PATH}"
     export PYTHONPATH="${REPO_ROOT}/gaudi_source/build/genConfDir:${PYTHONPATH}"
-elif [ -d "${REPO_ROOT}/k4SiWEcalReco/build" ]; then
-    export LD_LIBRARY_PATH="${REPO_ROOT}/k4SiWEcalReco/build:${LD_LIBRARY_PATH}"
-    export PYTHONPATH="${REPO_ROOT}/k4SiWEcalReco/build/genConfDir:${PYTHONPATH}"
 fi
 
 # --- optional viewer virtualenv (dash/plotly on top of key4hep) -------------
