@@ -50,10 +50,11 @@ def canonical_shape_names(n_layers: int = 15, mip_thresholds=(0.5, 1.0)) -> List
         names += [f"{_MIP_PREFIX[thr]}_{s}" for s in SCALAR_NAMES]
     return names
 # Per-hit fields exposed under the legacy ``hit_*`` names (so downstream is
-# unchanged). slab/x/y/z/energy come from the CalorimeterHit; chip/chan/sca and
-# hg/lg from the parallel podio UserDataCollections written by EcalToEDM4hep.
+# unchanged). slab/x/y/z/energy come from the CalorimeterHit; the rest from the
+# parallel podio UserDataCollections written by EcalToEDM4hep.
 PERHIT_FIELDS = ("hit_slab", "hit_x", "hit_y", "hit_z", "hit_energy",
-                 "hit_chip", "hit_chan", "hit_sca", "hit_hg", "hit_lg")
+                 "hit_chip", "hit_chan", "hit_sca", "hit_hg", "hit_lg",
+                 "hit_w_energy", "hit_X0")
 
 # Legacy hit field -> (collection name, numpy dtype) for the UserDataCollections.
 _USERDATA_HITS = {
@@ -62,7 +63,16 @@ _USERDATA_HITS = {
     "hit_sca": ("ECalHitSca", np.int32),
     "hit_hg": ("ECalHitHG", np.float32),
     "hit_lg": ("ECalHitLG", np.float32),
+    "hit_w_energy": ("ECalHitWE", np.float32),
+    "hit_X0": ("ECalHitX0", np.float32),
 }
+
+# Fields whose UserDataCollection postdates the earliest PID files. A file
+# written before them is still perfectly readable -- the field is dropped from
+# :meth:`PidFileReader.perhit_fields` rather than faked, so a consumer can tell
+# "not recorded" from a real value. Everything else is mandatory: its absence is
+# a corrupt file, not an old one, and should raise.
+OPTIONAL_PERHIT_FIELDS = ("hit_w_energy", "hit_X0")
 
 
 class PidFileReader:
@@ -86,6 +96,7 @@ class PidFileReader:
         self._scalars: Optional[np.ndarray] = None   # (n_events, n_shape_params)
         self._ids: Optional[Dict[str, np.ndarray]] = None
         self._hits: Optional[Dict[str, np.ndarray]] = None  # jagged object arrays
+        self._fields: Optional[tuple] = None         # PERHIT_FIELDS minus absent optionals
 
     @property
     def _frames(self):
@@ -171,8 +182,23 @@ class PidFileReader:
         return out
 
     # ------------------------------------------------------- per-hit ---------
+    def perhit_fields(self) -> tuple:
+        """The ``PERHIT_FIELDS`` this file carries, in canonical order.
+
+        Equal to ``PERHIT_FIELDS`` for a file written by the current
+        ``EcalToEDM4hep``; an older file drops whichever of
+        :data:`OPTIONAL_PERHIT_FIELDS` its writer did not know about.
+        """
+        if self._fields is None:
+            available = set(self._frames[0].getAvailableCollections()) if len(self._frames) else set()
+            self._fields = tuple(
+                f for f in PERHIT_FIELDS
+                if f not in OPTIONAL_PERHIT_FIELDS or _USERDATA_HITS[f][0] in available)
+        return self._fields
+
     def read_hits(self, index: int) -> Dict[str, np.ndarray]:
-        """Per-hit arrays for a single event, under legacy ``hit_*`` names."""
+        """Per-hit arrays for a single event, keyed by :meth:`perhit_fields`."""
+        fields = self.perhit_fields()
         frame = self._frames[index]
         hits = frame.get(self._hits_coll)
         m = len(hits)
@@ -189,6 +215,8 @@ class PidFileReader:
         out = {"hit_slab": slab, "hit_x": x, "hit_y": y, "hit_z": z, "hit_energy": energy}
         # Parallel per-hit UserDataCollections (same order as the hits).
         for field, (coll_name, dtype) in _USERDATA_HITS.items():
+            if field not in fields:
+                continue
             coll = frame.get(coll_name)
             out[field] = np.fromiter(coll, dtype=dtype, count=len(coll))
         return out
@@ -196,11 +224,12 @@ class PidFileReader:
     def all_hits(self) -> Dict[str, np.ndarray]:
         """All events' per-hit arrays as jagged object arrays (cached)."""
         if self._hits is None:
+            fields = self.perhit_fields()
             n = len(self._frames)
-            store = {f: np.empty(n, dtype=object) for f in PERHIT_FIELDS}
+            store = {f: np.empty(n, dtype=object) for f in fields}
             for i in range(n):
                 hits = self.read_hits(i)
-                for f in PERHIT_FIELDS:
+                for f in fields:
                     store[f][i] = hits[f]
             self._hits = store
         return self._hits
@@ -312,8 +341,14 @@ def write_valtree(reader: "PidFileReader", out_path: str, config, frame_indices,
     out_tree.Branch("sum_hg", sum_hg_buf, "sum_hg/F")
     out_tree.Branch("sum_energy", sum_energy_buf, "sum_energy/F")
 
+    # The valcache schema's per-hit floats, plus whichever optional ones this PID
+    # file carries. They are appended (not added to _REBUILT_HIT_FLOAT) because
+    # that tuple is also the valcache writer's read list against the raw `ecal`
+    # tree, where hit_w_energy is not guaranteed to exist.
+    extra_hit_float = tuple(f for f in OPTIONAL_PERHIT_FIELDS if f in reader.perhit_fields())
     hit_int_bufs = {n: np.zeros(max_hits, dtype=np.int32) for n in _REBUILT_HIT_INT}
-    hit_float_bufs = {n: np.zeros(max_hits, dtype=np.float32) for n in _REBUILT_HIT_FLOAT}
+    hit_float_bufs = {n: np.zeros(max_hits, dtype=np.float32)
+                      for n in _REBUILT_HIT_FLOAT + extra_hit_float}
     for name, buf in hit_int_bufs.items():
         out_tree.Branch(name, buf, f"{name}[nhit_chan]/I")
     for name, buf in hit_float_bufs.items():
