@@ -83,11 +83,14 @@ else
 fi
 
 # --- 3/3: k4SiWEcalReco build -----------------------------------------------
+# The source tree is gaudi_source/ (it holds the CMakeLists.txt); k4SiWEcalReco
+# is only the CMake project name. setup.sh looks for the build in exactly this
+# path, so the two must not drift apart again.
 if [ "${DO_K4}" = 1 ]; then
-    echo "==> [3/3] building k4SiWEcalReco (-j${JOBS})"
-    cmake -S "${REPO_ROOT}/k4SiWEcalReco" -B "${REPO_ROOT}/k4SiWEcalReco/build" \
+    echo "==> [3/3] building k4SiWEcalReco from gaudi_source/ (-j${JOBS})"
+    cmake -S "${REPO_ROOT}/gaudi_source" -B "${REPO_ROOT}/gaudi_source/build" \
           -DCMAKE_BUILD_TYPE=Release
-    cmake --build "${REPO_ROOT}/k4SiWEcalReco/build" -j"${JOBS}"
+    cmake --build "${REPO_ROOT}/gaudi_source/build" -j"${JOBS}"
 else
     echo "==> [3/3] skipped (--no-k4)"
 fi

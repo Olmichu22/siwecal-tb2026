@@ -58,8 +58,9 @@ class Edm4hepEventReader:
 
     @property
     def perhit_branches(self) -> List[str]:
-        from .._edm4hep_pid import PERHIT_FIELDS
-        return list(PERHIT_FIELDS)
+        # What this file actually carries, not the full schema: the optional
+        # fields (hit_w_energy/hit_X0) are absent from pre-existing PID files.
+        return list(self._pid.perhit_fields())
 
     @property
     def scalar_branches(self) -> List[str]:
