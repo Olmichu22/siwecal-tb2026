@@ -103,6 +103,17 @@ def decode_run(run, raw_dir, converted_dir, force=False, dry_run=False,
     os.makedirs(cdir, exist_ok=True)
 
     run_settings = os.path.join(raw_dir, "Run_Settings.txt")
+    # Whether these chunks use the EUDAQ 0xABCD frame sync (bare "<run>.bin")
+    # rather than the plain 0xEEEEEEEE one ("<run>_raw.bin") -- this is a
+    # property of which FILE PATTERN raw_chunk_files() actually matched, not
+    # of the run's name: some "..._eudaq_run_..." runs (e.g. run 000316) still
+    # use plain _raw.bin data. Verified against real data (2026-07-20): even
+    # with this flag correctly set, EcalRawDecoder decodes 0 acquisitions for
+    # every bare-".bin" eudaq run tried -- those need gaudi_jobs/decode_lcio_runs.py
+    # (EcalLcioDecoder reading Data/eudaq/ROC_run_<N>_tp.slcio) instead, not a flag.
+    # This still sets the flag correctly (for whatever future run may need it),
+    # it just does not make bare-".bin" runs decode via this path today.
+    eudaq_format = not os.path.basename(raw[0]).startswith(f"{run}_raw.bin")
     outputs, todo = [], []
     for i, raw_chunk in enumerate(raw):
         out = os.path.join(cdir, f"chunk_{i:04d}.root")
@@ -129,6 +140,8 @@ def decode_run(run, raw_dir, converted_dir, force=False, dry_run=False,
             "RAW2ROOT_MAX_CYCLE_JUMP": str(max_cycle_jump),
             "RAW2ROOT_RUN_SETTINGS_FILE": run_settings,
         }
+        if eudaq_format:
+            env["RAW2ROOT_EUDAQ"] = "1"
         # Quiet: one process per chunk means a run's worth of Gaudi banners
         # would otherwise drown the progress lines above.
         result = subprocess.run(["k4run", _RAW2ROOT_STEERING], env=env,
@@ -171,7 +184,11 @@ def assert_healthy(paths, run, tree="siwecaldecoded", max_ratio=1.5):
     """
     entries, max_acq, ratio = decode_health(paths, tree=tree)
     if entries == 0:
-        raise SystemExit(f"ERROR: {run}: decoded chunks hold 0 entries")
+        hint = (" This run's raw data may be EUDAQ-container-only (the raw decoder cannot "
+                "parse it at all, regardless of RAW2ROOT_EUDAQ) -- try "
+                "gaudi_jobs/decode_lcio_runs.py instead if Data/eudaq/ROC_run_<N>_tp.slcio exists."
+                if "eudaq" in run else "")
+        raise SystemExit(f"ERROR: {run}: decoded chunks hold 0 entries{hint}")
     if ratio > max_ratio:
         raise SystemExit(
             f"ERROR: {run}: decode looks lossy -- {entries:,} entries but the largest "

@@ -151,6 +151,8 @@ TABLES = {
               "calibration/MuonCalib_gaudi/pedestals/th230/Pedestal_TB2026CERN_run_000004_lowgain.txt"),
     "th220": ("calibration/MuonCalib_gaudi/pedestals/th220/Pedestal_TB2026CERN_run_000th220_highgain.txt",
               "calibration/MuonCalib_gaudi/pedestals/th220/Pedestal_TB2026CERN_run_000th220_lowgain.txt"),
+    "th210": ("calibration/MuonCalib_gaudi/pedestals/th210/Pedestal_TB2026CERN_run_000th210_highgain.txt",
+              "calibration/MuonCalib_gaudi/pedestals/th210/Pedestal_TB2026CERN_run_000th210_lowgain.txt"),
 }
 repo = os.path.dirname(_HERE)
 hp, lp = (os.path.join(repo, p) for p in TABLES[TH])

@@ -38,7 +38,7 @@
 #   n_chips_per_slab: 16          # SKIROC2 ASICs per slab
 #   n_scas_per_chip: 15           # SCA memory cells per chip
 #   n_channels_per_chip: 64       # pixels per chip
-#   # slab_z_mm: [0.0, 11.0, 22.0, ...]   # per-slab z [mm]; usually set via
+#   # slab_z_mm: [0.0, 15.0, 30.0, ...]   # per-slab z [mm]; usually set via
 #   #                                       geometry/slab_z_positions.yml instead
 
 # --- paths: per-run-list overrides (same role as data_reference main_path) --

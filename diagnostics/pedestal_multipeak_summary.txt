@@ -1,0 +1,116 @@
+PEDESTAL MULTI-PEAK STUDY -- th210 / th220 / th230
+==================================================
+Generated 2026-07-24 with diagnostics/plot_pedestal_multipeak.py on MERGED
+histograms (low gain unless noted). A cell is one (slab, chip, channel, SCA)
+pedestal histogram. Peak count = ROOT TSpectrum(10).Search(h, sigma=2.0,
+"nobackground", threshold=0.30): a peak must be >=30% of the tallest peak's
+height, and peaks closer than ~sigma bins merge. A cell counts as multi-peak
+if >=2 peaks. Cells with <200 entries are skipped (peak count not trustworthy).
+
+Sources (per-run merges):
+  th210 = runs 152-155,158-160,166 (re-filled from decoded chunks; the EOS grid
+          was gone -- only the .txt tables survived)
+  th220 = runs 254,060,061,062,086,087,088,142,143 (hadd of per-run merges)
+  th230 = official merged_th230.root
+
+MULTI-PEAK COUNTS (low gain)
+----------------------------------------------------------------------------------
+             present   scanned    low-stat(<200)   1pk      2pk     3+pk   MULTI-PEAK
+  th210      198,172   152,674    45,498 (23.0%)   128,600  23,601   473   24,074 = 15.8%
+  th220      215,855   170,589    45,266 (21.0%)   135,469  33,912 1,208   35,120 = 20.6%
+  th230      141,330    75,967    65,363 (46.2%)    65,939   9,844   184   10,028 = 13.2%
+
+  present  = cell has a filled histogram (>0 entries); the shortfall from the
+             230,400 theoretical cells (15x16x64x15) are dead/masked channels.
+  scanned  = >=200 entries (peak count run here).
+  low-stat = present but <200 entries -> excluded from the peak count.
+             (present/scanned/low-stat are identical for HG and LG: both gains
+              are filled by the same trigger.)
+  th230 loses ~half its cells to low stat (far fewer runs) and its sample is
+  biased toward SCA0 -> its 13.2% is the least comparable of the three.
+
+  Multi-peak fraction, HIGH gain (lower than LG): th210 ~13%, th220 ~15%, th230 ~10%.
+
+2nd-POPULATION PEAK-TO-PEAK OFFSET
+----------------------------------------------------------------------------------
+             LOW gain              HIGH gain
+  th210      7.0 ADC  IQR[6,9]     8.0 ADC  IQR[7,9]
+  th220      7.0 ADC  IQR[6,9]     8.0 ADC  IQR[7,9]
+  th230      7.0 ADC  IQR[6,9]     8.0 ADC  IQR[7,9]
+
+  Offset is ~equal in ADC in HG and LG (8 vs 7) even though HG gain is ~10x LG.
+  An input-referred charge injection would give ~10x larger ADC offset in HG;
+  it does not -> the step enters DOWNSTREAM of the gain split (SCA memory /
+  common mode / ADC chain), which the preamp feedback capacitor cannot change.
+  => A bigger gain capacitor does NOT fix the multi-peaks.
+
+PEDESTALS (from the calibration .txt tables)
+----------------------------------------------------------------------------------
+             mean HG   width HG   mean LG   width LG   width>5ADC outliers (HG / LG)
+  th210      244.99    1.69       244.98    0.92       0.13% / 0.91%   (cleanest)
+  th220      245.27    2.37       245.31    1.59       0.70% / 1.09%   (widest)
+  th230      244.16    1.95       244.48    0.92       0.43% / 2.36%   (fat LG tail)
+
+WHAT THE STRUCTURE PLOTS SHOW (th220, channel s1 c11 ch54)
+----------------------------------------------------------------------------------
+  (plots below live in diagnostics/compare/ and are gitignored like every plot
+   in this repo; regenerate from the merged histograms if needed.)
+
+  diagnostics/compare/pedestal_multipeak_per_sca_th220.png  (each SCA in its own pad):
+    EVERY individual SCA is itself multi-peak, with the SAME 3 sub-peaks at
+    ~246 / ~254 / ~261 ADC (spacing ~7-8 ADC). The per-SCA MEAN drifts only
+    250->254 because the WEIGHT among those 3 fixed sub-peaks shifts, not their
+    position. => The multi-peak is NOT "different SCAs at different pedestals";
+    a single SCA already jumps between discrete baseline levels, identically
+    across all SCAs of the channel. Only SCA14 looks single -- it is the
+    lowest-statistics SCA (849 entries).
+
+  diagnostics/compare/pedestal_multipeak_commonmode_th220.png  (channels of one chip, SCA-summed,
+    aligned to their dominant peak):
+    the satellite comb sits near +-7 ADC but NOT at identical positions across
+    channels -> INCONCLUSIVE for a clean chip-wide common mode. These histograms
+    are time-integrated and cannot tell whether channels jump TOGETHER in the
+    same acquisition.
+
+RELATED: LOW-GAIN MIP vs PEDESTAL (why the LG MIP fit is fragile)
+----------------------------------------------------------------------------------
+  MIP MPV (pedestal-subtracted, i.e. the pedestal-to-MIP separation in ADC),
+  median over well-fit channels of each threshold's MIP table:
+
+               LG MPV (med)   LG IQR        HG MPV   HG/LG
+    th230        4.34         [3.4,5.3]      31.58    7.3
+    th220        3.79         [3.0,5.0]      21.69    5.7
+    th210        4.76         [1.5,5.5]      18.55    3.9
+
+  - In LG the MIP sits only ~4 ADC above pedestal at ALL thresholds -- a handful
+    of ADC counts, comparable to the ~7 ADC multi-peak spacing and a few pedestal
+    sigmas. The LG MIP fit is intrinsically fragile.
+  - th230 -> th220: the LG separation shrinks (4.34 -> 3.79 ADC): pedestal
+    approaches MIP as the threshold is lowered.
+  - th210: the LG fit BIFURCATES. The MPV distribution is bimodal -- a large
+    population pinned at ~1.5 ADC (ON the pedestal) and another at ~5.6 ADC. The
+    median 4.76 sits in the valley and is misleading. The HG/LG ratio also drops
+    to 3.9 (should be a hardware constant ~7), another sign the th210 LG MIP is
+    unreliable.
+  - A bigger LG feedback capacitor makes this WORSE (lower gain compresses the MIP
+    further onto the pedestal). More LG gain would separate them but costs LG
+    dynamic range. The robust route already in the repo: derive the LG gain from
+    the HG<->LG anchor line (calibration/.../anchor/, plot_gain_anchor_fit.py),
+    not from a direct LG MIP fit.
+  Plot: diagnostics/compare/mip_lg_vs_pedestal_thresholds.png (gitignored).
+
+CONCLUSIONS / OPEN QUESTION
+----------------------------------------------------------------------------------
+  - Universal result: a discrete multi-level baseline per channel, ~7-8 ADC
+    spacing, same in both gains, independent of threshold. Ordering
+    th220 (20.6%) > th210 (15.8%) > th230 (13.2%) is NOT monotonic in threshold
+    -> not a trigger effect. th220 is the WORST, not the best, and MORE DATA
+    does not shrink it (single-run th220 20.7% == 9-run merge 20.6%).
+  - RETRACTED from the original th210 study (commit b94ecb8): "more frequent on
+    high-index chips" and "SCA0 spike" -- both were single-run artifacts, gone
+    after merging.
+  - To AVOID masking ~20% of channels, the route is event-by-event common-mode
+    subtraction -- but that only works if the baseline jumps are CORRELATED
+    across a chip's channels within one acquisition. That needs an EVENT-LEVEL
+    analysis of the decoded tuples (not these pedestal histograms) and is the
+    next step.

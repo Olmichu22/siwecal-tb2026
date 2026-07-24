@@ -35,8 +35,8 @@ W_X0_MM = 3.5
 W_THICKNESSES_DEFAULT = (2.8,) + (4.2,) * 8 + (5.6,) * 6
 # Per-slab physical z position [mm], mirrors
 # event_display/conversion/slab_z_positions.yml (also the source of ``hit_z``).
-SLAB_Z_MM_DEFAULT = (0.0, 11.0, 22.0, 33.0, 44.0, 55.0, 66.0, 77.0,
-                     88.0, 99.0, 110.0, 132.0, 143.0, 154.0, 165.0)
+SLAB_Z_MM_DEFAULT = (0.0, 15.0, 30.0, 45.0, 60.0, 75.0, 90.0, 105.0,
+                     120.0, 135.0, 150.0, 180.0, 195.0, 210.0, 225.0)
 
 
 def load_slab_z_mm(path: str) -> tuple:
