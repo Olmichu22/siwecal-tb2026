@@ -28,8 +28,8 @@ W_X0_MM = 3.5
 # Per-slab physical z position [mm] along the beam (hit_slab 0..14). Mirrors
 # event_display/conversion/slab_z_positions.yml; the live file can override it
 # (see :func:`load_slab_z_mm`).
-DEFAULT_SLAB_Z_MM = (0.0, 11.0, 22.0, 33.0, 44.0, 55.0, 66.0, 77.0,
-                     88.0, 99.0, 110.0, 132.0, 143.0, 154.0, 165.0)
+DEFAULT_SLAB_Z_MM = (0.0, 15.0, 30.0, 45.0, 60.0, 75.0, 90.0, 105.0,
+                     120.0, 135.0, 150.0, 180.0, 195.0, 210.0, 225.0)
 
 # Thickness [mm] of the W absorber plate in front of each slab (hit_slab 0..14).
 # Mirrors the w_thickness_mm key in slab_z_positions.yml.
