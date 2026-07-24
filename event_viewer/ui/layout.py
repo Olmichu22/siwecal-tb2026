@@ -27,6 +27,18 @@ def _loading(*children):
     )
 
 
+# "Download plot as png" from the modebar defaults to scale 1, i.e. the graph's
+# on-screen pixel size. In the 4x4 layers grid that is only ~4.5 px per pad, so
+# the rasteriser rounds some pad cells a pixel wider than their neighbours and
+# they look rectangular in the saved file (they are exact on screen, where the
+# data-coordinate cells rescale with any zoom). Exporting at 4x makes it ~18 px
+# per pad, well clear of that rounding, without changing the on-screen size or
+# the layout. Same win for the 3-D scene.
+def _hires_png(name: str) -> dict:
+    return {"toImageButtonOptions": {"format": "png", "filename": name,
+                                     "scale": 4}}
+
+
 def _file_bar(controller, initial_path: Optional[str]):
     options = [{"label": _short(p), "value": p} for p in controller.list_files()]
     return html.Div(className="file-bar", children=[
@@ -89,8 +101,10 @@ def _event_tab():
                         inputStyle={"marginRight": "4px", "marginLeft": "10px"}),
                 ]),
                 _loading(
-                    dcc.Graph(id="scene3d", style={"height": "460px"}),
-                    dcc.Graph(id="layers2d", style={"height": "640px"}),
+                    dcc.Graph(id="scene3d", style={"height": "460px"},
+                              config=_hires_png("scene3d")),
+                    dcc.Graph(id="layers2d", style={"height": "640px"},
+                              config=_hires_png("layers2d")),
                 ),
             ]),
             html.Div(style={"flex": "1", "minWidth": "260px"}, children=[

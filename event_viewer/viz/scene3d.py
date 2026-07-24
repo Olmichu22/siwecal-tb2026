@@ -2,9 +2,11 @@
 3-D detector scene: silicon planes + tungsten absorbers, with event hits overlaid.
 
 ``DetectorScene3D`` builds the static geometry once (a translucent quad per Si
-plane, a translucent box per W plate) and caches those traces. ``event_figure``
-clones the cached geometry and adds a ``Scatter3d`` of the event's hit pads,
-coloured by hit energy.
+*wafer*, a translucent box per W plate) and caches those traces. A silicon plane
+is drawn as its array of wafers rather than one rectangle, so the inactive guard
+ring between them is visible and hits never appear to sit on dead material.
+``event_figure`` clones the cached geometry and adds a ``Scatter3d`` of the
+event's hit pads, coloured by hit energy.
 
 Note on negative energies: ``hit_energy`` can be slightly negative when the raw
 ADC sits below pedestal (a known artefact of the dummy calibration, not physics).
@@ -25,11 +27,26 @@ SILICON_COLOR = "rgba(120, 170, 220, 0.12)"
 TUNGSTEN_COLOR = "rgba(150, 150, 150, 0.04)"   # very transparent absorber slabs
 
 
-def _quad_mesh(x0, x1, y0, y1, z, color, name):
-    """A flat rectangle in the z=const plane as a 2-triangle Mesh3d."""
+def _quad_mesh(rects, z, color, name):
+    """Flat rectangles in the same z=const plane, as a single Mesh3d.
+
+    ``rects`` is a list of ``(x0, x1, y0, y1)``; each contributes 4 vertices and
+    2 triangles. Batching a layer's wafers into one trace (rather than one trace
+    per wafer) keeps the scene at one trace per plane, as it was when a plane was
+    a single continuous quad.
+    """
+    xs, ys, zs = [], [], []
+    tri_i, tri_j, tri_k = [], [], []
+    for n, (x0, x1, y0, y1) in enumerate(rects):
+        xs += [x0, x1, x1, x0]
+        ys += [y0, y0, y1, y1]
+        zs += [z, z, z, z]
+        base = 4 * n
+        tri_i += [base, base]
+        tri_j += [base + 1, base + 2]
+        tri_k += [base + 2, base + 3]
     return go.Mesh3d(
-        x=[x0, x1, x1, x0], y=[y0, y0, y1, y1], z=[z, z, z, z],
-        i=[0, 0], j=[1, 2], k=[2, 3],
+        x=xs, y=ys, z=zs, i=tri_i, j=tri_j, k=tri_k,
         color=color, opacity=1.0, hoverinfo="skip", name=name,
         showscale=False, flatshading=True,
     )
@@ -61,9 +78,12 @@ class DetectorScene3D:
     def _build_base(self) -> List[go.Mesh3d]:
         (x0, x1), (y0, y1) = self.detector.x_extent, self.detector.y_extent
         traces: List[go.Mesh3d] = []
+        # One quad per silicon wafer, so the inactive guard ring between wafers
+        # shows up as a gap in the plane instead of being painted over. The W
+        # plates below stay full-plane rectangles -- the absorber is continuous.
+        wafers = self.detector.wafer_rects
         for slab, z in self.detector.silicon_quads():
-            traces.append(_quad_mesh(x0, x1, y0, y1, z,
-                                     SILICON_COLOR, f"Si slab {slab}"))
+            traces.append(_quad_mesh(wafers, z, SILICON_COLOR, f"Si slab {slab}"))
         for slab, z_down, z_up in self.detector.tungsten_boxes():
             traces.append(_box_mesh(x0, x1, y0, y1, z_up, z_down,
                                     TUNGSTEN_COLOR, f"W slab {slab}"))
@@ -248,7 +268,9 @@ class DetectorScene3D:
         ``chip``/``chan`` are the aggregate sentinel ``-1`` and a per-vertex text
         array would only bloat the payload.
         """
-        half = self.detector.pad_pitch / 2.0
+        # The active diode, not the pixel pitch: two pads that touch on the map
+        # are separated by the inter-pad margin on the real sensor.
+        half = self.detector.pad_active / 2.0
         sel = np.flatnonzero(mask)
         if sel.size:
             x = np.asarray(event.x, dtype=float)[sel]
