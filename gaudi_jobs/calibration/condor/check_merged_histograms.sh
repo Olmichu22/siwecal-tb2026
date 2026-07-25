@@ -16,7 +16,10 @@ if [ "${NODE_RC}" != "0" ]; then
   exit 1
 fi
 
-source /cvmfs/sw.hsf.org/key4hep/setup.sh -r 2026-04-08 >/dev/null 2>&1
+# Release from .key4hep-release (repo root, three levels up from this script),
+# the same file setup.sh and condor_common.py read.
+_K4REL="$(cat "$(dirname "${BASH_SOURCE[0]:-$0}")/../../../.key4hep-release" 2>/dev/null || echo 2026-04-08)"
+source /cvmfs/sw.hsf.org/key4hep/setup.sh -r "${_K4REL}" >/dev/null 2>&1
 
 # The merge job's own `cp -f "$TMP_OUT" "$OUT"` (see generate_dag.py's
 # _merge_sh) has already returned by the time this POST script starts, but

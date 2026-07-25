@@ -24,7 +24,7 @@ k4run's fixed startup overhead, not the (small, single-chunk) decode itself.
 
 Usage::
 
-    source /cvmfs/sw.hsf.org/key4hep/setup.sh -r 2026-04-08
+    source /cvmfs/sw.hsf.org/key4hep/setup.sh -r "$(cat .key4hep-release)"
     export LD_LIBRARY_PATH=$PWD/gaudi_source/build:$LD_LIBRARY_PATH
     export PYTHONPATH=$PWD/gaudi_source/build/genConfDir:$PWD:$PYTHONPATH
 
