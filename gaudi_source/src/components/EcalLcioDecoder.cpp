@@ -62,7 +62,9 @@ struct EcalLcioDecoder final : Gaudi::Algorithm {
       return error() << "OutputFile not set" << endmsg, StatusCode::FAILURE;
     }
 
-    auto fout = std::unique_ptr<TFile>(TFile::Open(m_outputFile.value().c_str(), "RECREATE"));
+    // Same ZSTD-5 as the raw decoder -- see k4siwecal::kDecodedFileCompression.
+    auto fout = std::unique_ptr<TFile>(
+        TFile::Open(m_outputFile.value().c_str(), "RECREATE", "", k4siwecal::kDecodedFileCompression));
     if (!fout || fout->IsZombie()) {
       return error() << "Cannot create output file: " << m_outputFile.value() << endmsg, StatusCode::FAILURE;
     }
