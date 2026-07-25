@@ -85,7 +85,7 @@ def queue_state(dag_dir):
     return [r for r in rows if os.path.abspath(r.get("Iwd", "")) == os.path.abspath(dag_dir)]
 
 
-def sweep_logs(dag_dir, live_ids, min_age_s=900):
+def sweep_logs(dag_dir, live_ids, min_age_s=900, sweep_out_err=False):
     """Delete per-job .log/.out/.err whose job is gone from the queue.
 
     ``live_ids`` is the set of log BASENAMES belonging to jobs still in the
@@ -105,14 +105,18 @@ def sweep_logs(dag_dir, live_ids, min_age_s=900):
     now = time.time()
     removed = freed = 0
     for name in os.listdir(log_dir):
-        # ONLY the per-job .log. The .out/.err are already deleted by the DAG's
-        # POST script the moment a node SUCCEEDS, so any that survive belong to
-        # a node that FAILED -- they are the only record of why, and sweeping
-        # them (this script did, once) destroys the evidence needed to fix the
-        # run. Leave them for a human.
+        # The per-job .log always goes. The .out/.err only when NO node of this
+        # DAG has failed: they are the sole record of WHY a node failed, and
+        # sweeping them (this script did, once) destroys the evidence. With zero
+        # failures every surviving .out/.err belongs to a node that succeeded --
+        # they linger only because cleanup_job_logs.sh could not match the
+        # _$(Process) names, and a fixed POST script cannot retroactively clean
+        # nodes that already ran.
         if not name.endswith(".log"):
-            continue
-        if name in live_ids:
+            if not (sweep_out_err and name.endswith((".out", ".err"))):
+                continue
+        stem = name.rsplit(".", 1)[0] + ".log"
+        if stem in live_ids:
             continue
         path = os.path.join(log_dir, name)
         try:
@@ -218,10 +222,13 @@ def main(argv=None):
 
     if args.sweep:
         log_dir = os.path.join(dag_dir, "logs")
-        n, freed = sweep_logs(dag_dir, live_logs, args.min_log_age)
+        # Only touch .out/.err when the DAG reports zero failed nodes -- see
+        # sweep_logs. No status line yet (prog is None) counts as "not safe".
+        oe = bool(prog) and prog["failed"] == 0 and prog.get("futile", 0) == 0
+        n, freed = sweep_logs(dag_dir, live_logs, args.min_log_age, oe)
         left = len(os.listdir(log_dir)) if os.path.isdir(log_dir) else 0
         if left > args.max_log_entries:
-            n2, freed2 = sweep_logs(dag_dir, live_logs, 0)
+            n2, freed2 = sweep_logs(dag_dir, live_logs, 0, oe)
             n, freed = n + n2, freed + freed2
             left = len(os.listdir(log_dir))
             print(f"logs: over {args.max_log_entries} entries -- swept again ignoring age")
