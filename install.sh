@@ -17,8 +17,12 @@ set -eo pipefail
 
 REPO_ROOT="$( cd "$( dirname "${BASH_SOURCE[0]:-$0}" )" && pwd )"
 # Single source of truth: .key4hep-release (shared with setup.sh); override
-# with the KEY4HEP_RELEASE env var.
-KEY4HEP_RELEASE="${KEY4HEP_RELEASE:-$(cat "${REPO_ROOT}/.key4hep-release" 2>/dev/null || echo 2026-04-08)}"
+# with the KEY4HEP_RELEASE env var. Missing or malformed -> k4_release explains
+# and fails, rather than silently building against a different release.
+if [ -z "${KEY4HEP_RELEASE:-}" ]; then
+    source "${REPO_ROOT}/key4hep_release.sh"
+    KEY4HEP_RELEASE="$(k4_release "${REPO_ROOT}")"
+fi
 
 DO_VIEWER=1
 DO_K4=1

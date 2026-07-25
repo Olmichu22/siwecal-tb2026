@@ -17,8 +17,12 @@ if [ "${NODE_RC}" != "0" ]; then
 fi
 
 # Release from .key4hep-release (repo root, three levels up from this script),
-# the same file setup.sh and condor_common.py read.
-_K4REL="$(cat "$(dirname "${BASH_SOURCE[0]:-$0}")/../../../.key4hep-release" 2>/dev/null || echo 2026-04-08)"
+# via the same k4_release helper setup.sh and condor_common.py use. Its errors
+# go to stderr, which DAGMan captures -- so a broken release file shows up as a
+# message in the POST script's log, not as a mystery ROOT failure below.
+_K4_REPO="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")/../../.." && pwd)"
+source "${_K4_REPO}/key4hep_release.sh"
+_K4REL="$(k4_release "${_K4_REPO}")" || exit 1
 source /cvmfs/sw.hsf.org/key4hep/setup.sh -r "${_K4REL}" >/dev/null 2>&1
 
 # The merge job's own `cp -f "$TMP_OUT" "$OUT"` (see generate_dag.py's

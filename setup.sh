@@ -13,7 +13,10 @@ REPO_ROOT="$( cd "$( dirname "${BASH_SOURCE[0]:-$0}" )" && pwd )"
 # --- key4hep release (numpy, scipy, uproot, ROOT, ...) ----------------------
 # Single source of truth: .key4hep-release (shared with install.sh); override
 # per-shell with the KEY4HEP_RELEASE env var.
-KEY4HEP_RELEASE="${KEY4HEP_RELEASE:-$(cat "${REPO_ROOT}/.key4hep-release" 2>/dev/null || echo 2026-04-08)}"
+if [ -z "${KEY4HEP_RELEASE:-}" ]; then
+    source "${REPO_ROOT}/key4hep_release.sh"
+    KEY4HEP_RELEASE="$(k4_release "${REPO_ROOT}")" || return 1
+fi
 source /cvmfs/sw.hsf.org/key4hep/setup.sh -r "${KEY4HEP_RELEASE}"
 
 # --- repo on PYTHONPATH so the top-level packages import anywhere ------------
