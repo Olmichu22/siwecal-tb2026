@@ -13,9 +13,12 @@ set -eo pipefail
 RUN_DIR="$1"; RUN_TAG="$2"
 
 REPO=/afs/cern.ch/user/m/marquezh/public/siwecal-tb2026
-# Release from .key4hep-release, so this cannot drift from the build the
-# LD_LIBRARY_PATH below points at (an ABI mismatch fails on the worker, not here).
-source /cvmfs/sw.hsf.org/key4hep/setup.sh -r "$(cat "$REPO/.key4hep-release" 2>/dev/null || echo 2026-04-08)"
+# Release from .key4hep-release via k4_release, so this cannot drift from the
+# build the LD_LIBRARY_PATH below points at (an ABI mismatch fails on the worker,
+# not here). A missing/malformed file aborts the job with a clear message.
+source "$REPO/key4hep_release.sh"
+K4REL="$(k4_release "$REPO")" || exit 1
+source /cvmfs/sw.hsf.org/key4hep/setup.sh -r "$K4REL"
 export LD_LIBRARY_PATH="$REPO/gaudi_source/build:${LD_LIBRARY_PATH:-}"
 export PYTHONPATH="$REPO/gaudi_source/build/genConfDir:$REPO:${PYTHONPATH:-}"
 
