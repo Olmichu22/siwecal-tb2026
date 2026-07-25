@@ -48,7 +48,10 @@ struct EcalRawDecoder final : Gaudi::Algorithm {
       return error() << "No InputFiles provided" << endmsg, StatusCode::FAILURE;
     }
 
-    auto fout = std::unique_ptr<TFile>(TFile::Open(m_outputFile.value().c_str(), "RECREATE"));
+    // ZSTD-5 instead of ROOT's ZLIB-1 default: 18.6x smaller output on these
+    // mostly-empty fixed-size arrays -- see k4siwecal::kDecodedFileCompression.
+    auto fout = std::unique_ptr<TFile>(
+        TFile::Open(m_outputFile.value().c_str(), "RECREATE", "", k4siwecal::kDecodedFileCompression));
     if (!fout || fout->IsZombie()) {
       return error() << "Cannot create output file: " << m_outputFile.value() << endmsg, StatusCode::FAILURE;
     }

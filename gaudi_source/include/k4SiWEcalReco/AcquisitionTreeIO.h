@@ -21,6 +21,34 @@
 
 namespace k4siwecal {
 
+/* ROOT compression setting for every `siwecaldecoded` file: ZSTD level 5
+ * (algorithm 5, level 5 -> 505). Both decoders pass it to TFile::Open, so the
+ * two front-ends stay byte-comparable.
+ *
+ * NOT a micro-optimisation. An Acquisition is 17.4 GB of uncompressed tree data
+ * per ~3000-entry chunk, because the arrays are fixed [15][16][15][64] and go
+ * out mostly empty -- and ROOT's default (ZLIB level 1, setting 101) is
+ * remarkably bad at that shape. Measured on one real chunk of
+ * TB2026CERN_eudaq_run_000285 (2026-07-25):
+ *
+ *     ZLIB-1 (the old default) 185.4 MB   <- what production used to write
+ *     ZLIB-6                    25.5 MB
+ *     LZ4-4                     78.4 MB
+ *     ZSTD-5                    10.0 MB   <- 18.6x smaller, ~27 s to write
+ *     ZSTD-9                     8.3 MB   (22.3x, but ~69 s)
+ *     LZMA-5                     8.7 MB   (21.2x, but ~214 s)
+ *
+ * Control: rewriting the same tree with ZLIB-1 again gives 184.8 MB (1.00x), so
+ * the gain is the algorithm, not the rewrite. ZSTD-5 is the knee of the curve --
+ * ZSTD-9 buys 17% more space for 2.5x the CPU. This took a full campaign from
+ * ~2.4 TB to ~130 GB, which is the difference between fitting in the EOS quota
+ * and aborting the DAG halfway through it (it did, on 2026-07-25).
+ *
+ * Transparent to every reader: ROOT decompresses on open, and ZSTD has been in
+ * ROOT since 6.20, far below the key4hep stack this builds against.
+ */
+inline constexpr int kDecodedFileCompression = 505;
+
 inline void bindAcquisitionBranches(TTree& tree, Acquisition& acq, RunSettings& runSettings) {
   tree.Branch("acqNumber", &acq.acqNumber, "acqNumber/I");
   tree.Branch("n_slboards", &acq.nSlboards, "n_slboards/I");
