@@ -12,8 +12,10 @@ set -eo pipefail
 #   <run_tag>  the run tag, e.g. run000166
 RUN_DIR="$1"; RUN_TAG="$2"
 
-source /cvmfs/sw.hsf.org/key4hep/setup.sh -r 2026-04-08
 REPO=/afs/cern.ch/user/m/marquezh/public/siwecal-tb2026
+# Release from .key4hep-release, so this cannot drift from the build the
+# LD_LIBRARY_PATH below points at (an ABI mismatch fails on the worker, not here).
+source /cvmfs/sw.hsf.org/key4hep/setup.sh -r "$(cat "$REPO/.key4hep-release" 2>/dev/null || echo 2026-04-08)"
 export LD_LIBRARY_PATH="$REPO/gaudi_source/build:${LD_LIBRARY_PATH:-}"
 export PYTHONPATH="$REPO/gaudi_source/build/genConfDir:$REPO:${PYTHONPATH:-}"
 

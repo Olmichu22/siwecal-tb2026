@@ -15,10 +15,31 @@ _THIS_DIR = os.path.dirname(os.path.abspath(__file__))
 REPO_ROOT = os.path.abspath(os.path.join(_THIS_DIR, "..", "..", ".."))
 OPTIONS_DIR = os.path.join(REPO_ROOT, "gaudi_source", "options")
 
-# Must match the release used elsewhere in this repo (gaudi_source/README.md
-# "Build & run" instructions) -- Condor worker nodes source the same CVMFS
-# release so the AFS-resident gaudi_source/build is ABI-compatible.
-KEY4HEP_RELEASE = "2026-04-08"
+def _key4hep_release():
+    """The key4hep release the generated Condor wrappers source on the worker.
+
+    Read from ``.key4hep-release`` at the repo root -- the SAME file setup.sh
+    and install.sh read, so the farm and an interactive shell cannot end up on
+    different releases. This used to be a literal here, which made the "single
+    source of truth" the README advertises quietly untrue: bumping the file and
+    rebuilding gaudi_source/build against the new release left every Condor job
+    still sourcing the old one, loading an AFS-resident .so with a mismatched
+    ABI. That does not fail at submit time -- it fails on the worker, obscurely.
+
+    The literal survives only as a fallback for a checkout without the file,
+    matching how setup.sh and install.sh degrade.
+    """
+    try:
+        with open(os.path.join(REPO_ROOT, ".key4hep-release")) as fh:
+            release = fh.read().strip()
+            if release:
+                return release
+    except OSError:
+        pass
+    return "2026-04-08"
+
+
+KEY4HEP_RELEASE = _key4hep_release()
 
 # EOS scratch area for the Fill stage's histograms. NEVER auto-deleted by any
 # script here (see the repo-wide "never delete anything under /Data/" rule).
