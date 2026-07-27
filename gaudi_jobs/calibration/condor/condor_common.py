@@ -10,15 +10,74 @@ sys.path, same convention already used by calib_run_utils.py one directory
 up.
 """
 import os
+import re
+import sys
 
 _THIS_DIR = os.path.dirname(os.path.abspath(__file__))
 REPO_ROOT = os.path.abspath(os.path.join(_THIS_DIR, "..", "..", ".."))
 OPTIONS_DIR = os.path.join(REPO_ROOT, "gaudi_source", "options")
 
-# Must match the release used elsewhere in this repo (gaudi_source/README.md
-# "Build & run" instructions) -- Condor worker nodes source the same CVMFS
-# release so the AFS-resident gaudi_source/build is ABI-compatible.
-KEY4HEP_RELEASE = "2026-04-08"
+_RELEASE_RE = re.compile(r"^[A-Za-z0-9._-]+$")
+
+
+def _key4hep_release():
+    """The key4hep release the generated Condor wrappers source on the worker.
+
+    Read from ``.key4hep-release`` at the repo root -- the SAME file setup.sh,
+    install.sh and key4hep_release.sh read, so the farm and an interactive shell
+    cannot end up on different releases. This used to be a literal here, which
+    made the "single source of truth" the README advertises quietly untrue:
+    bumping the file and rebuilding gaudi_source/build against the new release
+    left every Condor job still sourcing the old one, loading an AFS-resident
+    .so with a mismatched ABI. That does not fail at submit time -- it fails on
+    the worker, obscurely.
+
+    Raises rather than falling back to a baked-in default: generating a whole
+    DAG against a release nobody chose is exactly the silent drift this is meant
+    to prevent, and a generator is a good place to fail -- nothing has been
+    submitted yet. Mirrors k4_release() in key4hep_release.sh, including the
+    conservative charset (the value is interpolated into the `source ... -r`
+    line of every generated wrapper).
+    """
+    path = os.path.join(REPO_ROOT, ".key4hep-release")
+    try:
+        with open(path) as fh:
+            lines = [ln.strip() for ln in fh.read().splitlines()]
+    except FileNotFoundError:
+        raise SystemExit(
+            f"ERROR: key4hep release file not found: {path}\n"
+            "       It pins the CVMFS release the generated Condor jobs source, and it is\n"
+            "       version-controlled -- if it is gone, the checkout is incomplete.\n"
+            "       Restore it with:  git checkout -- .key4hep-release")
+    except OSError as e:
+        raise SystemExit(f"ERROR: cannot read key4hep release file {path}: {e}")
+
+    values = [ln for ln in lines if ln]
+    if not values:
+        raise SystemExit(
+            f"ERROR: key4hep release file is empty: {path}\n"
+            "       Expected a single release name, e.g. 2026-04-08")
+
+    release = values[0]
+    if not _RELEASE_RE.match(release):
+        raise SystemExit(
+            f"ERROR: invalid key4hep release in {path}: {release!r}\n"
+            "       Only letters, digits, dot, underscore and hyphen are allowed (the value\n"
+            "       is interpolated into the `source ... -r <release>` line of every\n"
+            "       generated Condor wrapper).\n"
+            "       Expected something like: 2026-04-08")
+
+    cvmfs = f"/cvmfs/sw.hsf.org/key4hep/releases/{release}"
+    if not os.path.isdir(cvmfs):
+        # Warn, do not fail: CVMFS may not be mounted on the submit host, and
+        # nightlies do not live under releases/. The name is well-formed; let
+        # the worker's setup script have the final word.
+        print(f"WARNING: key4hep release {release!r} (from {path}) is not under "
+              f"/cvmfs/sw.hsf.org/key4hep/releases/ -- continuing.", file=sys.stderr)
+    return release
+
+
+KEY4HEP_RELEASE = _key4hep_release()
 
 # EOS scratch area for the Fill stage's histograms. NEVER auto-deleted by any
 # script here (see the repo-wide "never delete anything under /Data/" rule).

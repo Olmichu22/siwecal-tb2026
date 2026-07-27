@@ -17,7 +17,7 @@ added. It is **not** versioned (147 MB, with absolute CVMFS paths baked in);
 create it once per machine:
 
 ```bash
-source /cvmfs/sw.hsf.org/key4hep/setup.sh -r 2026-04-08
+source /cvmfs/sw.hsf.org/key4hep/setup.sh -r "$(cat .key4hep-release)"
 python -m venv --system-site-packages .venv-viewer
 source .venv-viewer/bin/activate
 pip install -r requirements.txt      # dash + plotly

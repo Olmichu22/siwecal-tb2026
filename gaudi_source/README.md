@@ -198,7 +198,7 @@ profiles. Readers (`PidFileReader`) auto-detect which layout a file uses.
 ## Build & run (under key4hep)
 
 ```bash
-source /cvmfs/sw.hsf.org/key4hep/setup.sh -r 2026-04-08
+source /cvmfs/sw.hsf.org/key4hep/setup.sh -r "$(cat .key4hep-release)"
 cmake -S gaudi_source -B gaudi_source/build -DCMAKE_BUILD_TYPE=Release
 cmake --build gaudi_source/build -j4
 
