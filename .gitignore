@@ -36,6 +36,12 @@ gaudi_jobs/calibration/run_thresholds*.txt
 gaudi_jobs/run000166/logs
 gaudi_jobs/run000167/logs
 
+# --- Job stdout/stderr. The per-run "logs" rules above are path-specific: a
+#     pipeline.out was committed once from a directory they did not cover, so
+#     match the extensions everywhere instead (Condor writes .out/.err per job). ---
+*.out
+*.err
+
 
 # --- Generated Condor pipeline artifacts (gaudi_jobs/calibration/condor/generate_*.py) ---
 gaudi_jobs/calibration/condor/generated/
@@ -50,7 +56,6 @@ settings.yml
 .DS_Store
 .vscode/
 .idea/
-.claude/
 
 # build artifacts
 build/
@@ -64,10 +69,14 @@ diagnostics/*
 !diagnostics/*.py
 !diagnostics/*.txt
 
-# Agents
-claude_orders.txt
-
 # Private credential (grid/condor token) -- must never be tracked
 marquezh.cc
+
+# Agent scratch files (claude_orders.txt and friends are covered by the glob)
+.claude/
 claude*
+
+# Core dumps: two empty ones were committed once (bc3a911). "core.*" misses a
+# bare "core", which is what the kernel writes when core_pattern has no suffix.
+core
 core.*
