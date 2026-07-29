@@ -1,0 +1,127 @@
+PEDESTAL MULTI-PEAK -- TABLES (th210 / th220 / th230)
+=====================================================
+Generated 2026-07-28. Companion to pedestal_multipeak_summary.txt (2026-07-24),
+which this does NOT replace: the July note stays as the record of what was
+known then, including the fact that the th210 grid had been lost.
+
+Two things are new here:
+  1. all three grids were REBUILT from scratch and the July numbers reproduced;
+  2. the thresholds are compared with the statistics EQUALISED, which the July
+     note flagged as missing ("its 13.2% is the least comparable of the three").
+
+
+1. INPUTS AS REBUILT
+--------------------------------------------------------------------------------
+  th210  198,172 cells  refilled from the 8 decoded chunks of runs 152-155,
+                        158-160, 166 (rundata_converted_gaudi), one k4run,
+                        CALIB_MODE=Fill. The grid the July note reported as
+                        gone from EOS.
+  th220  215,855 cells  hadd of 73 group_*.root over runs 254, 060, 061, 062,
+                        086, 087, 088, 142, 143 (12.6 GB, ~3 h from EOS).
+  th230  141,330 cells  the pre-existing official merged_th230.root, untouched.
+
+  Cell counts match the July "present" column exactly for all three.
+
+
+2. REPRODUCTION OF THE JULY NUMBERS (low gain)
+--------------------------------------------------------------------------------
+             scanned    1pk      2pk     3+pk   MULTI-PEAK    offset
+  th210      152,674   128,600  23,601   473   24,074 = 15.8%  7.0 ADC IQR[6,9]
+  th220      170,589   135,469  33,912 1,208   35,120 = 20.6%  7.0 ADC IQR[6,9]
+  th230       75,967    65,939   9,844   184   10,028 = 13.2%  7.0 ADC IQR[6,9]
+
+  Identical to the July table in every field. The three regenerated PNGs are
+  BYTE-IDENTICAL to the ones committed in 7bcf532 (git diff empty), so the
+  analysis is reproducible end to end from what survives on EOS.
+
+  scanned = cells with >=200 entries (MIN_ENTRIES). Peak count is
+  TSpectrum(10).Search(h, sigma=2.0, "nobackground", threshold=0.30).
+  Binning is 400 bins over 100.5-500.5 ADC, so 1 bin = 1 ADC and sigma=2.0
+  means peaks closer than ~2 ADC merge. threshold=0.30 is RELATIVE to the
+  tallest peak: a second population below 30% of its height is not counted.
+
+
+3. STATISTICS-EQUALISED COMPARISON (low gain)
+--------------------------------------------------------------------------------
+Method (diagnostics/compare_multipeak_stat_matched.py): only cells clearing N
+entries in ALL THREE thresholds are used (identical geometry and SCA mix), and
+every histogram is resampled to exactly N entries by a multinomial draw over
+its own bins (identical detection power). See that file's docstring.
+
+  N      common cells   th210    th220    th230
+  200        73,466     16.98%   21.03%   13.10%
+  500        56,472     17.60%   21.34%   12.66%
+  1000       41,204     18.29%   21.37%   11.54%
+  2000       26,834     19.22%   21.87%    9.34%
+
+  Noise floor: running the SAME file in two slots gives 12.78% vs 12.92% at
+  N=500, so 0.14 pp is the resampling noise. Differences below ~0.3 pp are
+  not meaningful; the ones in this table are 5-12 pp.
+
+  Two-threshold cross-check (th220 vs th230 only, larger common set):
+  N=200 21.07/13.27, N=500 21.38/12.74, N=1000 21.24/11.78, N=2000 21.80/9.45.
+  Consistent with the three-way numbers.
+
+Reading:
+  - th220 is FLAT in N (21.0 -> 21.9%). Its 20.6% was never a statistics
+    artefact: equalising does not move it.
+  - th230 FALLS steeply (13.1 -> 9.3%). The gap to th220 WIDENS from 7.4 pp
+    (raw) to 12.5 pp (matched). Equalising the statistics makes the difference
+    bigger, not smaller -- the opposite of what the July note's caveat implied.
+  - th210 sits between and rises toward th220 (17.0 -> 19.2%).
+
+
+4. PER-SCA BREAKDOWN AT N=2000 (26,834 common cells, low gain)
+--------------------------------------------------------------------------------
+  SCA   th210   th220   th230
+    0   20.9    22.9     4.6
+    1   16.8    21.0    12.4
+    2   18.0    20.1    22.2
+
+  Only SCA 0-2 survive at N=2000: no cell above SCA2 has 2000 entries in all
+  three. At N=500 the common set reaches SCA7 and the th220/th230 pair agrees
+  from SCA2 on (20.1 vs 22.1 at SCA2, 23.0 vs 23.0 at SCA3).
+
+  The whole th220-th230 gap lives in SCA0 and SCA1. From SCA2 onward the
+  thresholds agree. This CORRECTS the July note's explanation: it attributed
+  th230's low fraction to its sample being "biased toward SCA0", which assumes
+  SCA0 is intrinsically poor in multi-peaks. It is not -- th220 and th210 both
+  sit near 21-23% at SCA0. SCA0 is low ONLY in th230. The sampling bias was
+  real but it was amplifying an effect, not causing it.
+
+  There is no monotonic trend with threshold: 210 -> 20.9, 220 -> 22.9,
+  230 -> 4.6. th210 sits WITH th220, so th230 is the outlier rather than one
+  end of a trend.
+
+
+5. WHAT IS SOLID AND WHAT IS NOT
+--------------------------------------------------------------------------------
+SOLID -- the 7.0 ADC peak-to-peak offset. Identical in all three thresholds, on
+  rebuilt inputs, and the distribution is DISCRETE: spikes at integer ADC
+  values, not a continuum. A quantised step that does not move with the
+  threshold is common-mode electronics, not a threshold effect.
+
+NOT ESTABLISHED -- that th230's SCA0 deficit is physical. A confound has not
+  been excluded: th220 and th210 were rebuilt here by the same pipeline, while
+  merged_th230.root is a pre-existing "official" file of different provenance.
+  It may have been filled by a different code version or run selection. Before
+  reading the SCA0 deficit as detector behaviour, th230 should be refilled the
+  same way th210 was, from its own decoded chunks. That has NOT been done.
+
+ALSO NOT ESTABLISHED -- the plateau above SCA7. No common cell above SCA2 has
+  2000 entries and none above SCA7 has 500, so the high-SCA end is unmeasured
+  in the matched comparison.
+
+CHOICES, NOT MEASUREMENTS -- MIN_ENTRIES=200 and threshold=0.30 are unjustified
+  in the code beyond a comment. The absolute fractions (15.8 / 20.6 / 13.2%)
+  depend on both. The 7.0 ADC offset does not.
+
+
+FILES
+--------------------------------------------------------------------------------
+  diagnostics/th210/pedestal_multipeak_th210.png
+  diagnostics/th220/pedestal_multipeak_th220.png
+  diagnostics/th230/pedestal_multipeak_th230.png
+  diagnostics/compare/multipeak_stat_matched_low.png   (three-way, section 3)
+  diagnostics/compare_multipeak_stat_matched.py        (the comparison script)
+  diagnostics/plot_pedestal_multipeak.py               (unchanged, per-threshold)
