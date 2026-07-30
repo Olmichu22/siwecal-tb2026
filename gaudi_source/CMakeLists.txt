@@ -24,6 +24,7 @@ gaudi_add_module(k4SiWEcalRecoPlugins
   SOURCES
     src/components/EcalToEDM4hep.cpp
     src/components/EcalPidTransformer.cpp
+    src/components/EcalEventCut.cpp
     src/components/EcalRawDecoder.cpp
     src/components/EcalLcioDecoder.cpp
     src/components/PedestalMipCalibrator.cpp
