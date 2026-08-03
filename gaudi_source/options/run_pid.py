@@ -37,10 +37,17 @@ svc = IOSvc("IOSvc")
 svc.Output = out_file
 # No svc.Input: EcalToEDM4hep reads the (non-podio) ecal tree itself.
 
-# Run mode (set by run_pid_batch.py; sensible defaults if run k4run directly):
-#  - ECAL_HIT_MIP_CUT: drop hits below this MIP energy (<0 disables; default off).
-#  - ECAL_MIP_THRESHOLDS: comma list of MIP-cut variant blocks to compute in the
-#    Cluster ("0.5,1.0" = visualizer mode; "" = none, the physics-mode default).
+# Run mode. These two are DIFFERENT knobs (see the main README, "Two different
+# MIP cut knobs"):
+#  - ECAL_HIT_MIP_CUT: per-hit energy cut -- drop hits below this many MIPs
+#    (<0 disables). Default off here; run_full_pipeline_batch.py sets 0.5.
+#  - ECAL_MIP_THRESHOLDS: comma list of EXTRA thresholds at which the whole
+#    shower-variable block is recomputed and stored again as mip05_/mip1_
+#    ("0.5,1.0" = visualiser mode; "" = physics mode, one block only).
+#    NOTE the default below ("0.5,1.0") applies ONLY to a bare `k4run
+#    run_pid.py`. The batch/interactive drivers (run_pid_batch.py without
+#    --validation, run_full_pipeline_batch.py) override it to "" -- physics
+#    mode -- so those pipelines write one block, not three. This is intentional.
 hit_mip_cut = float(os.environ.get("ECAL_HIT_MIP_CUT", "-1"))
 _raw_mip = os.environ.get("ECAL_MIP_THRESHOLDS", "0.5,1.0")
 mip_thresholds = [float(t) for t in _raw_mip.split(",") if t.strip()]

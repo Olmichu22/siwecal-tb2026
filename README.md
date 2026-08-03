@@ -13,19 +13,19 @@ builder: it is **not** what the pipeline runs — see "Two event builders" below
 ```
  RAW  <run>_raw.bin_NNNN                      <-- read-only, under Data/rundata/
         │
-        ▼  CONVERT — one k4run per raw chunk, in parallel (EcalRawDecoder)
+        ▼  STAGE 1 · decode — one k4run PER raw chunk, in parallel + health check
  ┌─────────────────────────┐
  │  gaudi_source (C++)     │  ───────────────►  Data/rundata_converted_gaudi/
  │  EcalRawDecoder         │                      <run>/chunks/chunk_NNNN.root
  └─────────────────────────┘                      (siwecaldecoded tree)
         │
-        ▼  RECO — event building: chains the chunks, no merge step
+        ▼  STAGE 2 · event building — one k4run chaining the chunks (no merge)
  ┌─────────────────────────┐
  │  gaudi_source (C++)     │  ───────────────►  Reconstruction/<run>/
  │  EcalEventBuilder       │                      ecal_<run>.root  (ecal tree)
  └─────────────────────────┘
         │
-        ▼  RECO — shower vars + selection (same job, second k4run)
+        ▼  STAGE 3 · PID/EDM4hep — a SECOND k4run (shower vars + selection)
  ┌─────────────────────────┐
  │  gaudi_source (C++)     │  ───────────────►  Reconstruction/<run>/
  │  EcalToEDM4hep + PID    │                      ecal_<run>.edm4hep.root
@@ -42,6 +42,40 @@ builder: it is **not** what the pipeline runs — see "Two event builders" below
 The per-event metrics **and the cut/cleaned event collections** are produced by
 `gaudi_source` (in C++, fast). `siwecal_validation` and `event_viewer` only read
 that output — neither recomputes metrics nor writes any tree.
+
+### The three pipeline stages (raw → EDM4hep)
+
+The three stages numbered in the diagram above are, in practice, **three
+separate `k4run` processes** — the CONVERT/RECO split is really decode →
+event building → PID. This is what `gaudi_jobs/run_full_pipeline_batch.py`
+runs for one run (and what the Condor DAG runs per run on the farm):
+
+| # | Stage | Process(es) | Component | Reads | Writes |
+|---|---|---|---|---|---|
+| **1** | **decode** | **one `k4run` per raw chunk**, in parallel, + a health check | `EcalRawDecoder` | `<run>_raw.bin_NNNN` (read-only) | `<converted-dir>/<run>/chunks/chunk_NNNN.root` (`siwecaldecoded` tree) |
+| **2** | **event building** | one `k4run` **chaining** all the chunks | `EcalEventBuilder` | the chunks from stage 1 | `Reconstruction/<run>/ecal_<run>.root` (`ecal` tree) |
+| **3** | **PID / EDM4hep** | a **second** `k4run` | `EcalToEDM4hep` (hit-MIP cut) + `EcalPidTransformer` (shower vars) | `ecal_<run>.root` | `ecal_<run>.edm4hep.root` |
+
+Two design points that are easy to miss:
+
+- **Stage 1 is one process per chunk, not one process for the whole run.**
+  The old "decode every chunk in a single `k4run`" path *silently dropped
+  ~75 % of the acquisitions* on some runs. It is now one decode per chunk,
+  and `assert_healthy()` **aborts the run** if the acquisitions don't add up
+  before anything is reconstructed from them (see
+  [`gaudi_jobs/decode_chunks.py`](gaudi_jobs/decode_chunks.py) and the
+  `run_full_pipeline_batch.py` module docstring).
+- **Stage 3 is a separate `k4run` on purpose.** k4FWCore needs `EvtMax`
+  fixed *before* the process starts, and the physics-event count only exists
+  once the event builder (stage 2) has run — so stage 3 opens the `ecal`
+  file, reads `GetEntries()`, then sets `EvtMax`. See
+  [Note on Gaudi's event loop](#note-on-gaudis-event-loop).
+
+Calibration (pedestals + MIPs) is a **separate upstream step**, not one of
+these three: each run auto-resolves its `MuonCalib_gaudi/{pedestals,mips}/th<N>/`
+tables from its own `ThresholdDAC` (`Run_Settings.txt`). See the "MIP cut vs.
+MIP thresholds" note below — the calibration MIP scale is a different thing
+from the two per-hit "mip cut" knobs.
 
 ## Packages
 
@@ -93,6 +127,39 @@ Two modes: the default **physics** mode bakes in a `0.5` MIP per-hit cut, while
 `--validation` mode keeps raw hits and also computes the `mip05_/mip1_` variant
 blocks that feed the viewer's interactive threshold slider. All cuts are off by
 default except total per-event energy > 0 (always enforced).
+
+> #### Two different "MIP cut" knobs — don't confuse them
+>
+> There are **two** MIP-related settings on the PID stage, and they do
+> different things:
+>
+> - **(A) `HitMipCut`** — env `ECAL_HIT_MIP_CUT`, flag `--hit-mip-cut`,
+>   Gaudi property `EcalToEDM4hep.HitMipCut`. A **per-hit energy cut**: hits
+>   below this many MIPs are dropped *before* the metrics are computed (`<0`
+>   disables it).
+> - **(B) `MipThresholds`** — env `ECAL_MIP_THRESHOLDS`, constant
+>   `siwecal_validation.vars_cache.MIP_CUT_THRESHOLDS`, Gaudi property
+>   `EcalPidTransformer.MipThresholds`. A **list of extra thresholds** at
+>   which the whole shower-variable block is **recomputed** and stored again
+>   under the prefixes `mip05_` / `mip1_`. This is what feeds the viewer's
+>   threshold slider; it does not change which hits survive.
+>
+> The **"three sets of variables"** older docs/scripts produced were the
+> base block (no extra cut) **plus** `mip05_` **plus** `mip1_` — i.e. knob
+> (B) set to `0.5,1.0` (the `mip05_*` / `mip1_*` prefixes in the
+> `shapeParameters` / valtree tables below). The default pipeline turns (B)
+> **off**, so you now get one block only. Defaults differ by driver:
+>
+> | Driver | (A) `HitMipCut` | (B) `MipThresholds` → `mip05_/mip1_` blocks |
+> |---|---|---|
+> | `run_full_pipeline_batch.py` (interactive, one run) | `0.5` | **none** (physics mode) |
+> | `run_pid_batch.py` (batch) | per-YAML / `--hit-mip-cut` | none; `[0.5, 1.0]` with `--validation` |
+> | `run_pid.py` (bare `k4run`) | off (`-1`) | **`0.5,1.0` by default** → 3 versions |
+>
+> So a bare `k4run gaudi_source/options/run_pid.py` still writes all three
+> blocks, while the batch/interactive drivers default to the single
+> physics block. This difference is intentional (physics vs. visualiser
+> mode); set `ECAL_MIP_THRESHOLDS`/`--validation` to opt back in.
 
 ```bash
 # Build it once (./install.sh does this for you) and load the env:
@@ -234,8 +301,11 @@ the `metadata` frame parameter `ECalPid_shapeParameterNames`):
 
 In `--validation` mode the same 21 scalars are appended twice more, recomputed
 after a per-hit cut, under the prefixes `mip05_` (`hit_energy ≥ 0.5`) and `mip1_`
-(`hit_energy ≥ 1.0`) — e.g. `mip05_moliere`, `mip1_is_shower`. These feed the
-viewer's interactive threshold slider; physics mode omits them.
+(`hit_energy ≥ 1.0`) — e.g. `mip05_moliere`, `mip1_is_shower`. These are the
+extra blocks knob **(B) `MipThresholds`** adds (see *"Two different 'MIP cut'
+knobs"* above); they feed the viewer's interactive threshold slider, and the
+default physics-mode pipeline omits them, so most files carry the base block
+only.
 
 ### valtree (`ecal_<run>.valtree.root`)
 
@@ -411,6 +481,14 @@ cycle) contains **many** physics events, separated by BCID clustering — run_00
 turns 28,915 acquisitions into 66,958 events. Gaudi needs `EvtMax` fixed before
 the process starts, and that count only exists once the events are built.
 
+That BCID clustering is *adjacency-based*, not a fixed-width time window:
+hits within `MergeDelta` (default **3**) BCID counts of each other form one
+event. The window granularity and the other clustering knobs
+(`SkipBcidStart`, `MinSlabsHit`, …) are `EcalEventBuilder` Gaudi properties;
+the pipeline leaves them at their defaults. See
+[gaudi_source/README.md → "How hits become events"](gaudi_source/README.md#how-hits-become-events-bcid-clustering-the-time-window)
+for the algorithm and the full property table.
+
 That is also why PID runs as a **second** `k4run` process: `EcalToEDM4hep` /
 `EcalPidTransformer` *are* k4FWCore components that follow the event loop, so
 `run_pid.py` opens the `ecal` file, reads `GetEntries()`, and only then sets
@@ -443,3 +521,69 @@ cd event_display/
 ```
 
 See each package's README for the full option list and design notes.
+
+## Making a change
+
+Every change to this repo goes through the same four steps, plus one standing
+duty. The workflow is also encoded as a Claude Code skill in
+[`.claude/skills/repo-change/SKILL.md`](.claude/skills/repo-change/SKILL.md), so
+an agent working here follows it without being told.
+
+**1 · Branch, one per topic.** Never commit to `main`. Related edits that serve
+the same purpose share a branch; unrelated work gets its own.
+
+```bash
+git fetch origin
+git switch -c fix/<slug> origin/main     # fix/ chore/ perf/ feat/ ...
+```
+
+**2 · Code.** Four traps that are specific to this repo:
+
+- **Two event builders — only one runs.** Event-building behaviour lives in the
+  C++ `gaudi_source/include/k4SiWEcalReco/EventBuilder.h`. Changing only the
+  legacy Python `siwecal_eventbuilder/` produces a fix the pipeline never sees
+  (see "Two event builders" above).
+- **C++ needs a rebuild** before it does anything: `./install.sh --no-viewer`
+  (or the cmake build) then `source setup.sh`.
+- **Python 3.9 floor, and CI has no key4hep.** CI runs the `3.9`/`3.11` matrix
+  over `siwecal_common`, `siwecal_eventbuilder`, `siwecal_validation` and
+  `event_viewer` with only `numpy pyyaml pytest` installed — no 3.10+ syntax
+  there, and keep ROOT/uproot imports lazy so those packages still import.
+- **New config key ⇒ update the template**, `settings.example.yml` (paths) or
+  `config.example.yml` (builder tunables); unknown keys are rejected at load.
+
+**3 · Tests.** There is no `python` and the system `python3` has no `pytest`,
+so load the stack first:
+
+```bash
+source setup.sh
+python3 -m pytest -q siwecal_validation/tests/     # what CI gates on
+python3 -m compileall -q siwecal_common siwecal_eventbuilder siwecal_validation event_viewer
+python3 -m pytest -q gaudi_jobs/tests/             # when touching decode / gaudi_jobs
+```
+
+key4hep's pytest plugin prints a wall of `<DartMeasurement>` XML per test; that
+is noise. Read the last summary line.
+
+**4 · Documentation.** Update the doc that describes what changed:
+
+| Changed | Update |
+|---|---|
+| pipeline stages, install/setup, repo layout | this `README.md` (incl. the diagram and the stage table) |
+| Gaudi components, algorithm properties, `options/` | `gaudi_source/README.md` |
+| metrics, validation plots, cuts | `siwecal_validation/README.md` |
+| legacy Python builder | `siwecal_eventbuilder/README.md` |
+| viewer / display UI and flags | `event_viewer/README.md`, `event_display/README.md` |
+| batch / Condor / calibration jobs | the `gaudi_jobs/**/README.md` next to the job |
+| a config key | `settings.example.yml` / `config.example.yml` |
+
+**5 · Say so when behaviour changes.** A change is *additive* (new option off by
+default, new file, new doc — existing runs give identical output) or it is
+*behaviour-changing*, and the second must be announced explicitly. Counts as
+behaviour-changing: different numbers for the same input; a changed default of
+any Gaudi property (`SkipBcidStart`, `MinSlabsHit`, …), CLI flag or config
+value; added, removed or renamed tree branches, output files or directory
+layout; events kept or dropped that were not before; changed public signatures
+or import paths; anything that makes previously produced ROOT files
+inconsistent with new ones. State what changes, who it affects, and whether
+older outputs remain comparable.

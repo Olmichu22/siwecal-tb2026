@@ -53,6 +53,18 @@ cut-passing events in either of two formats — an **EDM4hep** PID file
 (`ecal_<run>.valtree.root`). `siwecal_validation` no longer generates any
 tree; it only reads these outputs and makes plots.
 
+Two MIP knobs drive this stage, and they are **different things**:
+`EcalToEDM4hep.HitMipCut` (env `ECAL_HIT_MIP_CUT`) is the **per-hit energy
+cut** that decides which hits survive; `EcalPidTransformer.MipThresholds`
+(env `ECAL_MIP_THRESHOLDS`) is a **list of extra thresholds** at which the
+whole shower-variable block is recomputed and stored again as
+`mip05_`/`mip1_`. **Physics mode** = a single `HitMipCut=0.5` and
+`MipThresholds=[]` (one variable block); **validation/visualiser mode** =
+`MipThresholds=[0.5, 1.0]`, which adds the two extra blocks the viewer's
+slider reads. The batch drivers default to physics mode; a bare
+`k4run … run_pid.py` defaults to the validation thresholds. See the main
+README's "Two different MIP cut knobs" note for the per-driver default table.
+
 The `EcalToEDM4hep`/`EcalPidTransformer` chain itself is a strict **1→1**
 transform (the `ecal` tree is already one row per physics event — no BCID
 fan-out): it writes a *full* EDM4hep file to a temporary path.
@@ -151,6 +163,49 @@ All three are plain `Gaudi::Algorithm` (not `k4FWCore::Producer`/
 row count isn't known ahead of time, and none of them produce an
 EDM4hep/podio collection — they read/write plain ROOT trees or ASCII tables.
 All work happens in `initialize()`; `execute()` is a no-op.
+
+#### How hits become events: BCID clustering (the "time window")
+
+There is **no fixed-width time window**. Hits carry a **BCID** (the SKIROC
+bunch-crossing counter — a coarse timestamp), and `BcidClusterer`
+(`EventBuilder.h`, a port of `bcid_clustering.py`) groups them by
+*adjacency*:
+
+1. **Collect** the valid BCIDs per `(slab, chip, sca)`, dropping any
+   `bcid < SkipBcidStart` (start-of-acquisition noise), the explicit
+   `DropBcids` list, and SCAs with more than `MaxHitsPerSca` hits.
+2. **Merge into windows** (`mergeIntoWindows`): sort the unique BCIDs and
+   greedily extend the current window while the gap to the next BCID is
+   `< MergeDelta`. A gap `>= MergeDelta` closes the window and starts a new
+   one. (12-bit BCID overflow at 4096 is unwrapped first.)
+3. **Keep** a window as an event only if `>= MinSlabsHit` distinct slabs are
+   active in it.
+
+So the window's "size" is **`MergeDelta`, read as a merge distance, not a
+width**: two BCIDs land in the same event iff they are `< MergeDelta` apart
+(with the default `3`, that means within 1–2 counts), and a window can grow
+arbitrarily long as long as every consecutive step stays under `MergeDelta`.
+There is no maximum window length.
+
+All of these are `EcalEventBuilder` Gaudi properties (defaults match
+`siwecal_eventbuilder/config.py::BuilderConfig`):
+
+| Property | Default | Meaning |
+|---|---:|---|
+| `MergeDelta` | `3` | BCID merge distance — the effective window granularity |
+| `SkipBcidStart` | `50` | ignore BCIDs below this (acquisition-start artefacts) |
+| `DropBcids` | `{0, 901}` | specific BCID values always discarded |
+| `MinSlabsHit` | `10` | minimum distinct slabs for a window to become an event |
+| `BcidOverflow` | `4096` | 12-bit BCID counter modulus (overflow unwrapping) |
+
+**Configurable, with a caveat:** these are real Gaudi properties, but the
+pipeline steering [`options/run_event_builder.py`](options/run_event_builder.py)
+does **not** plumb them through `EVBLD_*` env vars (it forwards the
+calibration/gain/mapping ones only), so from `run_full_pipeline_batch.py` /
+the Condor DAG they stay at the defaults above. To change e.g. the merge
+distance you pass `MergeDelta=<n>` to the `EcalEventBuilder(...)` constructor
+in your own steering (or add an `EVBLD_MERGE_DELTA` line to
+`run_event_builder.py`).
 
 ### PID / EDM4hep
 
