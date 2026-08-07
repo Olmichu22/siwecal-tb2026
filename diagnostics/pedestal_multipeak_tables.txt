@@ -144,7 +144,340 @@ STILL NOT ESTABLISHED -- the plateau above SCA7. No common cell above SCA2 has
 
 CHOICES, NOT MEASUREMENTS -- MIN_ENTRIES=200 and threshold=0.30 are unjustified
   in the code beyond a comment. The absolute fractions (15.8 / 20.6 / 13.2%)
-  depend on both. The 7.0 ADC offset does not.
+  depend on both. The 7.0 ADC offset does not. Section 6 now measures the first
+  of the two: MIN_ENTRIES barely matters.
+
+
+6. THE CUT LOWERED TO N>=100 (2026-07-31)
+--------------------------------------------------------------------------------
+plot_pedestal_multipeak.py now reads MIN_ENTRIES from the environment (default
+still 200); a non-default cut writes pedestal_multipeak_th<TH>_min<N>.png so the
+plots quoted above are never overwritten. Same refilled grids as section 1.
+
+             scanned            MULTI-PEAK          offset
+             N>=200   N>=100    N>=200   N>=100
+  th210     152,674  160,646    15.8%    15.7%      7.0 ADC IQR[6,9] (both)
+  th220     170,589  179,874    20.6%    20.4%      7.0 ADC IQR[6,9] (both)
+  th230      75,967   88,422    13.2%    13.1%      7.0 ADC IQR[6,9] (both)
+
+  Halving the cut adds 5-16% more cells and moves every fraction by <=0.2 pp --
+  below the 0.3 pp meaningfulness floor of section 3. MIN_ENTRIES=200 is
+  therefore not driving the th220-th230 gap, and the extra cells the lower cut
+  admits behave like the ones already in.
+
+  Detection power still argues for keeping 200 as the default: fewer counts hide
+  a shoulder, so numbers taken at different cuts are not strictly comparable and
+  the equalised comparison of section 3 remains the right tool for cross-
+  threshold statements.
+
+THE WHITE BINS IN THE th230 MAP ARE NOT A STATISTICS CUT
+  The map looked heavily holed and MIN_ENTRIES was the suspect. It is not.
+  Counting (slab, chip) bins on the th230 low-gain grid:
+
+             cells scanned   fraction==0   no cells at all   coloured
+    N>=200      236/240          68              4             168
+    N>=100      236/240          62              4             174
+
+  Only 4 bins of 240 have no scanned cell, at either cut, and lowering to 100
+  recovers 6 bins -- not the ~70 the picture suggests. The rest are chips with
+  plenty of data and a multi-peak fraction of exactly 0, which ROOT's colz
+  leaves undrawn: a real zero and missing data render identically white.
+  plot_pedestal_multipeak.py now sets hm.SetMinimum(-1e-9) so zeros take the
+  lowest palette colour and white means only "no data". The _min100 plots use
+  it; the N>=200 plots above predate it.
+
+  Consequence for reading section 4: th230 has 68 chips at exactly zero
+  multi-peak. That is a much stronger statement than a low average, and it is
+  the same population as the SCA0/SCA1 deficit -- worth a look at whether those
+  68 chips are the ones whose scanned cells are mostly SCA0-1.
+
+
+7. IN-SPILL vs OUT-OF-SPILL: THE EFFECT IS BEAM-INDUCED (2026-08-06)
+--------------------------------------------------------------------------------
+Everything above is time-integrated and therefore silent on WHEN a cell's
+baseline jumps. PedestalMipCalibrator gained a SpillSelect=all|in|out property
+(cut on the acquisition's total accepted-hit occupancy) so the same fill can be
+run twice over the same chunks, once on beam-on and once on beam-off
+acquisitions. Study script: diagnostics/plot_pedestal_multipeak_spill.py.
+
+THE SPLIT IS WELL DEFINED. Per-acquisition occupancy on run_000060 (th220) is
+bimodal: median 4 hits when quiet, a second bump at 500-2000, and an almost
+empty valley between ~50 and ~500 (0.3% of acquisitions per decade-bin there).
+The high-occupancy acquisitions come in 11 contiguous blocks of ~40 separated by
+long quiet stretches -- the SPS spill structure, not a rate fluctuation. 8.9% of
+acquisitions are in-spill. Any cut in the valley (100/200/400) gives the same
+answer; 800 does NOT -- it cuts inside the beam bump itself, so it is not a
+spill cut. Default SpillOccupancyCut=200.
+
+FIRST, A RESULT ABOUT THE PRODUCTION FILL. With the default NSlabsHit=8 the
+comparison is impossible, and that is itself worth recording: the coincidence
+tagger wants >=8 slabs lit at the same BCID, which IS a beam trigger. Of the
+217,028 SCA slices it accepts over 10 chunks of run_000060, 99.14% come from
+in-spill acquisitions and 0.86% from outside. Verified in the C++ too:
+entries(in) + entries(out) = entries(all) exactly (13,566,256 + 117,263 =
+13,683,519) with out at 0.857%. => Every pedestal in this repo's calibration is
+an IN-SPILL pedestal. There is no out-of-spill sample to compare against unless
+the coincidence is relaxed.
+
+So both grids below were filled with NSlabsHit=1, so that ONLY the beam differs
+between them. 59 chunks of run_000060, low gain:
+
+                        cells present   entries      cells >=200
+  in spill                  156,648    96,428,890       79,893
+  out of spill               88,656     9,145,586        9,123
+
+  RAW multi-peak fraction (each on its own cells, NOT comparable):
+    in spill      16,305/79,893 = 20.41%
+    out of spill     133/ 9,123 =  1.46%
+
+STATISTICS-EQUALISED (intersection of cells, each resampled to exactly N --
+the method of section 3, which is what makes the raw numbers above meaningless):
+
+    N      common cells   SCA0 share    in spill   out of spill   ratio
+   200         9,059         96.5%       20.74%        1.44%      14.5x
+   500           687         81.7%       17.61%       10.77%       1.6x
+  1000           252         75.0%       22.22%       16.27%       1.4x
+
+  The N=200 row is stable across seeds (20.74/20.79/20.63 vs 1.44/1.58/1.49 for
+  seeds 0/1/2), so the 14.5x is not a resampling fluctuation.
+
+  DO NOT read the collapse to 1.4x at N=1000 as the effect disappearing under
+  equalised statistics. The cell SET changes drastically down the rows: 9,059 ->
+  252 cells. A cell only reaches 1000 out-of-spill entries if it self-triggers
+  ~1000 times with no beam in the detector, i.e. only the pathologically noisy
+  channels survive to the bottom row (s6_c11 alone contributes 316 of the 9,059
+  and dominates the high-statistics tail). Those channels are multi-peak with or
+  without beam -- overlaying them in/out gives two curves that sit on top of each
+  other, same satellite comb. The bottom rows therefore isolate a small
+  intrinsic, non-beam population; they do not describe the bulk.
+
+THE RESULT THAT NEEDS NO PEAK-FINDING. Pedestal RMS on the same 9,059 cells,
+paired cell by cell -- no TSpectrum, no threshold, no resampling:
+
+    in spill      median 2.89 ADC   IQR [2.32, 3.47]
+    out of spill  median 1.69 ADC   IQR [1.27, 2.33]
+    widening      +1.05 ADC (x1.71), and 88.7% of cells are wider in spill
+
+  A paired 88.7% is not a statistics artefact of any kind. The beam widens the
+  baseline of essentially every cell.
+
+TWO INDEPENDENT POPULATIONS, AND THEY ADD. The obvious objection to the "beam
+does it" reading is that the cells called intrinsic might simply be the ones
+where enough out-of-spill data happened to accumulate to SEE structure that is
+there everywhere. It is not that. Binning the common cells by how much
+out-of-spill data they hold and measuring BOTH sides at N=200 inside every bin
+-- detection power constant across bins by construction, so any trend is a
+property of the cells:
+
+    out-of-spill      cells    multipeak @ N=200      median RMS (ADC)
+    entries/cell               in spill   out          in     out
+    [  200,   400)    7,565     21.20%     0.57%      2.88   1.63
+    [  400,  1000)    1,052     19.20%     1.62%      3.03   2.19
+    [ 1000,  4000)      189     22.22%     8.99%      2.39   1.73
+    [ 4000,   inf)      253     21.34%    22.53%      2.08   1.91
+
+  The in-spill column is FLAT at ~21% across all four bins: the beam-induced
+  mechanism does not care how noisy a cell is intrinsically. The out-of-spill
+  column climbs 0.57% -> 22.53%, at fixed detection power, so it is real.
+
+  => Two mechanisms, independent and additive. The bulk (95% of cells) is
+  multi-peak ONLY with beam. A small tail is multi-peak either way, and the
+  beam adds its own ~21% on top. The N=500/N=1000 rows above are that tail seen
+  in isolation, which is why their ratio collapses; it is not the effect going
+  away.
+
+  WHAT THAT TAIL ACTUALLY IS -- two whole chips, and NOT "noisy cells".
+  Redone on the pure SCA0 set, the >=4000-entry group is 127 cells sitting on
+  2 of the 139 chips in the sample: s13_c9 (all 64 channels) and s6_c11 (63).
+  Whole chips, not scattered channels. That is expected once you notice the
+  binning variable is a CHIP property: an SCA slice is recorded for all 64
+  channels at once, so a cell's out-of-spill entry count measures how often its
+  chip self-triggered with no beam, not how noisy that channel is. Measured:
+  the within-chip spread of out-of-spill entry counts is 4.1% (median over the
+  139 chips with >=10 cells).
+
+  And "noisy" in the pedestal-WIDTH sense is the wrong picture -- it is a poor
+  predictor, and it points the wrong way. At fixed detection power (N=200):
+
+     by chip trigger rate            by the cell's own out-of-spill RMS
+     (out-of-spill entries)
+     [  200,  400)  7,502  0.47%     RMS [0.00, 1.26)  2,186  0.00%
+     [  400, 1000)  1,052  2.00%     RMS [1.26, 1.67)  2,186  0.00%
+     [ 1000, 4000)     63  1.59%     RMS [1.67, 2.29)  2,186  0.00%
+     [ 4000,  inf)    127 17.32%     RMS [2.29,40.21)  2,186  3.61%
+
+  The intrinsic group has the NARROWEST pedestals in the whole sample (median
+  RMS 0.76 ADC, against 1.62 for the bulk). They are not wide, dirty baselines:
+  they are very sharp peaks, several of them, at discrete levels. Whatever
+  moves those two chips' baseline between levels does it cleanly and without
+  beam.
+
+NOT AN SCA-TO-SCA PEDESTAL DIFFERENCE -- now closed independently. The July
+summary already argued this from the per-SCA plots (each individual SCA is
+itself multi-peak, with the same 3 sub-peaks; only the WEIGHT among them
+shifts). The spill split closes it a second way and more directly: 96.5% of the
+cells compared here are SCA0, so it is one and the same SCA that is single-peak
+without beam and a satellite comb with it. A pedestal offset between different
+SCAs cannot produce that.
+
+  Redone on a PURE SCA0 set (SCA=0, 100.0% SCA0, *_sca0.png) -- and the effect
+  gets STRONGER, which also says the mixed numbers above are conservative:
+
+      N      common cells    in spill   out of spill   ratio
+     200         8,744        20.84%        0.78%      26.8x
+     500           561        16.04%        5.88%       2.7x
+    1000           189        19.58%       12.70%       1.5x
+
+    RMS on the same 8,744 SCA0 cells: in 2.89, out 1.67 ADC, +1.09 (x1.73),
+    88.8% of cells wider in spill.
+
+  The mixed set reads 14.5x instead of 26.8x because the SCA1-4 sliver that
+  survives out of spill carries multi-peak cells of its own -- consistent with
+  the multi-peak fraction rising with SCA number (section 4).
+
+CONSISTENT WITH THE GAIN ARGUMENT, NOT REDUNDANT WITH IT. The summary's HG/LG
+result (offset ~equal in ADC in both gains => the step enters downstream of the
+gain split) says the second population is NOT injected charge. This section says
+it is nonetheless present only when beam is in the detector. Together: a
+beam-CORRELATED disturbance entering downstream of the preamp -- common
+mode / SCA memory / ADC chain reacting to detector activity, not signal leaking
+into the pedestal sample. Neither result alone gets there.
+
+SCOPE -- READ THIS BEFORE QUOTING THE 14.5x. Out of spill a chip is barely
+triggered, so essentially only SCA0 fills: the N=200 common set is 96.5% SCA0.
+These numbers are a statement about SCA0. Since the multi-peak fraction rises
+with SCA number (section 4), they are a LOWER bound on the whole-detector
+effect, not an average over it. Extending past SCA0 out of spill is not a
+statistics problem that more chunks fix -- the higher SCAs are not written at
+all when the chip is not triggered.
+
+  Provenance: run_000060 only (59 chunks), th220, low gain. The other eight
+  th220 runs are not in this and neither are th210/th230. The chunk-level
+  numbers scale (1,377 chunks would give ~23x the out-of-spill statistics) but
+  the SCA0 ceiling does not move.
+
+
+8. THE WHOLE STUDY REDONE IN HIGH GAIN (2026-08-07)
+--------------------------------------------------------------------------------
+Everything above is low gain. plot_pedestal_multipeak.py now takes GAIN=low|high
+(GAIN=high writes *_high.png, so the low-gain plots quoted above are never
+overwritten), and plot_pedestal_multipeak_spill.py takes GAIN and SCA. Same
+merged grids as section 1 -- no refill was needed, because Mode=Fill always
+builds all four grids (ped_high/ped_low/mip_high/mip_low) whatever CALIB_GAIN
+says, so ped_high_* was already sitting in every file.
+
+PER THRESHOLD, N>=200:
+
+             scanned    1pk      2pk     3+pk   MULTI-PEAK      offset
+  th210     152,674   132,936  19,436   302   19,738 = 12.9%   8.0 ADC IQR[7,9]
+  th220     170,589   144,558  25,317   714   26,031 = 15.3%   8.0 ADC IQR[7,9]
+  th230      75,967    68,372   7,492   103    7,595 = 10.0%   8.0 ADC IQR[7,9]
+
+  Confirms the one-line HG estimate the July summary carried ("th210 ~13%,
+  th220 ~15%, th230 ~10%") to the decimal. HG is below LG at every threshold
+  (12.9 vs 15.8, 15.3 vs 20.6, 10.0 vs 13.2) and the threshold ORDERING is the
+  same, so nothing about section 3's cross-threshold picture is gain-specific.
+
+STATISTICS-EQUALISED THREE-WAY, HIGH GAIN (section 3's comparison, redone;
+ran on Condor -- ~2h08 CPU, 3.4 GB, cluster 20474543):
+
+  N      common cells   th210    th220    th230
+  200        73,466     13.96%   15.42%   10.29%
+  500        56,472     14.37%   15.05%    9.56%
+  1000       41,204     14.85%   14.81%    8.88%
+  2000       26,834     15.47%   14.81%    7.64%
+
+  The common-cell counts are IDENTICAL to low gain (73,466 / 56,472 / 41,204 /
+  26,834) -- both gains are filled by the same trigger, so the cell set cannot
+  differ. A free consistency check on the whole chain.
+
+  Same qualitative reading as low gain, in all three curves:
+    - th220 FLAT in N (15.4 -> 14.8%, cf. LG's 21.1 -> 21.8%)
+    - th230 FALLS steeply (10.3 -> 7.6%, cf. LG's 13.1 -> 9.3%)
+    - th210 RISES (14.0 -> 15.5%, cf. LG's 17.0 -> 19.2%)
+  The one difference: in HG th210 rises far enough to CROSS th220 near N=1000,
+  where in LG it approaches without crossing. So the th220-over-th210 ordering
+  of section 3 is gain-dependent and should not be quoted as a bare fact; the
+  th230 deficit, which is the load-bearing claim, is not -- it survives in both
+  gains and WIDENS as the statistics are equalised, exactly as in low gain.
+
+  Per-SCA at N=2000 (high gain):  SCA0  th210 16.3  th220 15.2  th230  4.4
+                                  SCA1        13.7        14.4        10.3
+                                  SCA2        16.2        14.6        15.0
+  th230's SCA0 collapse to 4.4% is far sharper than th210/th220's -- the same
+  SCA0 anomaly section 4 found in low gain.
+
+SPILL SPLIT IN HIGH GAIN (same run_000060 grids as section 7):
+
+                        N=200 cells   in spill   out of spill   ratio
+  mixed SCA                 9,059      14.59%       1.09%       13.4x
+  SCA0 only                 8,744      14.42%       0.87%       16.6x
+
+  RMS on those cells:  mixed  in 3.56  out 2.46   +0.98 ADC (x1.45)  78.7% wider
+                       SCA0   in 3.58  out 2.46   +1.02 ADC (x1.46)  78.4% wider
+
+  The beam-induced effect is there in both gains, with the same structure
+  (SCA0-only strengthens the ratio in HG too, 13.4 -> 16.6x, as it does in LG).
+
+  THE NUMBER WORTH THE SLIDE: the WIDENING IS THE SAME IN ADC IN BOTH GAINS --
+  +1.02 (HG) against +1.09 (LG) on SCA0. It is the RMS argument's version of the
+  offset argument in the July summary, and it is independent of TSpectrum:
+  an input-referred charge injection would widen HG ~10x more than LG, because
+  HG gain is ~10x LG. It does not. The disturbance therefore enters DOWNSTREAM
+  of the gain split, and it is beam-correlated. Two separate observables, same
+  conclusion.
+
+  Why the RATIO is smaller in HG (16.6x vs LG's 26.8x) even though the absolute
+  widening matches: HG pedestals are intrinsically wider (out-of-spill median
+  2.46 ADC against LG's 1.67), so the same ~1 ADC of beam-induced motion is a
+  smaller relative perturbation and pushes fewer cells over TSpectrum's
+  threshold. Nothing physical differs between the gains here.
+
+
+9. THE BEAM ITSELF: IS SpillSelect REALLY CUTTING ON SPILLS? (2026-08-07)
+--------------------------------------------------------------------------------
+diagnostics/plot_beam_spill_structure.py, run over all 59 chunks of
+run_000060. Acquisitions are spliced by acqNumber first (a chunk-boundary
+acquisition is written twice as two complementary halves -- summing is the
+splice; never dedup by position).
+
+  acquisitions          28,860
+  in spill (occ>200)     2,635  = 9.1% duty cycle
+  spill blocks              29  median 101 consecutive acquisitions
+  gaps                      30  median 1,062
+  acquisition period      23 ms (acqWindowMs + delayBetweenCycleMs)
+  => spill >~2.3 s, gap >~24.4 s, period >~26.7 s
+
+  The seconds are LOWER BOUNDS: the config period leaves out readout dead time.
+  The 9.1% duty cycle is a ratio of acquisition counts and is exact.
+
+  The cut is sound: the occupancy distribution is cleanly bimodal with a wide
+  empty valley, and the high-occupancy acquisitions come in 29 contiguous
+  blocks, not scattered. The averaged spill profile is FLAT across the spill
+  (no rise/fall), as slow extraction should be.
+
+WHY THE OUT-OF-SPILL SAMPLE IS ALL SCA0 -- measured, not inferred.
+  Filled SCA slots per triggered chip: median 3 in spill, median 1 out of it.
+  With no beam a chip is triggered so rarely that it never gets past its first
+  memory cell. This is the mechanism behind section 7's scope limitation, and
+  it is why more chunks cannot fix it.
+
+TRAP -- `bcid` WRAPS, USE `corrected_bcid`.
+  The raw BCID is a 12-bit counter that rolls over every 4096 ticks, and an
+  acquisition runs ~9 rollovers (corrected_bcid observed up to 38,569). Any
+  time-structure plot built on raw bcid returns a mean of exactly 2048 = 4096/2
+  for EVERY SCA slot -- a flat line that reads as "no time structure" and is
+  pure artefact. With corrected_bcid (invalid sentinel -999) the mean rises
+  linearly with slot number, ~1,600 BCID per slot in spill, which is a direct
+  per-chip trigger-rate measurement. Out of spill it rises to slot ~3 and then
+  flattens: the rare quiet acquisitions that fill deep slots are noise bursts,
+  not slow accumulation.
+
+WHERE THIS RAN.  The three per-threshold scans, the spill splits and the beam
+structure ran on lxplus; the three-way statistics-matched comparison in HIGH
+gain went to Condor (~4.5 GB RSS, >35 min CPU). Do NOT fan these out in
+parallel on a login node -- doing so earned a CPU-pressure warning from the
+LxPlus service on 2026-08-07.
 
 
 FILES
@@ -152,9 +485,31 @@ FILES
   diagnostics/th210/pedestal_multipeak_th210.png
   diagnostics/th220/pedestal_multipeak_th220.png
   diagnostics/th230/pedestal_multipeak_th230.png
+  diagnostics/th{210,220,230}/pedestal_multipeak_th{TH}_min100.png  (section 6)
   diagnostics/compare/multipeak_stat_matched_low.png   (three-way, section 3)
   diagnostics/compare_multipeak_stat_matched.py        (the comparison script)
-  diagnostics/plot_pedestal_multipeak.py               (unchanged, per-threshold)
+  diagnostics/plot_pedestal_multipeak.py               (per-threshold; MIN_ENTRIES
+                                                        configurable since 07-31)
+  diagnostics/compare/pedestal_multipeak_spill_low.png        (section 7)
+  diagnostics/compare/pedestal_multipeak_spill_cells_low.png  (six cells, one per
+                                                        slab, in/out overlaid)
+  diagnostics/compare/pedestal_multipeak_spill_low_sca0.png        (SCA=0)
+  diagnostics/compare/pedestal_multipeak_spill_cells_low_sca0.png  (SCA=0)
+  diagnostics/plot_pedestal_multipeak_spill.py          (the in/out study)
+
+  High gain (section 8):
+  diagnostics/th{210,220,230}/pedestal_multipeak_th{TH}_high.png
+  diagnostics/compare/pedestal_multipeak_spill_high.png
+  diagnostics/compare/pedestal_multipeak_spill_cells_high.png
+  diagnostics/compare/pedestal_multipeak_spill_high_sca0.png
+  diagnostics/compare/pedestal_multipeak_spill_cells_high_sca0.png
+  diagnostics/compare/multipeak_stat_matched_high.png   (Condor, cluster 20474543)
+
+  Beam structure (section 9):
+  diagnostics/compare/beam_spill_time.png
+  diagnostics/compare/beam_spill_bcid.png
+  diagnostics/plot_beam_spill_structure.py
+  gaudi_jobs/calibration/condor/generated/multipeak_hg/  (the Condor wrapper)
 
   Refilled grids (EOS, not in the repo):
   Data/calib_multipeak_v3/hist/th{210,220,230}/merged_th{210,220,230}.root
