@@ -216,17 +216,23 @@ c.Divide(2, 2, 0.008, 0.012)
 c.cd(1)
 ROOT.gPad.SetMargin(0.12, 0.05, 0.12, 0.10)
 ROOT.gPad.SetLogy()
-nshow = min(len(acqs), 1500)
+# The WHOLE run, not a window. This used to draw only the first 1500
+# acquisitions, which showed one and a half spill trains out of 29 and read as
+# if that were all the beam there was -- with nothing in the title to say
+# otherwise. Every acquisition is plotted now; markers only, since a connecting
+# line across ~29k points is unreadable.
+nshow = len(acqs)
 g = ROOT.TGraph(nshow)
 for i in range(nshow):
     g.SetPoint(i, i, max(occ[i], 0.5))
-g.SetTitle("occupancy per acquisition (the spill trains);"
+nblocks = int((np.diff(inspill.astype(int)) == 1).sum() + (1 if inspill[0] else 0))
+g.SetTitle(f"occupancy per acquisition -- whole run, {nshow:,} acquisitions, "
+           f"{nblocks} spill trains;"
            "acquisition index;accepted hits in the acquisition")
-g.SetLineColor(ROOT.kGray + 2)
 g.SetMarkerColor(ROOT.kBlack)
 g.SetMarkerStyle(20)
-g.SetMarkerSize(0.35)
-g.Draw("APL")
+g.SetMarkerSize(0.25)
+g.Draw("AP")
 cut = ROOT.TLine(0, OCC_CUT, nshow, OCC_CUT)
 cut.SetLineColor(ROOT.kRed + 1)
 cut.SetLineStyle(2)
