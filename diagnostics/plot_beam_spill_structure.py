@@ -225,9 +225,9 @@ nshow = len(acqs)
 g = ROOT.TGraph(nshow)
 for i in range(nshow):
     g.SetPoint(i, i, max(occ[i], 0.5))
-nblocks = int((np.diff(inspill.astype(int)) == 1).sum() + (1 if inspill[0] else 0))
+ntrain = int((on >= 10).sum()) if len(on) else 0
 g.SetTitle(f"occupancy per acquisition -- whole run, {nshow:,} acquisitions, "
-           f"{nblocks} spill trains;"
+           f"{ntrain} spill trains;"
            "acquisition index;accepted hits in the acquisition")
 g.SetMarkerColor(ROOT.kBlack)
 g.SetMarkerStyle(20)
@@ -314,6 +314,59 @@ keep.append(hp)
 p1 = os.path.join(OUT, "beam_spill_time.png")
 c.SaveAs(p1)
 print(f"saved {p1}")
+
+# ================================================= figure 1b: zoom on 3 spills ===
+# The whole-run panel above answers "are the trains regular?" but at ~29k points
+# each train is a few pixels wide and its SHAPE is invisible. One pad, three
+# consecutive trains, so the rise/plateau/fall (or absence of one) can be read.
+# MIN_TRAIN separates a real spill from an isolated acquisition that happens to
+# clear the cut. On run_000060, 3 of the 29 above-cut blocks are single
+# acquisitions -- pile-up or a cosmic shower, not beam -- and picking one as a
+# "spill" to zoom on would frame the window around nothing.
+MIN_TRAIN = 10
+starts, idx = [], 0
+for v, n in blocks:
+    if v and n >= MIN_TRAIN:
+        starts.append((idx, n))
+    idx += n
+print(f"real spill trains (>={MIN_TRAIN} acquisitions): {len(starts)} of "
+      f"{int(len(on))} above-cut blocks")
+if starts:
+    take = starts[:3]
+    gap = int(np.median(off)) if len(off) else 200
+    lo = max(take[0][0] - gap // 2, 0)
+    hi = min(take[-1][0] + take[-1][1] + gap // 2, len(occ))
+    cz = ROOT.TCanvas("cz", "spill zoom", 1800, 900)
+    ROOT.gPad.SetMargin(0.10, 0.04, 0.12, 0.10)
+    ROOT.gPad.SetLogy()
+    sec = (period_ms or 0) / 1000.0
+    xtitle = ("time since the first of these spills  [s]" if sec
+              else "acquisition index")
+    gz = ROOT.TGraph(hi - lo)
+    for i in range(lo, hi):
+        x = (i - lo) * sec if sec else i
+        gz.SetPoint(i - lo, x, max(occ[i], 0.5))
+    gz.SetTitle(f"{len(take)} consecutive spills, "
+                f"{hi - lo:,} acquisitions;{xtitle};accepted hits in the acquisition")
+    gz.SetLineColor(ROOT.kGray + 2)
+    gz.SetMarkerColor(ROOT.kBlack)
+    gz.SetMarkerStyle(20)
+    gz.SetMarkerSize(0.6)
+    gz.Draw("APL")
+    xmax = (hi - lo - 1) * sec if sec else hi - 1
+    cutz = ROOT.TLine(0 if sec else lo, OCC_CUT, xmax, OCC_CUT)
+    cutz.SetLineColor(ROOT.kRed + 1)
+    cutz.SetLineStyle(2)
+    cutz.SetLineWidth(3)
+    cutz.Draw()
+    latz = ROOT.TLatex()
+    latz.SetNDC()
+    latz.SetTextSize(0.035)
+    latz.SetTextColor(ROOT.kRed + 1)
+    latz.DrawLatex(0.68, 0.855, f"SpillOccupancyCut = {OCC_CUT:.0f}")
+    pz = os.path.join(OUT, "beam_spill_zoom.png")
+    cz.SaveAs(pz)
+    print(f"saved {pz}  (spills of {[n for _, n in take]} acquisitions)")
 
 # ========================================================== figure 2: bcid ===
 c2 = ROOT.TCanvas("c2", "inside the acquisition", 2000, 1600)
