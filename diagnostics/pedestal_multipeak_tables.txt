@@ -511,6 +511,192 @@ FILES
   diagnostics/plot_beam_spill_structure.py
   gaudi_jobs/calibration/condor/generated/multipeak_hg/  (the Condor wrapper)
 
+  Across runs, mechanism, bursts (section 10):
+  diagnostics/compare/spill_split_runs_low.png
+  diagnostics/compare/common_mode.png
+  diagnostics/compare/isolated_bursts_population.png
+  diagnostics/plot_spill_split_runs.py
+  diagnostics/plot_common_mode.py
+  diagnostics/plot_isolated_bursts_population.py
+  gaudi_jobs/calibration/condor/generated/spill_split/  (fills + the three analyses)
+
   Refilled grids (EOS, not in the repo):
   Data/calib_multipeak_v3/hist/th{210,220,230}/merged_th{210,220,230}.root
   The July th230 grid is still at Data/calib_fill_scratch/hist/th230/.
+  Data/calib_spill_split/<run>_ns1_{in,out}.root  -- the 18 NSlabsHit=1 in/out
+  grids for the nine th220 runs, plus occ_cache/ with each run's per-acquisition
+  occupancies. NOT a scratch directory this time: the 2026-08-06 grids behind
+  section 7 were written to a session scratchpad and were deleted with it, so
+  section 7 was not reproducible until they were refilled on 2026-08-09.
+
+
+10. ACROSS RUNS, AND WHAT THE BEAM ACTUALLY DOES (2026-08-09)
+--------------------------------------------------------------------------------
+Sections 7-9 are all run_000060. This extends the split to all nine th220 runs
+(18 fills, NSlabsHit=1, low gain), measures the mechanism, and tests what could
+be done about it. THREE CLAIMS FROM SECTION 7 DO NOT SURVIVE; they are marked
+RETRACTED below.
+
+10a. THE SPLIT ACROSS RUNS (plot_spill_split_runs.py, SCA0, matched N=200)
+
+    run    common cells    in      out     ratio    RMS in/out   wider
+    88        15,104     23.52%   0.22%   107.6x    2.93/1.59    94.2%
+    86        13,882     23.53%   0.55%    43.0x    2.95/1.48    92.9%
+    60         8,744     20.32%   0.85%    24.0x    2.89/1.67    88.8%
+    62        13,418     20.00%   1.07%    18.8x    2.90/1.67    90.3%
+    142        5,229     20.46%   2.52%     8.1x    2.46/1.68    98.5%
+    254       15,104     18.64%   8.30%     2.2x    2.28/1.88    87.3%
+    61  *        189     17.46%  11.11%     1.6x    1.96/1.19    85.7%
+    87  *        127      6.30%   5.51%     1.1x    0.91/1.09    82.7%
+    143 *          0        --      --        --        --         --
+
+  * far too few common cells to mean anything. run_000087 even returns a
+    NARROWER in-spill RMS, which is what no statistics looks like, not a
+    reversal of the effect.
+
+  WHICH NUMBER TO QUOTE. The IN-SPILL fraction is the stable one: 18-24% across
+  the six runs with statistics. The RATIO is not (2.2x to 108x) because what
+  varies between runs is the DENOMINATOR, the out-of-spill fraction, over
+  0.22%-8.30%. Quoting "26.8x" as the result of the study is quoting one run's
+  denominator. Quote the in-spill fraction, and the RMS widening: median +1.00
+  ADC over the runs, 87-98% of cells wider in spill everywhere.
+
+  RETRACTED -- "the intrinsic tail is two whole chips, s13_c9 and s6_c11"
+  (section 7). Section 7 identified the tail by a PROXY: cells with >= 4,000
+  out-of-spill entries. Measured directly instead -- cells actually flagged
+  multi-peak OUT OF SPILL at matched N -- s13_c9 does not appear in any run.
+  It is a chip that self-triggers often, which is what the entry-count proxy
+  was really selecting, not a chip that is multi-peak without beam. s6_c11
+  survives in 3 runs of 8; every other chip appears in at most 2. The
+  proxy also fails outright on run_000142, where an absolute 4,000-entry
+  threshold returns all 5,229 common cells on 85 chips as "intrinsic" purely
+  because the run is long and beamless.
+  What is NOT retracted: the two-population structure itself (section 7's
+  binned table, 0.57% -> 22.53% at fixed detection power) still stands. Only
+  the attribution to two named chips goes.
+
+  run_000254 is its own case: 8.30% of its cells are multi-peak out of spill,
+  an order of magnitude above every other run, spread over 81 chips. Not
+  understood; it is the eudaq-converted run.
+
+10b. WHAT THE BEAM DOES: CHIP-LOCAL COMMON MODE (plot_common_mode.py)
+
+  Method: in-spill acquisitions, SCA slices with nhits<=1, every non-hit channel
+  contributes adc_low minus that cell's OUT-OF-SPILL mean, inside the pedestal
+  window 100.5-500.5 ADC. run_000060, 59 chunks, 18,107,866 measurements.
+
+    hits on the chip     cases        median dev   RMS    |dev|>4 ADC
+    [1,2)             2,933,253         +0.14      3.06      4.65%
+    [2,5)             6,253,055         -0.32      4.30     33.54%
+    [5,10)            5,485,985         -0.39      4.27     34.15%
+    [10,20)           2,693,064         -0.66      4.42     36.18%
+    [20,50)             196,470         -0.95      4.70     38.79%
+    [50,inf)              3,296         -2.44      7.37     53.22%
+
+    hits in the whole detector    cases      median    RMS    |dev|>4 ADC
+    [200,500)                    515,331     -0.02     3.81     24.67%
+    [500,800)                  8,912,028     -0.14     4.06     28.39%
+    [800,1100)                 7,519,987     -0.19     4.21     30.09%
+    [1100,1400)                1,013,191     -0.24     4.36     31.52%
+    [1400,inf)                   147,329     -0.29     4.33     32.49%
+
+  CHIP-LOCAL. The chip curve climbs 4.65% -> 53.22%; the detector curve creeps
+  24.7% -> 32.5% and saturates. If the disturbance were global it would be the
+  other way round. And the median moves DOWN throughout: a coherent sag, not a
+  symmetric widening.
+
+  THE ADC WINDOW IS LOAD-BEARING. Without it (the first version of the script)
+  the medians and tail fractions above are unchanged but every RMS is garbage --
+  215 ADC in the chipbusy==0 bin, ~38 in every detector bin. A handful of
+  invalid readings per cell, all in slices where the chip recorded nothing.
+
+10c. CAN ANYTHING BE CORRECTED? (same script, both tests out of sample)
+
+  RETRACTED -- "the ideal would be an occupancy-dependent pedestal" (the verbal
+  conclusion carried since 2026-08-06). One offset per chip-activity bin, fitted
+  on EVEN acquisitions and applied to ODD ones: RMS 4.133 -> 4.126, i.e. -0.2%,
+  tail -0.5%. It buys nothing, and it could not have: what grows with occupancy
+  is the WIDTH, and an offset only moves the mean.
+
+  A per-slice common mode is the right shape of correction but only works in
+  one regime. Estimator: the median deviation of the chip's OTHER quiet channels
+  in the same slice (channels split even/odd, each half correcting the other, so
+  never itself). Overall -4.0%, which hides everything:
+
+    hits on the chip    RMS as calibrated -> corrected    removed
+    [1,2)                     3.07 -> 1.66                46.0%
+    [2,5)                     4.30 -> 4.30                -0.0%
+    [5,10)                    4.27 -> 4.32                -1.1%
+    [10,20)                   4.42 -> 4.25                 3.8%
+    [20,50)                   4.70 -> 4.33                 7.8%
+    [50,inf)                  7.37 -> 5.84                20.8%
+
+  With the chip almost quiet the disturbance is ENTIRELY coherent: removing it
+  gives 1.66 ADC against an out-of-spill pedestal RMS of 1.70 on the same cells.
+  At 2-10 hits a chip-wide median removes nothing, so there the disturbance is
+  not common to all 64 channels -- presumably localised near the struck
+  channels. An estimator that excludes the neighbourhood of the hits is the
+  obvious thing to try next; it has not been tried.
+
+10d. THE ISOLATED OUT-OF-SPILL BURSTS ARE NOT A COUNTABLE POPULATION
+
+  RETRACTED -- any rate or probability for the "isolated above-cut
+  acquisitions" of section 9, including the estimate given verbally on
+  2026-08-07. The train count is a property of the beam and is stable in the
+  cut; the isolated count is not, and varies by more than an order of magnitude
+  over cuts that are all defensible:
+
+    run          trains at cut 25/50/100/200/400   isolated at the same cuts
+    60              26 / 26 / 26 / 26 / 27            169 / 72 / 29 / 3 / 1
+    86              28 / 28 / 28 / 28 / 28            213 / 45 /  8 / 1 / 0
+    88             309 /309 /309 /309 /309            607 /397 /268 /173 /93
+    62              24 / 19 / 17 / 16 / 15            661 /263 /162 /116 /95
+
+  run_000060's three isolated acquisitions become 29 at cut 100 and 169 at cut
+  25. They are the tail of a continuum, not a class with a rate. The three
+  acquisitions characterised in section 9 remain real objects and their
+  characterisation stands; what does not stand is counting them.
+
+  THE CUT ITSELF took three attempts and the failures are worth recording,
+  because all three are the same mistake in different clothes -- an absolute
+  number tuned on one run:
+    * fixed 200 hits (section 7's value): run_000142 and run_000143 came out
+      with ZERO trains and 706 and 54 "bursts".
+    * a valley finder on the log-occupancy histogram: returned 0-4 hits for
+      every run, 92,067 bursts. At low occupancy the small integer counts leave
+      exactly-empty log bins right next to the quiet mode and the argmin fell
+      into one. Smoothed and floored, it returned cuts scattered 25-327 with no
+      physical reason.
+    * WHAT WORKS: anchor to the run's own beam level, defined as the median
+      occupancy above its 99th percentile, and cut at 20% of it. On run_000060
+      that gives 227 hits against the 200 chosen by eye in section 7, and
+      reproduces its 26 trains and 3 isolated acquisitions exactly.
+
+  IS THERE A SPILL AT ALL? A spill is contiguous, so in a run with beam almost
+  every above-cut acquisition sits inside a train. Measured at each run's own
+  cut: 98-100% for six runs, 75.6% for run_000062, against 5.6% for run_000142
+  and 2.8% for run_000143. Those two have no beam -- their "beam level" is 122
+  and 109 hits against 1,066-1,854 elsewhere -- and are excluded. This test is
+  used in place of a floor in hits precisely because a floor in hits is what
+  failed twice above.
+
+  With that, the seven runs with beam hold 384,050 acquisitions, 533 spill
+  trains and 340 isolated above-cut acquisitions. The train count is the number
+  worth having; the 340 is not, for the reason above.
+
+  AND THE CLASSIFICATION DOES NOT GENERALISE EITHER. The rule of
+  plot_isolated_bursts_population.py -- retrigger / flash / beam-like / other,
+  written down from the three run_000060 cases characterised by hand in section
+  9 -- sorts the 340 as:
+
+      beam-like   211  (62.1%)
+      flash         0  ( 0.0%)
+      retrigger     2  ( 0.6%)
+      other       127  (37.4%)
+
+  Over a third of the sample falls outside every category, and the two classes
+  that the section-9 case studies were supposed to establish (a whole-slab flash
+  and a chip retrigger) account for 2 cases out of 340. Three hand-picked
+  acquisitions from one run were a sample of three, not a taxonomy. The "other"
+  bin was left in the figure so that this would be visible rather than hidden,
+  and it is.
