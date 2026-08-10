@@ -69,6 +69,10 @@ k4SiWEcalReco/build/
 diagnostics/*
 !diagnostics/*.py
 
+# Notes and plans elsewhere in the tree, same rule. A README.md documents how to
+# run the pipeline it sits in and IS tracked; these are working notes.
+siwecal_validation/PLAN_particle_id_metrics.md
+
 # Private credential (grid/condor token) -- must never be tracked
 marquezh.cc
 
