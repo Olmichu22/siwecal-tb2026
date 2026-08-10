@@ -61,13 +61,13 @@ settings.yml
 build/
 k4SiWEcalReco/build/
 
-# Diagnostic PLOTS are local scratch and are not versioned. The scripts that make
-# them are: they are the measurements the calibration constants come from (the
-# switch point, k, c, the th220 MIP decision), and a constant whose derivation has
-# been deleted is a magic number. Same for the procedure note.
+# Diagnostic PLOTS and NOTES are local scratch and are not versioned. The SCRIPTS
+# that make them are: they are the measurements the calibration constants come
+# from (the switch point, k, c, the th220 MIP decision), and a constant whose
+# derivation has been deleted is a magic number. Each script carries its method,
+# its traps and its caveats in its own docstring, which is where they get read.
 diagnostics/*
 !diagnostics/*.py
-!diagnostics/*.txt
 
 # Private credential (grid/condor token) -- must never be tracked
 marquezh.cc
