@@ -67,6 +67,9 @@ _HERE = os.path.dirname(os.path.abspath(__file__))
 OUTDIR = sys.argv[1] if len(sys.argv) > 1 else os.path.join(_HERE, "compare")
 os.makedirs(OUTDIR, exist_ok=True)
 
+# Appended to the output PNG name, so a run set restricted to a subset of the
+# th220 runs does not overwrite the all-runs figure the tables refer to.
+TAG = os.environ.get("TAG", "")
 MIN_TRAIN = int(os.environ.get("MIN_TRAIN", "10"))
 FORCE_CUT = float(os.environ["FORCE_CUT"]) if os.environ.get("FORCE_CUT") else None
 CACHE = os.environ.get("CACHE", "")
@@ -299,8 +302,10 @@ tot_train = sum(r["ntrain"] for r in per_run)
 counts = Counter(r["cls"] for r in records)
 print(f"\n{tot_acq:,} acquisitions over {len(per_run)} runs, {tot_train} spill trains, "
       f"{tot_iso} isolated above-cut acquisitions at each run's own cut.")
-print("DO NOT quote a rate from that total: see the cut scan below -- the train "
-      "count is stable in the cut and the isolated count is not.")
+print("DO NOT quote a rate from that total: see the cut scan below -- the isolated "
+      "count moves by more than an order of magnitude over defensible cuts. The "
+      "train count is stable in most runs but not all; the figure names the "
+      "exceptions, measured over the valley cuts.")
 print("\ncut scan (trains / isolated):")
 hdr = "".join(f"{c:>12}" for c in CUT_SCAN)
 print(f"   {'run':<10}{hdr}")
@@ -400,9 +405,26 @@ for i, (short, rows) in enumerate(sorted(scan.items())):
 lat2 = ROOT.TLatex()
 lat2.SetNDC()
 lat2.SetTextSize(0.031)
-lat2.DrawLatex(0.16, 0.83, "solid: spill trains -- flat, so it is a property of the beam")
+# "Flat" was asserted here from the four runs that are. Assert it from the data
+# instead and name the runs that are not: run_000254's train count runs 81 ->
+# 443 -> 0 over the same scan, so the claim is a property of most runs, not all.
+# Judged over the VALLEY cuts only. 800 sits inside the beam bump itself (§9),
+# so every run loses trains there -- including it would flag runs for a cut we
+# already know is wrong rather than for any instability of their own.
+VALLEY_MAX = 400
+unstable = []
+for run, pts in scan.items():
+    tr = [t for cut, t, _ in pts if t > 0 and cut <= VALLEY_MAX]
+    if not tr or max(tr) > 3 * min(tr):
+        m = re.search(r"run_0*(\d+)$", run)
+        unstable.append(m.group(1) if m else run)
+lat2.DrawLatex(0.16, 0.83, "solid: spill trains -- flat in {} of {} runs, so it is a property"
+                           " of the beam".format(len(scan) - len(unstable), len(scan)))
 lat2.DrawLatex(0.16, 0.78, "dashed: isolated acquisitions -- falls by 20x or more")
 lat2.DrawLatex(0.16, 0.73, "no rate can be quoted for the isolated ones")
+if unstable:
+    lat2.DrawLatex(0.16, 0.68, "exception: run(s) {} -- see the printed scan"
+                               .format(", ".join(sorted(unstable))))
 keep += scan_g + [fr2, lat2]
 
 # --- 3. the two discriminating axes, one point per burst
@@ -454,6 +476,6 @@ lat.DrawLatex(0.17, 0.81, f"at each run's own cut; against {tot_train} spill tra
 lat.DrawLatex(0.17, 0.76, "the SPLIT is meaningful, the TOTAL is not -- see panel 2")
 keep += [hc, lat]
 
-out = os.path.join(OUTDIR, "isolated_bursts_population.png")
+out = os.path.join(OUTDIR, f"isolated_bursts_population{TAG}.png")
 c.SaveAs(out)
 print(f"\nsaved {out}")
