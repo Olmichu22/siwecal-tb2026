@@ -112,13 +112,35 @@ def cells(f):
     return out
 
 
-pairs = []
+RUNNO_RE = re.compile(r"run_0*(\d+)$")
+
+
+def runno(name):
+    m = RUNNO_RE.search(name)
+    return int(m.group(1)) if m else 0
+
+
+# Runs to leave out, as bare run numbers: EXCLUDE=61,87. A run with only a
+# couple of hundred common cells contributes a point whose error bar is the
+# whole y range, and on a shared axis it sets the scale for everything else.
+# Excluding is a presentation choice, not a correction -- the * marking stays
+# for whatever is kept.
+EXCLUDE = {int(x) for x in os.environ.get("EXCLUDE", "").replace(",", " ").split()}
+
+pairs, dropped = [], []
 for p in sorted(glob.glob(os.path.join(GRIDS, f"*_ns1_in.root"))):
     q = p.replace("_ns1_in.root", "_ns1_out.root")
-    if os.path.exists(q):
-        pairs.append((os.path.basename(p).replace("_ns1_in.root", ""), p, q))
+    if not os.path.exists(q):
+        continue
+    run = os.path.basename(p).replace("_ns1_in.root", "")
+    if runno(run) in EXCLUDE:
+        dropped.append(run)
+        continue
+    pairs.append((run, p, q))
 if not pairs:
     raise SystemExit(f"no in/out grid pairs under {GRIDS}")
+if dropped:
+    print(f"excluded by EXCLUDE: {', '.join(dropped)}")
 print(f"{len(pairs)} runs with a grid pair, SCA {sorted(SCAS)}, N={N}, gain={GAIN}\n")
 
 results = []
@@ -194,14 +216,6 @@ print(f"RMS widening across runs: median {np.median(wid):+.2f} ADC, "
       f"range {min(wid):+.2f} to {max(wid):+.2f} ADC")
 
 # ------------------------------------------------------------------ figure
-RUNNO_RE = re.compile(r"run_0*(\d+)$")
-
-
-def runno(name):
-    m = RUNNO_RE.search(name)
-    return int(m.group(1)) if m else 0
-
-
 # Sort by run number, and strip the label down to the number itself. Chopping a
 # fixed "run_0000" prefix does not work: run 254 is written run_000254, with one
 # zero fewer, so it came out on the axis as the full "run_000254" and ran into
@@ -214,6 +228,10 @@ labels = [str(runno(r["run"])) for r in results]
 # between a reader seeing eight comparable runs and seeing six.
 LOWSTAT = 1000
 labels = [f"{l}*" if r["ncommon"] < LOWSTAT else l for l, r in zip(labels, results)]
+# Explain the * only when one is actually drawn: with the short runs excluded
+# the note would otherwise send the reader hunting for a mark that is not there.
+XTITLE = ("th220 run  (* = fewer than {:,} common cells)".format(LOWSTAT)
+          if any(l.endswith("*") for l in labels) else "th220 run")
 C_IN, C_OUT = ROOT.kOrange + 7, ROOT.kAzure + 2
 
 c = ROOT.TCanvas("c", "spill split across runs", 1800, 1300)
@@ -232,8 +250,7 @@ c.cd(1)
 ROOT.gPad.SetMargin(0.12, 0.04, 0.12, 0.10)
 ROOT.gPad.SetGridy()
 hi = ROOT.TH1F("hi", f"Multi-peak cells at matched N={N}, SCA0;"
-                     f"th220 run  (* = fewer than {LOWSTAT:,} common cells);"
-                     f"cells (%)", nr, 0, nr)
+                     f"{XTITLE};cells (%)", nr, 0, nr)
 ho = ROOT.TH1F("ho", "", nr, 0, nr)
 for i, r in enumerate(results):
     hi.SetBinContent(i + 1, r["rin"])
@@ -312,6 +329,7 @@ hc.SetMinimum(-1e-9)          # so genuine zeros are painted, not left white
 hc.Draw("colz")
 keep += [hc]
 
-out = os.path.join(OUTDIR, f"spill_split_runs_{GAIN}.png")
+suffix = ("_ex" + "-".join(str(x) for x in sorted(EXCLUDE))) if EXCLUDE else ""
+out = os.path.join(OUTDIR, f"spill_split_runs_{GAIN}{suffix}.png")
 c.SaveAs(out)
 print(f"\nsaved {out}")
