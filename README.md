@@ -30,14 +30,24 @@ builder: it is **not** what the pipeline runs — see "Two event builders" below
  │  gaudi_source (C++)     │  ───────────────►  Reconstruction/<run>/
  │  EcalToEDM4hep + PID    │                      ecal_<run>.edm4hep.root
  └─────────────────────────┘
-        │                                   │
-        ▼                                   ▼
- ┌─────────────────────────┐        ┌─────────────────────────┐
- │   siwecal_validation    │        │      event_viewer       │
- │   validation plots only │        │   interactive Dash app  │
- │   (reads the metrics)   │        │   (3-D / 2-D / dists)    │
- └─────────────────────────┘        └─────────────────────────┘
+        │                                                                        │
+        ▼                                                                        ▼  STAGE 4 · tracking (optional, ACTS)
+ ┌─────────────────────────┐        ┌─────────────────────────┐         ┌─────────────────────────┐
+ │   siwecal_validation    │        │      event_viewer       │         │  gaudi_source (C++)     │
+ │   validation plots only │        │   interactive Dash app  │         │  ACTSGeoSvc             │
+ │   (reads the metrics)   │        │   (3-D / 2-D / dists)   │         │  ShowerTagger           │
+ └─────────────────────────┘        └─────────────────────────┘         │  SiPadMeasConverter     │
+                                                                         │  ACTSProtoTracker       │
+                                                                         └─────────────────────────┘
+                                                                                      │
+                                                                                      ▼
+                                                                       tracks_<run>.edm4hep.root  (ACTSTracks + EMShowers)
 ```
+
+`event_viewer` is untouched by tracking (it reads `ecal_<run>.edm4hep.root`
+directly); the tracking stage is a separate, optional consumer of the same
+file — see `gaudi_source/README.md`'s "Tracking (ACTS)" section and
+`docs/acts_integration.md`.
 
 The per-event metrics **and the cut/cleaned event collections** are produced by
 `gaudi_source` (in C++, fast). `siwecal_validation` and `event_viewer` only read
@@ -55,6 +65,7 @@ runs for one run (and what the Condor DAG runs per run on the farm):
 | **1** | **decode** | **one `k4run` per raw chunk**, in parallel, + a health check | `EcalRawDecoder` | `<run>_raw.bin_NNNN` (read-only) | `<converted-dir>/<run>/chunks/chunk_NNNN.root` (`siwecaldecoded` tree) |
 | **2** | **event building** | one `k4run` **chaining** all the chunks | `EcalEventBuilder` | the chunks from stage 1 | `Reconstruction/<run>/ecal_<run>.root` (`ecal` tree) |
 | **3** | **PID / EDM4hep** | a **second** `k4run` | `EcalToEDM4hep` (hit-MIP cut) + `EcalPidTransformer` (shower vars) | `ecal_<run>.root` | `ecal_<run>.edm4hep.root` |
+| **4** | **tracking** *(optional)* | a **third** `k4run`, run separately, per run | `ACTSGeoSvc` + `ShowerTagger` + `SiPadMeasConverter` + `ACTSProtoTracker` (see `docs/acts_integration.md`) | `ecal_<run>.edm4hep.root` (its `ECalHits`) | `tracks_<run>.edm4hep.root` (`ACTSTracks` + `EMShowers`) |
 
 Two design points that are easy to miss:
 

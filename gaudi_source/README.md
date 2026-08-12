@@ -250,6 +250,56 @@ physics mode the hits are already cleaned by the `0.5` MIP hit cut, so the block
 are omitted and the layout is just the 21 base scalars + the three per-layer
 profiles. Readers (`PidFileReader`) auto-detect which layout a file uses.
 
+### Tracking (ACTS)
+
+**Files:** `src/components/{ACTSGeoSvc,ShowerTagger,SiPadMeasConverter,ACTSProtoTracker}.cpp`
+**Config:** `options/run_tracking.py` (low-level), `gaudi_jobs/run_tracking_batch.py`
+(batch driver), `gaudi_jobs/run000013/run_tracking_000013.py` (concrete example)
+
+Reconstructs straight-line tracks (and identifies electromagnetic showers)
+through the 15 SiW-ECAL slabs, using them as ACTS tracking surfaces. Ported
+from `../siwecal_k4sim`'s tracking stage (see that repo's
+`docs/acts_integration.md` / `docs/gaudi_pipeline.md`) with the **same class
+names, property names and address convention**, specifically so that a run's
+reconstructed tracks are comparable to a simulated sample's without any
+translation. See `docs/acts_integration.md` at the repo root for full details;
+the summary:
+
+| Component | Kind | Role |
+|---|---|---|
+| `ACTSGeoSvc` | Gaudi service | Builds the `Acts::TrackingGeometry`: one plane surface per slab |
+| `ShowerTagger` | Gaudi algorithm | Identifies EM cascades and flags their hits so they never become ACTS measurements; writes the showers |
+| `SiPadMeasConverter` | Gaudi algorithm | Pad hits → `edm4hep::TrackerHit3D` measurements bound to those surfaces, minus the flagged ones |
+| `ACTSProtoTracker` | Gaudi algorithm | Hough seeding → CKF → KalmanFitter refit → `edm4hep::TrackCollection` |
+
+**The one real difference from `siwecal_k4sim`:** the simulation builds its 15
+plane surfaces by walking a DD4hep compact-XML detector description. This repo
+has no such description, so `ACTSGeoSvc` builds the same surfaces directly from
+`mappings/slab_z_positions.yml` (already ported to C++ as
+`k4siwecal::SlabGeometry` in `include/k4SiWEcalReco/PadMapGeometry.h`) plus a
+configured pad pitch (`PadPitchMm`, default `5.53` mm — the same physical
+hardware) and transverse envelope (`HalfSizeX`/`HalfSizeY`). Its public
+interface (`trackingGeometry()`, `allSurfaces()`, `surfaceByAddress(detID,
+station, layer, plane)`, `geometryContext()`) and address convention
+(`detID=1` "SiPad", `station=-1`, `layer=hit_slab 0..14`, `plane=-1`) are
+otherwise byte-for-byte identical, so `ACTSProtoTracker` is an unmodified port
+and `ShowerTagger`/`SiPadMeasConverter` only had their input hit collection
+type swapped (`edm4hep::CalorimeterHitCollection` — this repo's real
+reconstructed `ECalHits` — instead of `edm4hep::SimCalorimeterHitCollection`).
+
+Input: an EDM4hep file with an `ECalHits` collection, i.e. the output of
+`run_pid_batch.py` (`ecal_<label>.edm4hep.root`). Output: `ACTSTracks`
+(`edm4hep::TrackCollection`) and `EMShowers` (`edm4hep::ClusterCollection`).
+
+```bash
+python gaudi_jobs/run_pid_batch.py --run TB2026CERN_run_000013
+python gaudi_jobs/run_tracking_batch.py --run TB2026CERN_run_000013
+
+# or the low-level steering file directly:
+TRACKING_INPUT_FILE=/path/ecal_TB2026CERN_run_000013.edm4hep.root \
+    k4run gaudi_source/options/run_tracking.py
+```
+
 ## Build & run (under key4hep)
 
 ```bash
