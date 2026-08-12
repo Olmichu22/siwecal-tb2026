@@ -24,7 +24,8 @@ from . import vars_cache
 def _append_scalar_metrics(ecols, slab, energy, x, y,
                            w_over_x0, n_layers, profile_kind,
                            shower_thr, peak_min, start_frac, containment,
-                           hit_threshold):
+                           hit_threshold, *,
+                           core_radius_mm, onset_min_nhit, onset_min_consecutive):
     """Compute per-event scalar metrics after filtering hits below hit_threshold
     and append one value to each list in ecols.  Called inside the main event
     loop for each extra MIP-cut threshold level.
@@ -56,6 +57,8 @@ def _append_scalar_metrics(ecols, slab, energy, x, y,
         ecols["last_layer"].append(NAN)
         ecols["n_layers_hit"].append(0)
         ecols["e_over_nhit"].append(NAN)
+        ecols["shower_onset"].append(NAN)
+        ecols["n_layers_before_onset"].append(NAN)
         return
 
     hits_layer = metrics.hits_per_layer(s, n_layers)
@@ -68,7 +71,12 @@ def _append_scalar_metrics(ecols, slab, energy, x, y,
     bx, by, br = metrics.barycenter_xy(fx[pos], fy[pos], pw)
 
     profile = {"nhit": hits_layer, "sume": e_layer, "weighte": w_layer}[profile_kind]
-    sh = metrics.shower_features(profile, shower_thr, peak_min, start_frac)
+    core_hits = metrics.core_hits_per_layer(s[pos], fx[pos], fy[pos], bx, by,
+                                           n_layers, core_radius_mm)
+    sh = metrics.shower_features(profile, shower_thr, peak_min, start_frac,
+                                 core_hits=core_hits, hits_layer=hits_layer,
+                                 onset_min_nhit=onset_min_nhit,
+                                 onset_min_consecutive=onset_min_consecutive)
 
     moliere = (metrics.moliere_radius(fx[pos], fy[pos], pw, bx, by, containment)
                if sh.is_shower and np.isfinite(bx) else 0.0)
@@ -96,6 +104,8 @@ def _append_scalar_metrics(ecols, slab, energy, x, y,
     ecols["last_layer"].append(last)
     ecols["n_layers_hit"].append(n_layers_hit)
     ecols["e_over_nhit"].append(float(e.sum()) / s.size)
+    ecols["shower_onset"].append(sh.onset)
+    ecols["n_layers_before_onset"].append(sh.n_layers_before_onset)
 
 
 @dataclass
@@ -131,6 +141,10 @@ class EventData:
     last_layer: np.ndarray          # highest layer with a hit
     n_layers_hit: np.ndarray        # number of layers with at least one hit
     e_over_nhit: np.ndarray         # energy / nhit (hit energy density)
+    shower_onset: np.ndarray        # conversion layer (first of the dense run)
+    n_layers_before_onset: np.ndarray  # hit layers ahead of it: the pre-shower
+                                       # track. ~0-1 for an electron, several for
+                                       # a pion that traverses before interacting
 
     # --- provenance (EDM4hep path only) ------------------------------------
     #: Original podio frame index of each event (set by :meth:`from_edm4hep`;
@@ -174,6 +188,9 @@ class EventData:
         thr, peak_min = config.shower_e_threshold, config.shower_max_min
         start_frac = config.shower_start_frac
         containment = config.moliere_containment
+        core_radius_mm = config.shower_core_radius_mm
+        onset_min_nhit = config.shower_onset_min_nhit
+        onset_min_consecutive = config.shower_onset_min_consecutive
 
         root_file = ROOT.TFile(path, "READ")
         tree = root_file.Get(config.tree_name)
@@ -239,7 +256,13 @@ class EventData:
             # Longitudinal shower descriptors from the configured profile.
             profile = {"nhit": hits_layer, "sume": e_layer,
                        "weighte": w_layer}[profile_kind]
-            sh = metrics.shower_features(profile, thr, peak_min, start_frac)
+            core_hits = metrics.core_hits_per_layer(slab[pos], px, py, bx, by,
+                                                   n_layers, core_radius_mm)
+            sh = metrics.shower_features(
+                profile, thr, peak_min, start_frac,
+                core_hits=core_hits, hits_layer=hits_layer,
+                onset_min_nhit=onset_min_nhit,
+                onset_min_consecutive=onset_min_consecutive)
 
             # Molière radius only for showers (mirrors the template).
             moliere = (metrics.moliere_radius(px, py, pw, bx, by, containment)
@@ -271,13 +294,18 @@ class EventData:
             cols["last_layer"].append(last)
             cols["n_layers_hit"].append(n_layers_hit)
             cols["e_over_nhit"].append(energy_sum / n_channels)
+            cols["shower_onset"].append(sh.onset)
+            cols["n_layers_before_onset"].append(sh.n_layers_before_onset)
 
             # --- extra MIP-threshold metrics (same pass, filtered hits) ---
             for mip_thr, ecols in extra_cols.items():
                 _append_scalar_metrics(
                     ecols, slab, energy, x, y,
                     w_over_x0, n_layers, profile_kind,
-                    thr, peak_min, start_frac, containment, mip_thr)
+                    thr, peak_min, start_frac, containment, mip_thr,
+                    core_radius_mm=core_radius_mm,
+                    onset_min_nhit=onset_min_nhit,
+                    onset_min_consecutive=onset_min_consecutive)
 
         root_file.Close()
 

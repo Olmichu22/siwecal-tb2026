@@ -217,7 +217,7 @@ the `metadata` frame parameter `ECalPid_shapeParameterNames`):
 | bar_r               | radial barycenter √(bar_x² + bar_y²) (mm)                        |
 | moliere             | 90% transverse containment (Molière) radius in mm (showers; 0 else) |
 | transverse_rms      | energy-weighted RMS hit radius about the shower axis (mm)        |
-| is_shower           | longitudinal shower flag (0/1): rising EM-like edge with a peak  |
+| is_shower           | longitudinal shower flag (0/1): a shower onset was found (below) |
 | shower_start        | first shower layer (NaN if not a shower)                         |
 | shower_max          | peak (maximum) layer of the profile                              |
 | shower_end          | last shower layer                                                |
@@ -228,14 +228,52 @@ the `metadata` frame parameter `ECalPid_shapeParameterNames`):
 | last_layer          | highest layer with a hit                                        |
 | n_layers_hit        | number of layers with at least one hit                          |
 | e_over_nhit         | energy / nhit (hit energy density)                              |
+| shower_onset        | conversion layer: first of the dense run (NaN if not a shower)   |
+| n_layers_before_onset | hit layers ahead of the onset: the pre-shower track length     |
 | hits_per_layer_0..14    | per-layer hit count (one float per layer)                   |
 | energy_per_layer_0..14  | per-layer Σ E (one float per layer)                         |
 | weighte_per_layer_0..14 | per-layer tungsten-weighted energy (one float per layer)    |
 
-In `--validation` mode the same 21 scalars are appended twice more, recomputed
+In `--validation` mode the same 23 scalars are appended twice more, recomputed
 after a per-hit cut, under the prefixes `mip05_` (`hit_energy ≥ 0.5`) and `mip1_`
 (`hit_energy ≥ 1.0`) — e.g. `mip05_moliere`, `mip1_is_shower`. These feed the
 viewer's interactive threshold slider; physics mode omits them.
+
+#### How `is_shower` is decided
+
+An event is a shower when a **shower onset** exists: `ShowerOnsetMinConsecutive`
+(2) consecutive layers, each with at least `ShowerOnsetMinNhit` (4) hits within
+`ShowerCoreRadiusMm` (30 mm) of the transverse barycentre. `shower_onset` is the
+first of them. A through-going MIP lights one or two pads per layer, so it never
+reaches the threshold, let alone twice in a row; the core restriction is what
+keeps scattered pedestal noise from inflating a layer's density.
+
+Two things this buys over the previous criterion (which asked for N *ascending*
+core-density layer pairs):
+
+* A cascade that opens near the back of the stack — a pion punching through and
+  interacting late, the topology PID cares most about — can run out of layers
+  before producing the required rise, and be missed. A dense run does not need
+  the profile to still be climbing.
+* `n_layers_before_onset` is the length of the incoming track segment: ~0-1 for
+  an electron converting immediately, several layers for a pion or a radiative
+  muon that traverses as a MIP first. That distinction is the e/π handle the
+  longitudinal variables did not previously expose, and it is cuttable
+  (`n_layers_before_onset_min/max`, suffix token `nPre`).
+
+Measured on simulation the flag itself does not move: e⁻ 74 GeV and µ⁻ 100 GeV
+classify exactly as before (300/300 and 5/5 events, no disagreement). The
+criterion is the same decision reached in a form that also yields the conversion
+layer and the pre-shower length.
+
+The definition lives in `showerOnset()` in
+`gaudi_source/include/k4SiWEcalReco/EcalShowerVars.h` and is mirrored in
+`siwecal_validation/metrics.py` and `event_viewer/_metrics.py`. It is the same
+definition the simulation's `ShowerTagger` (in `siwecal_k4sim`) uses to keep
+cascade hits out of the ACTS measurement pool, so simulation and analysis agree
+on where a shower begins. Changing it means changing all three; the parity test
+is that the viewer's recompute at threshold 0 reproduces the flag stored in the
+file.
 
 ### valtree (`ecal_<run>.valtree.root`)
 

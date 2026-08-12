@@ -38,7 +38,7 @@ import ROOT
 import uproot
 
 # Bump to invalidate every existing cache (e.g. when the schema changes).
-CACHE_FORMAT_VERSION = 3
+CACHE_FORMAT_VERSION = 4
 FINGERPRINT_KEY = "valcache_fingerprint"
 
 # Per-hit branches the cache rebuilds (filtered: masked channels removed) and
@@ -108,6 +108,9 @@ def config_fingerprint(config) -> str:
         "shower_e_threshold": float(config.shower_e_threshold),
         "shower_max_min": float(config.shower_max_min),
         "shower_start_frac": float(config.shower_start_frac),
+        "shower_core_radius_mm": float(config.shower_core_radius_mm),
+        "shower_onset_min_nhit": int(config.shower_onset_min_nhit),
+        "shower_onset_min_consecutive": int(config.shower_onset_min_consecutive),
         "moliere_containment": float(config.moliere_containment),
         "n_layers": int(config.n_layers),
         "mip_cut_thresholds": MIP_CUT_THRESHOLDS,
