@@ -187,7 +187,7 @@ class PidFileReader:
             reader = rio.Reader(self.path)
             for frame in reader.get("metadata"):
                 raw = frame.get_parameter(SHAPE_PARAM_META)
-                return [n.decode("utf-8") if isinstance(n, bytes) else n for n in raw]
+                return [n.decode("utf-8") if isinstance(n, bytes) else str(n) for n in raw]
         except Exception:
             return None
         return None
