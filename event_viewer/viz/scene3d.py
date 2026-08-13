@@ -96,7 +96,8 @@ class DetectorScene3D:
 
     def event_figure(self, event, color_clip: bool = True,
                      threshold=None, show_moliere: bool = False,
-                     show_axis: bool = False, hover: bool = True) -> go.Figure:
+                     show_axis: bool = False, show_tracks: bool = False,
+                     hover: bool = True) -> go.Figure:
         """Detector geometry + this event's hits coloured by energy.
 
         ``threshold`` (energy, MIP) fades hits *below* it: they are drawn in a
@@ -105,7 +106,9 @@ class DetectorScene3D:
 
         ``show_moliere`` overlays the Molière cylinder and ``show_axis`` the
         shower axis, both from the per-event ``bar_x``/``bar_y`` (and ``moliere``)
-        metrics stored in the tree.
+        metrics stored in the tree. ``show_tracks`` draws the reconstructed
+        ACTSTracks (``event.tracks`` -- only populated when the caller asked
+        for them, see ``EventDataset.get_event(want_tracks=...)``).
         """
         traces = list(self._base_traces)
         if event is not None and event.n_hits:
@@ -135,6 +138,8 @@ class DetectorScene3D:
                 axis = self._axis_trace(event)
                 if axis is not None:
                     traces.append(axis)
+            if show_tracks:
+                traces += self._track_traces(event)
         return self._wrap(traces)
 
     # ---------------------------------------------------------- shower overlays --
@@ -238,6 +243,35 @@ class DetectorScene3D:
             marker=dict(size=[2, 5, 2] if len(zs) == 3 else [2, 2],
                         color="red"),
             name="shower axis (bar_x, bar_y)", hoverinfo="name")
+
+    _TRACK_COLORS = ("#e91e63", "#ff9800", "#00bcd4", "#8bc34a")
+
+    def _track_traces(self, event):
+        """One line+markers ``Scatter3d`` per reconstructed track.
+
+        ``event.tracks`` is ``[{"points": [(x,y,z), ...], "chi2", "ndf"}, ...]``
+        (``EventDataset.get_event(want_tracks=True)``) -- the ``AtOther``
+        track states, one per detector surface, already in the same frame as
+        the hits. Returns ``[]`` when there are no tracks (most events, or a
+        reader/file that doesn't carry ``ACTSTracks`` at all).
+        """
+        traces = []
+        for i, tr in enumerate(event.tracks or []):
+            pts = tr.get("points") or []
+            if len(pts) < 2:
+                continue
+            xs, ys, zs = zip(*pts)
+            color = self._TRACK_COLORS[i % len(self._TRACK_COLORS)]
+            chi2, ndf = tr.get("chi2"), tr.get("ndf")
+            label = f"track {i}"
+            if chi2 is not None and ndf is not None:
+                label += f" (chi2/ndf={chi2:.1f}/{ndf})"
+            traces.append(go.Scatter3d(
+                x=xs, y=ys, z=zs, mode="lines+markers",
+                line=dict(color=color, width=5),
+                marker=dict(size=3, color=color),
+                name=label, hoverinfo="name"))
+        return traces
 
     @staticmethod
     def _color_range(energy, color_clip):

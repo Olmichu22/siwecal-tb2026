@@ -274,7 +274,8 @@ def register_callbacks(app, controller) -> None:
         overlays = overlays or []
         scene, layers, rows, tracks_msg = controller.event_figures(
             path, index, color_clip, thr,
-            show_moliere="moliere" in overlays, show_axis="axis" in overlays)
+            show_moliere="moliere" in overlays, show_axis="axis" in overlays,
+            show_tracks="tracks" in overlays)
         ds = controller.dataset(path)
         label = (f"event {pos + 1} / {n_pass} passing "
                  f"(entry {index}, {ds.n_events} total)")

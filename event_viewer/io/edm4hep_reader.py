@@ -126,5 +126,10 @@ class Edm4hepEventReader:
             return None
         return int(counts[index])
 
+    def read_tracks(self, index: int) -> list:
+        """Per-track state points for one event (see PidFileReader.read_tracks),
+        ``[]`` if this file/event has none."""
+        return self._pid.read_tracks(index)
+
     def close(self) -> None:
         self._pid.close()

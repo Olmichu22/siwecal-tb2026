@@ -369,6 +369,39 @@ class PidFileReader:
                 self._track_counts = None
         return self._track_counts
 
+    def read_tracks(self, index: int) -> List[dict]:
+        """Track state points for one event, ``[]`` if there are none.
+
+        Each dict is ``{"points": [(x,y,z), ...], "chi2": float, "ndf": int}``
+        -- only the ``AtOther`` states (one per detector surface, in the same
+        detector frame as the hits), sorted by z. The ``AtIP`` state's
+        ``referencePoint`` is a ``(0,0,0)`` placeholder (its seed position
+        lives in ``D0``/``Z0`` instead) and is excluded from the polyline.
+        """
+        try:
+            # Keep an explicit reference to the Frame: an unnamed
+            # self._frames[index].get(...) chained in one expression let the
+            # Frame's refcount drop to zero once the statement finished,
+            # leaving Track/TrackState access into freed memory -- crashed
+            # inside edm4hep::TrackMutableCollectionIterator::operator*()
+            # on the very next call. Same root cause as the unbound Reader
+            # temporary fixed earlier in write_filtered().
+            frame = self._frames[index]
+            tracks_coll = frame.get("ACTSTracks")
+        except Exception:
+            return []
+        out = []
+        for t in tracks_coll:
+            pts = []
+            for s in t.getTrackStates():
+                if s.location == 1:  # AtIP: placeholder referencePoint, skip
+                    continue
+                rp = s.referencePoint
+                pts.append((float(rp.x), float(rp.y), float(rp.z)))
+            pts.sort(key=lambda p: p[2])
+            out.append({"points": pts, "chi2": float(t.getChi2()), "ndf": int(t.getNdf())})
+        return out
+
     def close(self) -> None:
         # podio Reader has no explicit close; drop references.
         self._frames = None

@@ -35,7 +35,7 @@ def _filter_event(event: Event, mask: np.ndarray) -> Event:
         x=_m(event.x), y=_m(event.y), z=_m(event.z),
         slab=_m(event.slab), chip=_m(event.chip), chan=_m(event.chan),
         energy=_m(event.energy), hg=_m(event.hg), lg=_m(event.lg),
-        metrics=event.metrics,
+        metrics=event.metrics, tracks=event.tracks,
     )
 
 
@@ -144,9 +144,9 @@ class ViewerController:
     # ------------------------------------------------------- event figures --
     def event_figures(self, path: str, index: int, color_clip: bool,
                       hit_threshold: float = 0.0, show_moliere: bool = False,
-                      show_axis: bool = False):
+                      show_axis: bool = False, show_tracks: bool = False):
         """``(scene3d_fig, layers2d_fig, metrics_rows, tracks_message)`` for one event."""
-        event = self.dataset(path).get_event(index)
+        event = self.dataset(path).get_event(index, want_tracks=show_tracks)
         if hit_threshold > 0.0:
             mask = event.energy >= hit_threshold
             event = _filter_event(event, mask)
@@ -154,7 +154,8 @@ class ViewerController:
             event.metrics = (table.iloc[index].to_dict()
                              if index < len(table) else {})
         scene = self.scene3d.event_figure(
-            event, color_clip, show_moliere=show_moliere, show_axis=show_axis)
+            event, color_clip, show_moliere=show_moliere, show_axis=show_axis,
+            show_tracks=show_tracks)
         layers = self.layers2d.build(event, color_clip)
         rows = self._metric_rows(event)
         tracks_msg = self.tracks_message(path, event)

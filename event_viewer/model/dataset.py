@@ -46,11 +46,22 @@ class EventDataset:
         return cut_model.passing_indices(self._table)
 
     # ------------------------------------------------------------- event --
-    def get_event(self, index: int) -> Event:
-        """Build the :class:`Event` at tree entry ``index``."""
+    def get_event(self, index: int, want_tracks: bool = False) -> Event:
+        """Build the :class:`Event` at tree entry ``index``.
+
+        ``want_tracks`` fetches the reconstructed ACTSTracks too (a podio
+        Frame access, same cost class as the hits) -- skipped by default
+        since most renders don't draw them (see ``show-overlays``'s
+        "tracks" checkbox).
+        """
         hits = self.reader.read_hits(index)
         slab = np.asarray(hits.get("hit_slab", []), dtype=np.int64)
         row = self._table.iloc[index].to_dict() if index < len(self._table) else {}
+        tracks = []
+        if want_tracks:
+            read_tracks = getattr(self.reader, "read_tracks", None)
+            if read_tracks:
+                tracks = read_tracks(index)
         return Event(
             index=index,
             x=np.asarray(hits.get("hit_x", []), dtype=float),
@@ -63,6 +74,7 @@ class EventDataset:
             hg=np.asarray(hits.get("hit_hg", []), dtype=float),
             lg=np.asarray(hits.get("hit_lg", []), dtype=float),
             metrics=row,
+            tracks=tracks,
         )
 
     def accumulate(self, indices) -> Event:

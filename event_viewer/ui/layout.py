@@ -99,7 +99,8 @@ def _event_tab():
                         id="show-overlays",
                         options=[
                             {"label": " Molière cylinder", "value": "moliere"},
-                            {"label": " shower axis", "value": "axis"}],
+                            {"label": " shower axis", "value": "axis"},
+                            {"label": " tracks", "value": "tracks"}],
                         value=[], style={"display": "inline-block"},
                         inputStyle={"marginRight": "4px", "marginLeft": "10px"}),
                 ]),

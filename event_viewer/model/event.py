@@ -9,7 +9,7 @@ so the event already carries physical 3-D positions.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Dict
+from typing import Dict, List
 
 import numpy as np
 
@@ -29,6 +29,9 @@ class Event:
     hg: np.ndarray                   # high-gain ADC
     lg: np.ndarray                   # low-gain ADC
     metrics: Dict[str, float] = field(default_factory=dict)
+    # Reconstructed ACTSTracks, [{"points": [(x,y,z), ...], "chi2", "ndf"}, ...].
+    # Empty when the reader has no tracks for this event (or at all).
+    tracks: List[dict] = field(default_factory=list)
 
     @property
     def n_hits(self) -> int:
