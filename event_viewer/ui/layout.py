@@ -68,6 +68,9 @@ def _event_tab():
                         id="color-clip", options=[
                             {"label": " clip E<0", "value": "clip"}],
                         value=["clip"], style={"display": "inline-block"}),
+                    html.Span(id="tracks-status",
+                              style={"fontSize": "13px", "color": "#666",
+                                     "marginLeft": "8px"}),
                 ], style={"display": "flex", "gap": "10px",
                           "alignItems": "center", "marginBottom": "6px"}),
                 html.Div(style={"display": "flex", "gap": "10px",

@@ -147,17 +147,28 @@ class PidFileReader:
         sp = tree[f"_{ev}_shapeParameters"].array()
         mat = ak.to_numpy(sp)                      # regular: 1 cluster/event
         if mat.shape[1] != len(self.shape_names):
-            # The PID stage may run without the mip05_/mip1_ variant blocks
-            # (physics mode). Adapt to the file's actual width when it matches the
-            # no-variant layout; otherwise the layout is genuinely unexpected.
-            base = canonical_shape_names(self._n_layers, mip_thresholds=())
-            if mat.shape[1] == len(base):
-                self.shape_names = base
-                self._name_idx = {n: i for i, n in enumerate(base)}
+            # The width can differ from the compiled-in canonical layout for
+            # more than one reason: physics-mode files (no mip05_/mip1_
+            # variant blocks), or an older EcalPidTransformer that predates a
+            # later addition to SCALAR_NAMES (e.g. shower_onset/
+            # n_layers_before_onset, added after some real-data PID files were
+            # already written). The file's own metadata frame parameter
+            # (SHAPE_PARAM_META) is its authoritative record of what it
+            # actually wrote -- read that instead of guessing a variant.
+            names = self._shape_names_from_metadata()
+            if names is not None and len(names) == mat.shape[1]:
+                self.shape_names = names
+                self._name_idx = {n: i for i, n in enumerate(names)}
             else:
-                raise RuntimeError(
-                    f"shapeParameters width {mat.shape[1]} != "
-                    f"{len(self.shape_names)} names in {self.path}")
+                base = canonical_shape_names(self._n_layers, mip_thresholds=())
+                if mat.shape[1] == len(base):
+                    self.shape_names = base
+                    self._name_idx = {n: i for i, n in enumerate(base)}
+                else:
+                    raise RuntimeError(
+                        f"shapeParameters width {mat.shape[1]} != "
+                        f"{len(self.shape_names)} names in {self.path}, and "
+                        f"{SHAPE_PARAM_META} metadata did not resolve it either")
 
         hd = self._header_coll
         first = lambda field: ak.to_numpy(  # noqa: E731
@@ -171,6 +182,20 @@ class PidFileReader:
             # nhit (cluster) == number of ECalHits == legacy nhit_chan.
             "nhit_chan": mat[:, self._name_idx["nhit"]].astype(np.int64),
         }
+
+    def _shape_names_from_metadata(self) -> Optional[List[str]]:
+        """The file's own :data:`SHAPE_PARAM_META` list, or ``None`` if it
+        cannot be read (very old file, or no ``metadata`` category)."""
+        try:
+            import podio.root_io as rio
+
+            reader = rio.Reader(self.path)
+            for frame in reader.get("metadata"):
+                raw = frame.get_parameter(SHAPE_PARAM_META)
+                return [n.decode("utf-8") if isinstance(n, bytes) else n for n in raw]
+        except Exception:
+            return None
+        return None
 
     def scalar(self, name: str) -> np.ndarray:
         """Per-event array of one shape-parameter (e.g. ``moliere``)."""

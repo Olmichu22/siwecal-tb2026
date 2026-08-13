@@ -83,6 +83,27 @@ class ViewerController:
             self._datasets[path] = EventDataset(reader, self.detector)
         return self._datasets[path]
 
+    # --------------------------------------------------------------- tracks --
+    def tracks_message(self, path: str, event: Event) -> str:
+        """'tracks available: N tracks' readout for the Event tab.
+
+        Reads ``ACTSTracks`` straight out of the currently open file at
+        ``event.index`` -- job4_tracking.py (simulation) or
+        gaudi_jobs/run_tracking_batch.py (real data) merge tracks into the
+        SAME edm4hep the rest of the event comes from, no companion file to
+        go looking for. Empty string when the reader has no per-event tracks
+        at all -- a plain ecal/valcache tree, a PID file predating the merge,
+        or a run tracking was never run on -- which is not an error, just
+        nothing to report.
+        """
+        if event.index < 0:  # accumulated/cluster pseudo-event
+            return ""
+        n_tracks = getattr(self.dataset(path).reader, "n_tracks", None)
+        n = n_tracks(event.index) if n_tracks else None
+        if n is None:
+            return ""
+        return f"tracks available: {n} track{'s' if n != 1 else ''}"
+
     # --------------------------------------------------- hit-energy threshold --
     def _filtered_table(self, path: str, threshold: float):
         """Per-event DataFrame with metrics for hit_energy >= threshold.
@@ -124,7 +145,7 @@ class ViewerController:
     def event_figures(self, path: str, index: int, color_clip: bool,
                       hit_threshold: float = 0.0, show_moliere: bool = False,
                       show_axis: bool = False):
-        """``(scene3d_fig, layers2d_fig, metrics_rows)`` for one event."""
+        """``(scene3d_fig, layers2d_fig, metrics_rows, tracks_message)`` for one event."""
         event = self.dataset(path).get_event(index)
         if hit_threshold > 0.0:
             mask = event.energy >= hit_threshold
@@ -136,7 +157,8 @@ class ViewerController:
             event, color_clip, show_moliere=show_moliere, show_axis=show_axis)
         layers = self.layers2d.build(event, color_clip)
         rows = self._metric_rows(event)
-        return scene, layers, rows
+        tracks_msg = self.tracks_message(path, event)
+        return scene, layers, rows, tracks_msg
 
     def _metric_rows(self, event) -> List[dict]:
         """Per-event scalar metrics as ``[{variable, value}]`` for the table."""

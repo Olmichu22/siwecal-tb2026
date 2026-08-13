@@ -250,6 +250,7 @@ def register_callbacks(app, controller) -> None:
         Output("event-label", "children"),
         Output("event-input", "value"),
         Output("event-input", "max"),
+        Output("tracks-status", "children"),
         Input("store-file", "data"),
         Input("store-pos", "data"),
         Input("store-event-cuts", "data"),
@@ -260,24 +261,24 @@ def register_callbacks(app, controller) -> None:
     def render_event(path, cur_index, cuts, clip, hit_threshold, overlays):
         if not path:
             return (_empty_fig("Load a file"), _empty_fig(), [],
-                    "no file", None, 1)
+                    "no file", None, 1, "")
         thr = float(hit_threshold or 0.0)
         passing = controller.passing_indices(path, CutModel.from_store(cuts), thr)
         n_pass = len(passing)
         if n_pass == 0:
             return (_empty_fig("No events pass the cuts"), _empty_fig(),
-                    [], "0 events passing cuts", None, 1)
+                    [], "0 events passing cuts", None, 1, "")
         pos = _pos_of(passing, cur_index)
         index = int(passing[pos])
         color_clip = "clip" in (clip or [])
         overlays = overlays or []
-        scene, layers, rows = controller.event_figures(
+        scene, layers, rows, tracks_msg = controller.event_figures(
             path, index, color_clip, thr,
             show_moliere="moliere" in overlays, show_axis="axis" in overlays)
         ds = controller.dataset(path)
         label = (f"event {pos + 1} / {n_pass} passing "
                  f"(entry {index}, {ds.n_events} total)")
-        return scene, layers, rows, label, pos + 1, n_pass
+        return scene, layers, rows, label, pos + 1, n_pass, tracks_msg
 
     # ------------------------------------------------------- distributions --
     @app.callback(
