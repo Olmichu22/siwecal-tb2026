@@ -23,6 +23,13 @@ all runs; in ``--all``/``--point`` a per-energy ``cuts:`` block in the YAML
 overrides them. All cuts default to off except total per-event energy > 0, which
 is always enforced (events with no hits or non-positive energy are dropped).
 
+``--tracks-file`` merges a second EDM4hep file's ``ACTSTracks``/``EMShowers``/
+``SiPadMeasurements``/``SiPadShowerFlags`` into the ``edm4hep`` output at
+matching frame index (see :func:`siwecal_common.edm4hep_pid.write_filtered`).
+It exists for the simulation case -- ``siwecal_k4sim/analysis/run_pid_sim.sh``
+passes its own ``digitized.edm4hep.root`` explicitly -- and is entirely
+optional for real test-beam data, which never has one to pass.
+
 Run after sourcing key4hep and exporting LD_LIBRARY_PATH / PYTHONPATH (see the
 top-level README). Example::
 
@@ -83,7 +90,7 @@ def _jobs(args):
         yield run, paths.resolve_input(os.path.join(run, f"ecal_{run}.root")), {}
 
 
-def _post_process(temp, out_dir, label, effective_cut, mip_thresholds, fmt, ecal_path):
+def _post_process(temp, out_dir, label, effective_cut, mip_thresholds, fmt, tracks_file):
     """Apply ``effective_cut`` to the full EDM4hep ``temp`` file and write the
     requested final output(s). Returns the number of cut-passing events."""
     config = PlotConfig()
@@ -95,14 +102,14 @@ def _post_process(temp, out_dir, label, effective_cut, mip_thresholds, fmt, ecal
 
     if fmt in ("edm4hep", "both"):
         out = os.path.join(out_dir, f"ecal_{label}.edm4hep.root")
-        # Merge in the simulation's digitized+tracks file when one sits next to
-        # the ecal tree (siwecal_k4sim runs only) -- None for real test-beam
-        # data, which never has one. See "Single-file output" in
-        # siwecal_k4sim/docs/gaudi_pipeline.md.
-        tracks_path = paths.tracks_path_for(ecal_path)
-        edm4hep_pid.write_filtered(temp, out, frame_indices, merge_path=tracks_path)
-        if tracks_path:
-            print(f"[Output] merged ACTSTracks from {tracks_path}")
+        # Merge the caller-specified tracks file (e.g. siwecal_k4sim's
+        # run_pid_sim.sh passes --tracks-file digitized.edm4hep.root, the
+        # exact file it fed into sim_to_ecal_tree.py) -- explicit, no
+        # sibling-file discovery. None for real test-beam invocations, which
+        # pass nothing (see "--tracks-file" above).
+        edm4hep_pid.write_filtered(temp, out, frame_indices, merge_path=tracks_file)
+        if tracks_file:
+            print(f"[Output] merged ACTSTracks from {tracks_file}")
         print(f"[Output] {n_kept} event(s) -> {out}")
     if fmt in ("valtree", "both"):
         out = os.path.join(out_dir, f"ecal_{label}.valtree.root")
@@ -125,6 +132,12 @@ def main(argv=None):
     p.add_argument("--outdir", default=None,
                    help="Output directory. Default: settings.yml 'pid_dir', else "
                         "next to each input ecal file.")
+    p.add_argument("--tracks-file", default=None, dest="tracks_file",
+                   help="EDM4hep file (e.g. siwecal_k4sim's digitized.edm4hep.root) "
+                        "whose ACTSTracks/EMShowers/SiPadMeasurements/SiPadShowerFlags "
+                        "are merged into the output at matching frame index. Explicit "
+                        "only -- no sibling-file auto-discovery. Valid only with "
+                        "--run/--file (a single input); rejected with --all/--point.")
     p.add_argument("--tree", default="ecal", help="Input TTree name")
     p.add_argument("--format", choices=("edm4hep", "valtree", "both"), default="edm4hep",
                    help="Output format(s) to write (default: edm4hep).")
@@ -151,6 +164,9 @@ def main(argv=None):
     shower.add_argument("--no-shower", dest="is_shower", action="store_const",
                         const=False, help="keep only non-shower events")
     args = p.parse_args(argv)
+    if args.tracks_file and (args.all or args.point is not None):
+        raise SystemExit("--tracks-file only applies to a single run (--run/--file); "
+                         "it cannot be combined with --all/--point.")
 
     general_cut = cutset_from_args(args)
     mip_thresholds = [0.5, 1.0] if args.validation else []
@@ -183,7 +199,7 @@ def main(argv=None):
             continue
         try:
             _post_process(temp, out_dir, label, effective_cut, mip_thresholds,
-                         args.format, ecal_path)
+                         args.format, args.tracks_file)
         except (OSError, RuntimeError, ValueError) as error:
             print(f"ERROR: post-processing failed for {label}: {error}")
             failures += 1

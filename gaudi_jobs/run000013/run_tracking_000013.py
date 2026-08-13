@@ -3,11 +3,17 @@
 # por EcalToEDM4hep/EcalPidTransformer (mismo INPUT que usa steer_run000013.py,
 # variante "_realvalues": event builder con calibración real).
 #
-# Uso (desde la raíz del repo):
+# El resultado se funde EN EL MISMO ARCHIVO de entrada (temp oculto + swap),
+# nunca en un tracks_<run>.edm4hep.root aparte -- ver run_tracking_batch.py,
+# que hace el swap automáticamente y es la vía preferida:
+#   python gaudi_jobs/run_tracking_batch.py --run TB2026CERN_run_000013
+#
+# Uso ad hoc, standalone (desde la raíz del repo):
 #   source setup.sh
 #   export LD_LIBRARY_PATH=$PWD/gaudi_source/build:$LD_LIBRARY_PATH
 #   export PYTHONPATH=$PWD/gaudi_source/build/genConfDir:$PWD:$PYTHONPATH
 #   k4run gaudi_jobs/run000013/run_tracking_000013.py
+#   mv <_OUTPUT temp path printed above> <_INPUT>
 #
 import os
 
@@ -26,7 +32,7 @@ _INPUT = os.environ.get(
     f"/eos/user/o/oarquero/TB2026CERN/data/{_RUN}/ecal_pid_{_RUN}_realvalues.root")
 _OUTPUT = os.environ.get(
     "TRACKING_OUTPUT_FILE",
-    os.path.join(os.path.dirname(_INPUT), f"tracks_{_RUN}.edm4hep.root"))
+    os.path.join(os.path.dirname(_INPUT), f".{_RUN}.tracking.tmp.root"))
 
 loglevel = DEBUG if os.environ.get("TRACKING_LOGLEVEL", "INFO") == "DEBUG" else INFO
 

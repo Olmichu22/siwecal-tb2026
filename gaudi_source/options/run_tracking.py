@@ -1,16 +1,36 @@
 #
 # ACTS tracking over the 15 SiW-ECAL slabs -- read real reconstructed hits
-# (ECalHits, from EcalToEDM4hep/run_pid.py) and write ACTSTracks + EMShowers.
+# (ECalHits, from EcalToEDM4hep/run_pid.py) and write ACTSTracks + EMShowers
+# back into the SAME edm4hep file, in place.
 #
 # Mirrors siwecal_k4sim/gaudi_jobs/pid2026_common/job4_tracking.py: same
 # component names, same property names, same tuned defaults, so the two
 # repos' tracking output is directly comparable. The only real difference is
 # geometry input -- this repo has no DD4hep compact XML, so ACTSGeoSvc builds
 # its 15 plane surfaces from mappings/slab_z_positions.yml instead (see
-# k4SiWEcalReco/ACTSGeoSvc.h and docs/acts_integration.md).
+# k4SiWEcalReco/ACTSGeoSvc.h and docs/acts_integration.md). Unlike simulation,
+# real-data ECalHits are already in the frame ACTS surfaces expect (no
+# DetectorFlipper-equivalent step), so tracking here needs no cross-file
+# merge at all -- just a plain in-place update of ecal_<run>.edm4hep.root.
+#
+# A Gaudi IOSvc reader/writer cannot write back onto the file it is still
+# reading, so this job's own default output is a HIDDEN TEMP FILE next to the
+# input (must end in .root -- IOSvc picks its Writer backend off the
+# filename). It is NOT a product: swap it onto the input yourself
+#   (mv <output> <input>)
+# for a bare `k4run` invocation, or use gaudi_jobs/run_tracking_batch.py,
+# which drives this job AND does that swap automatically -- the normal way
+# to run tracking.
 #
 #   TRACKING_INPUT_FILE=/path/ecal_pid_<label>.root \
 #       k4run gaudi_source/options/run_tracking.py
+#   mv /path/.<label>.tracking.tmp.root /path/ecal_pid_<label>.root
+#
+# Do NOT run this on a file that already has ACTSTracks/EMShowers/
+# SiPadMeasurements/SiPadShowerFlags (e.g. re-running tracking on its own
+# output): the components write those as new Gaudi collections, which
+# collide with the ones already carried through by "keep *" and abort the
+# process (not a graceful error). Track a file once.
 #
 import os
 import sys
@@ -29,13 +49,14 @@ if not infile:
                       "ECalHits collection (e.g. ecal_pid_<label>.root from "
                       "run_pid.py).")
 
-# Default output: next to the input, ecal_pid_<label>.root -> tracks_<label>.edm4hep.root
-# (same naming idiom as run_pid.py's ECAL_PID_OUT default).
+# Default output: a hidden temp file next to the input -- see the module
+# docstring above. Not a product; swap it onto the input yourself, or use
+# run_tracking_batch.py, which does that automatically.
 _stem = os.path.splitext(os.path.basename(infile))[0]
 _label = _stem[len("ecal_pid_"):] if _stem.startswith("ecal_pid_") else _stem
 outfile = os.environ.get(
     "TRACKING_OUTPUT_FILE",
-    os.path.join(os.path.dirname(infile) or ".", f"tracks_{_label}.edm4hep.root"),
+    os.path.join(os.path.dirname(infile) or ".", f".{_label}.tracking.tmp.root"),
 )
 inputcoll = os.environ.get("TRACKING_INPUT_COLLECTION", "ECalHits")
 seed_p    = float(os.environ.get("SEED_MOMENTUM", "3.0"))

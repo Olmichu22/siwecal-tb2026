@@ -228,26 +228,3 @@ def valtree_path_for(events_path: str) -> Optional[str]:
             if os.path.exists(candidate):
                 return candidate
     return None
-
-
-def tracks_path_for(events_path: str) -> Optional[str]:
-    """Locate the simulation's digitised+tracks EDM4hep file for an
-    event-builder ``events_path``, when one sits next to it.
-
-    ``siwecal_k4sim``'s ``job4_tracking.py`` writes ``ACTSTracks``/
-    ``EMShowers``/``SiPadMeasurements`` back into the SAME ``digitized.
-    edm4hep.root`` it reads from the digitisation step (see "Single-file
-    output" in that repo's ``docs/gaudi_pipeline.md``) -- it is not a separate
-    per-run product, just a constant filename living alongside whatever
-    ``ecal_sim.root`` the simulation pipeline hands to this PID stage.
-    ``run_pid_batch.py`` merges its collections straight into the PID output
-    (see :func:`siwecal_common.edm4hep_pid.write_filtered`) so the final file
-    stays a single edm4hep, with no separate tracks file for a consumer like
-    ``event_viewer`` to go hunting for.
-
-    Real test-beam ``ecal_<run>.root`` files never have a sibling
-    ``digitized.edm4hep.root`` -- that is not an error, just nothing to merge:
-    returns ``None``.
-    """
-    candidate = os.path.join(os.path.dirname(events_path), "digitized.edm4hep.root")
-    return candidate if os.path.exists(candidate) else None

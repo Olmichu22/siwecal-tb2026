@@ -41,12 +41,16 @@ builder: it is **not** what the pipeline runs — see "Two event builders" below
                                                                          └─────────────────────────┘
                                                                                       │
                                                                                       ▼
-                                                                       tracks_<run>.edm4hep.root  (ACTSTracks + EMShowers)
+                                                                     ecal_<run>.edm4hep.root, IN PLACE
+                                                                     (gains ACTSTracks + EMShowers +
+                                                                      SiPadMeasurements + SiPadShowerFlags;
+                                                                      temp file + swap, no separate product)
 ```
 
-`event_viewer` is untouched by tracking (it reads `ecal_<run>.edm4hep.root`
-directly); the tracking stage is a separate, optional consumer of the same
-file — see `gaudi_source/README.md`'s "Tracking (ACTS)" section and
+`event_viewer` reads `ecal_<run>.edm4hep.root` whether or not tracking has run
+yet; the tracking stage is a separate, optional step that mutates that SAME
+file in place (`gaudi_jobs/run_tracking_batch.py`) — see
+`gaudi_source/README.md`'s "Tracking (ACTS)" section and
 `docs/acts_integration.md`.
 
 The per-event metrics **and the cut/cleaned event collections** are produced by
@@ -65,7 +69,7 @@ runs for one run (and what the Condor DAG runs per run on the farm):
 | **1** | **decode** | **one `k4run` per raw chunk**, in parallel, + a health check | `EcalRawDecoder` | `<run>_raw.bin_NNNN` (read-only) | `<converted-dir>/<run>/chunks/chunk_NNNN.root` (`siwecaldecoded` tree) |
 | **2** | **event building** | one `k4run` **chaining** all the chunks | `EcalEventBuilder` | the chunks from stage 1 | `Reconstruction/<run>/ecal_<run>.root` (`ecal` tree) |
 | **3** | **PID / EDM4hep** | a **second** `k4run` | `EcalToEDM4hep` (hit-MIP cut) + `EcalPidTransformer` (shower vars) | `ecal_<run>.root` | `ecal_<run>.edm4hep.root` |
-| **4** | **tracking** *(optional)* | a **third** `k4run`, run separately, per run | `ACTSGeoSvc` + `ShowerTagger` + `SiPadMeasConverter` + `ACTSProtoTracker` (see `docs/acts_integration.md`) | `ecal_<run>.edm4hep.root` (its `ECalHits`) | `tracks_<run>.edm4hep.root` (`ACTSTracks` + `EMShowers`) |
+| **4** | **tracking** *(optional)* | a **third** `k4run`, run separately, per run, output swapped in place | `ACTSGeoSvc` + `ShowerTagger` + `SiPadMeasConverter` + `ACTSProtoTracker` (see `docs/acts_integration.md`) | `ecal_<run>.edm4hep.root` (its `ECalHits`) | the SAME `ecal_<run>.edm4hep.root`, now also carrying `ACTSTracks`/`EMShowers`/`SiPadMeasurements`/`SiPadShowerFlags` — no separate file |
 
 Two design points that are easy to miss:
 
@@ -281,21 +285,26 @@ collections existed stay readable — `siwecal_common.edm4hep_pid` reports them 
 `PidFileReader.perhit_fields()` and simply omits what a file does not carry.
 
 **Simulation runs also carry `ACTSTracks` / `EMShowers` / `SiPadMeasurements` /
-`SiPadShowerFlags`** — no separate tracks file. `run_pid_batch.py` looks for a
-`digitized.edm4hep.root` next to the input `ecal_<run>.root`
-(`siwecal_common.paths.tracks_path_for`) and, when found, `write_filtered`
-merges those four collections straight into the SAME `ecal_<run>.edm4hep.root`
-it writes (see `siwecal_k4sim/docs/gaudi_pipeline.md`, "Single-file output",
-for where `digitized.edm4hep.root` comes from). `SiPadHits*`/`MCParticles`
-are deliberately **not** pulled in: `ECalHits` already covers the raw hits,
-and those collections carry `SimCalorimeterHit`→`CaloHitContribution`
-relations that segfault when resolved against a second, concurrently-open
-podio `Reader` — the four merged collections are relation-free
-`Track`/`Cluster`/`TrackerHit3D`/`UserDataCollection` types, so they merge
-cleanly. Real test-beam runs never have a `digitized.edm4hep.root` sibling, so
-their PID files are unaffected — `PidFileReader.track_counts()` returns
-`None` for them, same as for any older simulation PID file written before
-this merge existed.
+`SiPadShowerFlags`** — no separate tracks file. `run_pid_batch.py --tracks-file
+<path>` merges those four collections straight into the SAME
+`ecal_<run>.edm4hep.root` it writes; the caller passes the path explicitly (no
+sibling-file auto-discovery) — `siwecal_k4sim/analysis/run_pid_sim.sh` wires
+it to the exact `digitized.edm4hep.root` it fed into `sim_to_ecal_tree.py`
+(see `siwecal_k4sim/docs/gaudi_pipeline.md`, "Single-file output", for where
+that file comes from). `SiPadHits*`/`MCParticles` are deliberately **not**
+pulled in: `ECalHits` already covers the raw hits, and those collections
+carry `SimCalorimeterHit`→`CaloHitContribution` relations that segfault when
+resolved against a second, concurrently-open podio `Reader` — the four merged
+collections are relation-free `Track`/`Cluster`/`TrackerHit3D`/
+`UserDataCollection` types, so they merge cleanly. Real test-beam runs never
+pass `--tracks-file`, so their PID files are unaffected —
+`PidFileReader.track_counts()` returns `None` for them, same as for any older
+simulation PID file written before this merge existed.
+
+The real-data ACTS **tracking** stage (below) is a separate, later step: it
+runs on the already-produced `ecal_<run>.edm4hep.root` (its `ECalHits`) and
+merges its own output back into that SAME file in place — no `--tracks-file`
+involved, and no separate `tracks_<run>.edm4hep.root` file either.
 
 The `shapeParameters` floats are stored in a fixed order (names listed once in
 the `metadata` frame parameter `ECalPid_shapeParameterNames`):

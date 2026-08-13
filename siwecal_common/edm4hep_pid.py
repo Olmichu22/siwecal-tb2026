@@ -287,10 +287,12 @@ def write_filtered(in_path: str, out_path: str, frame_indices,
     the result stays a self-describing, re-readable PID file. Returns the number
     of event frames written.
 
-    ``merge_path``, when given, is a second EDM4hep file (see
-    :func:`siwecal_common.paths.tracks_path_for` -- typically
-    ``digitized.edm4hep.root`` from the ``siwecal_k4sim`` simulation pipeline)
-    whose SAME-INDEX frames contribute :data:`_MERGE_COLLECTIONS` --
+    ``merge_path``, when given, is a second EDM4hep file -- passed explicitly
+    by the caller (e.g. ``gaudi_jobs/run_pid_batch.py --tracks-file``, which
+    ``siwecal_k4sim/analysis/run_pid_sim.sh`` wires to the exact
+    ``digitized.edm4hep.root`` it already fed into ``sim_to_ecal_tree.py``; no
+    auto-discovery, no sibling-file guessing) -- whose SAME-INDEX frames
+    contribute :data:`_MERGE_COLLECTIONS` --
     ``ACTSTracks``, ``EMShowers``, ``SiPadMeasurements``, ``SiPadShowerFlags``
     -- into each kept event. Only those four: ``ECalHits`` already IS the raw
     hits (from the same ``SiPadHits*`` chain, just re-shaped), so re-adding

@@ -289,15 +289,25 @@ reconstructed `ECalHits` — instead of `edm4hep::SimCalorimeterHitCollection`).
 
 Input: an EDM4hep file with an `ECalHits` collection, i.e. the output of
 `run_pid_batch.py` (`ecal_<label>.edm4hep.root`). Output: `ACTSTracks`
-(`edm4hep::TrackCollection`) and `EMShowers` (`edm4hep::ClusterCollection`).
+(`edm4hep::TrackCollection`), `EMShowers` (`edm4hep::ClusterCollection`),
+`SiPadMeasurements` and `SiPadShowerFlags` — merged **into that SAME file, in
+place**. Real-data `ECalHits` are already in the frame the ACTS surfaces
+expect (no flip step, unlike simulation's pre-tracking `DetectorFlipper`), so
+there is nothing to merge from elsewhere: `run_tracking.py` writes to a
+hidden temp file next to the input (must end in `.root` — `IOSvc` picks its
+Writer backend off the filename) and `run_tracking_batch.py` swaps it onto
+the input once `k4run` succeeds. No `tracks_<run>.edm4hep.root` product.
 
 ```bash
 python gaudi_jobs/run_pid_batch.py --run TB2026CERN_run_000013
 python gaudi_jobs/run_tracking_batch.py --run TB2026CERN_run_000013
 
-# or the low-level steering file directly:
+# or the low-level steering file directly (writes a hidden temp file; swap it
+# onto the input yourself -- run_tracking_batch.py above does this for you):
 TRACKING_INPUT_FILE=/path/ecal_TB2026CERN_run_000013.edm4hep.root \
     k4run gaudi_source/options/run_tracking.py
+mv /path/.TB2026CERN_run_000013.tracking.tmp.root \
+   /path/ecal_TB2026CERN_run_000013.edm4hep.root
 ```
 
 ## Build & run (under key4hep)
