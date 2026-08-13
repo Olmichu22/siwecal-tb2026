@@ -13,7 +13,14 @@ counts its peaks with TSpectrum, and asks WHERE and WHY:
      spacing points to one mechanism (common-mode step), a broad range to many.
   4. Peaks-per-cell histogram (1 / 2 / 3+), high vs low gain side by side.
 
-Usage:  HIST=<grid.root> TH=210 python3 diagnostics/plot_pedestal_multipeak.py [outdir]
+Usage:  HIST=<grid.root> TH=210 [MIN_ENTRIES=200] \
+        python3 diagnostics/plot_pedestal_multipeak.py [outdir]
+
+MIN_ENTRIES other than 200 writes to pedestal_multipeak_th<TH>_min<N>.png, so
+the 200-entry plots the .txt notes quote are never overwritten. Lowering it
+recovers cells (and map bins) but costs TSpectrum detection power: fractions
+measured at different cuts are NOT comparable -- see the docstring of
+compare_multipeak_stat_matched.py.
 """
 import os
 import sys
@@ -32,7 +39,17 @@ OUT = sys.argv[1] if len(sys.argv) > 1 else os.path.join(_HERE, f"th{TH}")
 os.makedirs(OUT, exist_ok=True)
 
 NSL, NCHIP, NCHN, NSCA = 15, 16, 64, 15
-MIN_ENTRIES = 200          # below this a peak count is not trustworthy
+MIN_ENTRIES = int(os.environ.get("MIN_ENTRIES", "200"))  # below this a peak count is not trustworthy
+# GAIN picks which gain the map / per-SCA / offset panels describe (the tally
+# panel always shows both). Default low = the historical behaviour, which wrote
+# unsuffixed files; GAIN=high writes *_high.png so the low-gain plots the .txt
+# tables quote are never overwritten.
+GAIN = os.environ.get("GAIN", "low")
+if GAIN not in ("low", "high"):
+    raise SystemExit(f"GAIN must be low|high, got {GAIN}")
+TAG = "" if MIN_ENTRIES == 200 else f"_min{MIN_ENTRIES}"
+TAG += "" if GAIN == "low" else "_high"
+LBL = f"th{TH} {GAIN} gain (N>={MIN_ENTRIES})"
 SIGMA, THRESH = 2.0, 0.30  # TSpectrum: peak width in bins, and height fraction
 
 
@@ -70,14 +87,14 @@ f = ROOT.TFile.Open(HIST)
 if not f or f.IsZombie():
     raise SystemExit(f"cannot open {HIST}")
 
-# The map + per-SCA + offsets come from the low gain (where the user sees it);
-# the peaks-per-cell tally is shown for both gains.
-nmap, mmap, per_sca, offsets, tally_lo = scan(f, "low")
-_, _, _, _, tally_hi = scan(f, "high")
+# The map + per-SCA + offsets come from GAIN (low by default, where the user
+# first saw it); the peaks-per-cell tally is shown for both gains regardless.
+nmap, mmap, per_sca, offsets, tally_lo = scan(f, GAIN)
+_, _, _, _, tally_hi = scan(f, "high" if GAIN == "low" else "low")
 
 tot = nmap.sum()
 multi = mmap.sum()
-print(f"th{TH} LOW gain: {int(tot):,} (channel,SCA) pedestals with >={MIN_ENTRIES} entries")
+print(f"th{TH} {GAIN.upper()} gain: {int(tot):,} (channel,SCA) pedestals with >={MIN_ENTRIES} entries")
 print(f"  multi-peak (>=2): {int(multi):,} ({100 * multi / max(tot, 1):.1f}%)   "
       f"[1: {tally_lo[1]:,}  2: {tally_lo[2]:,}  3+: {tally_lo[3]:,}]")
 if len(offsets):
@@ -91,7 +108,7 @@ keep = []
 # 1. map of multi-peak fraction per (slab,chip)
 c.cd(1).SetMargin(0.11, 0.14, 0.11, 0.10)
 c.cd(1).SetRightMargin(0.16)
-hm = ROOT.TH2F("hm", f"th{TH}: multi-peak fraction of pedestals (low gain);"
+hm = ROOT.TH2F("hm", f"{LBL}: multi-peak fraction of pedestals;"
                      f"chip;slab", NCHIP, 0, NCHIP, NSL, 0, NSL)
 hm.SetDirectory(0)
 for slab in range(NSL):
@@ -100,12 +117,17 @@ for slab in range(NSL):
         if nmap[row] > 0:
             hm.SetBinContent(chip + 1, slab + 1, mmap[row] / nmap[row])
 hm.GetZaxis().SetTitle("fraction")
+# colz leaves a bin with content exactly 0 undrawn, which makes a chip whose
+# multi-peak fraction is genuinely 0 look identical to one with no data at all.
+# A minimum below zero forces those into the lowest palette colour, so the only
+# white bins left are the chips with no scanned cell.
+hm.SetMinimum(-1e-9)
 hm.Draw("colz")
 keep.append(hm)
 
 # 2. multi-peak fraction vs SCA number
 c.cd(2).SetMargin(0.12, 0.05, 0.12, 0.10)
-hs = ROOT.TH1F("hs", f"th{TH}: multi-peak fraction vs SCA number;SCA;fraction multi-peak",
+hs = ROOT.TH1F("hs", f"{LBL}: multi-peak fraction vs SCA number;SCA;fraction multi-peak",
                NSCA, 0, NSCA)
 hs.SetDirectory(0)
 for sca in range(NSCA):
@@ -121,7 +143,7 @@ keep.append(hs)
 # 3. peak-to-peak offset distribution
 c.cd(3).SetMargin(0.12, 0.05, 0.12, 0.10)
 if len(offsets):
-    ho = ROOT.TH1F("ho", f"th{TH}: 2nd-population offset;peak-to-peak spacing  [ADC];multi-peak cells",
+    ho = ROOT.TH1F("ho", f"{LBL}: 2nd-population offset;peak-to-peak spacing  [ADC];multi-peak cells",
                    60, 0, float(np.percentile(offsets, 99)) + 2)
     ho.SetDirectory(0)
     for v in offsets:
@@ -134,7 +156,7 @@ if len(offsets):
 
 # 4. peaks-per-cell tally, high vs low gain
 c.cd(4).SetMargin(0.12, 0.05, 0.12, 0.10)
-ht = ROOT.TH1F("ht", f"th{TH}: peaks per pedestal cell;peaks;fraction of cells", 3, 0.5, 3.5)
+ht = ROOT.TH1F("ht", f"{LBL}: peaks per pedestal cell;peaks;fraction of cells", 3, 0.5, 3.5)
 hh = ROOT.TH1F("hh", "", 3, 0.5, 3.5)
 for h, tally, col in ((ht, tally_lo, ROOT.kAzure + 1), (hh, tally_hi, ROOT.kOrange + 7)):
     s = sum(tally.values()) or 1
@@ -152,11 +174,11 @@ hh.Draw("hist same")
 leg = ROOT.TLegend(0.5, 0.75, 0.93, 0.88)
 leg.SetBorderSize(0)
 leg.SetTextSize(0.03)
-leg.AddEntry(ht, "low gain", "f")
-leg.AddEntry(hh, "high gain", "f")
+leg.AddEntry(ht, f"{GAIN} gain", "f")
+leg.AddEntry(hh, f"{'high' if GAIN == 'low' else 'low'} gain", "f")
 leg.Draw()
 keep += [ht, hh, leg]
 
-out = os.path.join(OUT, f"pedestal_multipeak_th{TH}.png")
+out = os.path.join(OUT, f"pedestal_multipeak_th{TH}{TAG}.png")
 c.SaveAs(out)
 print(f"saved {out}")

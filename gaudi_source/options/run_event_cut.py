@@ -25,7 +25,7 @@
 # mip_likeness, weighte, bar_x, bar_y, bar_r, moliere, transverse_rms,
 # is_shower, shower_start, shower_max, shower_end, shower_start_10,
 # shower_end_10, shower_length, first_layer, last_layer, n_layers_hit,
-# e_over_nhit.
+# e_over_nhit, shower_onset, n_layers_before_onset.
 #
 import os
 

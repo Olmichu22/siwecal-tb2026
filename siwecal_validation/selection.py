@@ -41,6 +41,12 @@ _CUT_SPEC = (
     ("shower_max_min",     "shower_max_max",     "shMax",  "shower_max"),
     ("shower_end_min",     "shower_end_max",     "shEnd",  "shower_end"),
     ("shower_length_min",  "shower_length_max",  "shLen",  "shower_length"),
+    ("shower_onset_min",   "shower_onset_max",   "shOns",  "shower_onset"),
+    # Pre-shower track length: ~0-1 for an electron converting immediately,
+    # several layers for a pion (or a radiative muon) that traverses as a MIP
+    # before interacting. The e/pi handle among the longitudinal variables.
+    ("n_layers_before_onset_min", "n_layers_before_onset_max", "nPre",
+     "n_layers_before_onset"),
     ("n_layers_hit_min",   "n_layers_hit_max",   "nLay",   "n_layers_hit"),
     ("first_layer_min",    "first_layer_max",    "first",  "first_layer"),
     ("last_layer_min",     "last_layer_max",     "last",   "last_layer"),
@@ -74,6 +80,10 @@ class CutSet:
     shower_end_max: Optional[float] = None
     shower_length_min: Optional[float] = None
     shower_length_max: Optional[float] = None
+    shower_onset_min: Optional[float] = None
+    shower_onset_max: Optional[float] = None
+    n_layers_before_onset_min: Optional[float] = None
+    n_layers_before_onset_max: Optional[float] = None
     n_layers_hit_min: Optional[float] = None
     n_layers_hit_max: Optional[float] = None
     first_layer_min: Optional[float] = None

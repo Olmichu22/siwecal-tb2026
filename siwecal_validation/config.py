@@ -128,6 +128,19 @@ class PlotConfig:
     shower_start_frac: float = 0.1
     """Fraction of the peak required by the ``*_10`` start/end variants."""
 
+    shower_core_radius_mm: float = 30.0
+    """``is_shower``: radius around the barycentre within which a hit counts
+    toward its layer's core density. Keeps scattered noise from making a layer
+    look dense."""
+
+    shower_onset_min_nhit: int = 4
+    """``is_shower``: core hits in one layer for that layer to count as dense.
+    A through-going MIP gives 1-2."""
+
+    shower_onset_min_consecutive: int = 2
+    """``is_shower``: consecutive dense layers that declare the shower onset.
+    2 rejects a single-layer delta-ray fluctuation."""
+
     moliere_containment: float = 0.90
     """Energy fraction defining the Molière containment radius."""
 

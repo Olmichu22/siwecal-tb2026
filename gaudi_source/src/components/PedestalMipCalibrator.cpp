@@ -130,6 +130,28 @@ struct PedestalMipCalibrator final : Gaudi::Algorithm {
   Gaudi::Property<int> m_maxNhit{this, "MaxNhit", 1, "nhits<=this to accept the SCA slice"};
   Gaudi::Property<int> m_nSlabsHit{this, "NSlabsHit", 8,
                                    "Coincidence tagger requirement: total slabs (incl. this one) expected hit"};
+  // --------------------------------------------------- beam-spill splitting ---
+  // The acquisitions of a run separate cleanly into beam-on and beam-off by
+  // their total occupancy: measured on run_000060 (th220) the per-acquisition
+  // hit count is bimodal, ~4 hits (median) when quiet against a 500-2000 hit
+  // bump, with a near-empty valley between ~50 and ~500, and the high-occupancy
+  // acquisitions come in contiguous blocks of ~40 separated by long quiet
+  // stretches -- i.e. the SPS spill structure, not a rate fluctuation. Anything
+  // in that valley therefore gives the same split; 200 sits in the middle of it.
+  //
+  // NOTE on using this with the DEFAULT NSlabsHit=8: don't. The coincidence
+  // tagger is itself a beam trigger (it wants >=8 slabs lit at the same BCID),
+  // so 99.1% of accepted SCA slices already come from in-spill acquisitions and
+  // the "out" sample is empty for all practical purposes. A meaningful in/out
+  // comparison needs the coincidence relaxed (NSlabsHit=1) so that BOTH samples
+  // are selected identically and only the beam differs.
+  Gaudi::Property<std::string> m_spillSelect{
+      this, "SpillSelect", "all",
+      "all|in|out: keep every acquisition (all, the historical behaviour), only those above "
+      "SpillOccupancyCut (in = beam on), or only those at or below it (out = beam off)"};
+  Gaudi::Property<int> m_spillOccupancyCut{
+      this, "SpillOccupancyCut", 200,
+      "Total accepted-hit occupancy separating in-spill from out-of-spill acquisitions"};
   Gaudi::Property<double> m_minMipIntegral{this, "MinMipIntegral", 200.,
                                            "Combined per-channel MIP histogram integral required to ATTEMPT a fit. "
                                            "A channel below this (but with >0 entries) is not masked -- it is handed "
@@ -244,6 +266,23 @@ struct PedestalMipCalibrator final : Gaudi::Algorithm {
     tree.SetBranchAddress("adc_high", buf.adcHigh);
   }
 
+  // Total accepted-hit occupancy of one acquisition: sum of nhits over every
+  // (slab,chip,sca) slot that survives the badbcid/bcid preselection. This is
+  // the quantity SpillSelect cuts on -- see the property's doc for why it
+  // separates beam-on from beam-off acquisitions.
+  static long acquisitionOccupancy(const TreeBuffers& buf) {
+    long occ = 0;
+    for (int slab = 0; slab < buf.nSlboards; ++slab) {
+      for (int chip = 0; chip < kSkirocsPerAsu; ++chip) {
+        for (int sca = 0; sca < kScasInSkiroc; ++sca) {
+          if (buf.badbcid[slab][chip][sca] != 0 || buf.bcid[slab][chip][sca] < 0) continue;
+          occ += buf.nhits[slab][chip][sca];
+        }
+      }
+    }
+    return occ;
+  }
+
   // Shared NSlabsAnalysis-style event loop over all InputFiles: for every
   // (slab,chip,sca) passing the badbcid/nhits/coincidence selection, calls
   // fn(buf, slab, chip, sca) with the TreeBuffers entry already loaded (both
@@ -254,6 +293,12 @@ struct PedestalMipCalibrator final : Gaudi::Algorithm {
   // of one forEachSelectedChannel call per gain.
   template <typename Fn>
   StatusCode forEachSelectedSca(const Fn& fn) const {
+    const std::string& spill = m_spillSelect.value();
+    if (spill != "all" && spill != "in" && spill != "out") {
+      return error() << "SpillSelect must be all|in|out, got '" << spill << "'" << endmsg, StatusCode::FAILURE;
+    }
+    const bool spillFilter = (spill != "all");
+    const bool wantInSpill = (spill == "in");
     for (const auto& path : m_inputFiles.value()) {
       std::unique_ptr<TFile> file(TFile::Open(path.c_str(), "READ"));
       if (!file || file->IsZombie()) {
@@ -272,6 +317,10 @@ struct PedestalMipCalibrator final : Gaudi::Algorithm {
       const Long64_t nEntries = tree->GetEntries();
       for (Long64_t entry = 0; entry < nEntries; ++entry) {
         tree->GetEntry(entry);
+        if (spillFilter) {
+          const bool inSpill = acquisitionOccupancy(*buf) > m_spillOccupancyCut.value();
+          if (inSpill != wantInSpill) continue;
+        }
         for (int slab = 0; slab < buf->nSlboards; ++slab) {
           for (int chip = 0; chip < kSkirocsPerAsu; ++chip) {
             for (int sca = 0; sca < kScasInSkiroc; ++sca) {

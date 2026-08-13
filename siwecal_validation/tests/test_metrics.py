@@ -98,24 +98,62 @@ def test_moliere_two_radii():
     assert abs(m.moliere_radius(x, y, w, 0.0, 0.0, 0.90) - 1.0) < 1e-9
 
 
+def test_core_hits_per_layer_drops_out_of_core_hits():
+    # Two hits in layer 0: one on the barycentre, one 100 mm away.
+    slab = np.array([0, 0, 1])
+    x = np.array([0.0, 100.0, 1.0])
+    y = np.zeros(3)
+    n = m.core_hits_per_layer(slab, x, y, 0.0, 0.0, 3, radius_mm=30.0)
+    assert list(n) == [1, 1, 0]           # the 100 mm hit does not count
+
+
 def test_shower_features_shower():
     # rising profile peaking at layer 5, then falling
     profile = np.array([0, 1, 4, 8, 14, 20, 12, 6, 2, 0,
                         0, 0, 0, 0, 0], dtype=float)
-    f = m.shower_features(profile, threshold=5.0, max_min=10.0, start_frac=0.1)
+    # Dense core from layer 2 on: the onset is the first run of two layers
+    # with >= 4 core hits.
+    core = np.array([0, 1, 4, 8, 14, 20, 12, 6, 2, 0,
+                     0, 0, 0, 0, 0], dtype=int)
+    f = m.shower_features(profile, threshold=5.0, max_min=10.0, start_frac=0.1,
+                          core_hits=core, hits_layer=profile)
     assert f.is_shower is True
     assert f.max_layer == 5.0 and f.max_value == 20.0
     assert f.start_layer == 3.0           # first layer > 5 before the peak
     assert f.end_layer == 7.0             # last layer > 5 after the peak
     assert f.length == 5.0                # layers 3,4,5,6,7 are > 5
+    assert f.onset == 2.0                 # layers 2 and 3 are the first dense pair
+    assert f.n_layers_before_onset == 1.0  # only layer 1 has hits ahead of it
 
 
 def test_shower_features_mip():
     # flat MIP-like profile (a couple of hits per layer): not a shower
     profile = np.full(15, 2.0)
-    f = m.shower_features(profile, threshold=5.0, max_min=10.0)
+    core = np.full(15, 2, dtype=int)
+    f = m.shower_features(profile, threshold=5.0, max_min=10.0,
+                          core_hits=core, hits_layer=profile)
     assert f.is_shower is False
     assert math.isnan(f.start_layer) and math.isnan(f.max_layer)
+    assert math.isnan(f.onset) and math.isnan(f.n_layers_before_onset)
+
+
+def test_shower_onset_needs_consecutive_dense_layers():
+    # A single dense layer (a delta ray) surrounded by MIP-level occupancy must
+    # not open a shower, however tall the profile peak is.
+    profile = np.array([2, 2, 40, 2, 2] + [2] * 10, dtype=float)
+    core = np.array([1, 1, 40, 1, 1] + [1] * 10, dtype=int)
+    assert m.shower_onset(core, profile, max_min=10.0) == -1
+    # Two in a row does.
+    core2 = np.array([1, 1, 40, 8, 1] + [1] * 10, dtype=int)
+    assert m.shower_onset(core2, profile, max_min=10.0) == 2
+
+
+def test_shower_onset_finds_a_late_cascade():
+    # A cascade opening in the last layers: no room left for a rising edge, which
+    # is what the previous ascending-pairs criterion needed.
+    profile = np.array([1] * 12 + [30, 40, 20], dtype=float)
+    core = np.array([1] * 12 + [30, 40, 20], dtype=int)
+    assert m.shower_onset(core, profile, max_min=10.0) == 12
 
 
 def _run_standalone():

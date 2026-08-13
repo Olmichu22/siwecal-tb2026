@@ -36,7 +36,11 @@ SCALAR_NAMES = (
     "nhit", "zbary", "energy", "mip_likeness", "weighte", "bar_x", "bar_y", "bar_r",
     "moliere", "transverse_rms", "is_shower", "shower_start", "shower_max", "shower_end",
     "shower_start_10", "shower_end_10", "shower_length", "first_layer", "last_layer",
-    "n_layers_hit", "e_over_nhit")
+    "n_layers_hit", "e_over_nhit",
+    # Appended, not interleaved with the shower_* block: the index of every
+    # pre-existing scalar has to stay put. Mirrors scalarNames() in
+    # k4SiWEcalReco/EcalShowerVars.h, which is the source of truth.
+    "shower_onset", "n_layers_before_onset")
 PER_LAYER_NAMES = ("hits_per_layer", "energy_per_layer", "weighte_per_layer")
 _MIP_PREFIX = {0.5: "mip05", 1.0: "mip1"}
 
@@ -307,7 +311,7 @@ def write_valtree(reader: "PidFileReader", out_path: str, config, frame_indices,
 
     cols = reader.scalar_columns()    # per-event (all events): base + per-layer + mip
     ids = reader.identifiers()
-    scalar_names = _scalar_derived_names()       # 21 scalars incl. is_shower
+    scalar_names = _scalar_derived_names()       # 23 scalars incl. is_shower
     per_layer = list(_PER_LAYER_FIELDS)          # 3 per-layer profile blocks
     # Only the MIP-variant blocks actually present in this file (validation mode).
     active_mip = [t for t in mip_thresholds

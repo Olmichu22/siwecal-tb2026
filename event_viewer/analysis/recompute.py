@@ -21,6 +21,13 @@ _SHOWER_PEAK  = 10.0  # minimum peak nhit for shower classification
 _START_FRAC   = 0.1   # fraction of peak for start/end_layer_10
 _MOLIERE_CONT = 0.90  # 90% transverse containment
 _W_X0_MM      = 3.5   # tungsten radiation length [mm]
+# is_shower onset criterion. These MUST match the EcalPidTransformer defaults
+# (ShowerCoreRadiusMm / ShowerOnsetMinNhit / ShowerOnsetMinConsecutive), because
+# the whole point of the recompute path is that threshold 0 reproduces the flag
+# stored in the file.
+_CORE_RADIUS_MM   = 30.0
+_ONSET_MIN_NHIT   = 4
+_ONSET_MIN_CONSEC = 2
 
 
 def recompute_all_metrics(
@@ -82,6 +89,7 @@ def _metrics_one(slab, energy, x, y, w_over_x0, n_layers):
             "is_shower": False,
             "shower_start": NAN, "shower_max": NAN, "shower_end": NAN,
             "shower_start_10": NAN, "shower_end_10": NAN, "shower_length": NAN,
+            "shower_onset": NAN, "n_layers_before_onset": NAN,
         }
 
     # Clip out-of-range slab indices before any indexing into w_over_x0.
@@ -113,7 +121,20 @@ def _metrics_one(slab, energy, x, y, w_over_x0, n_layers):
                     x[pos], y[pos], pw, bar_x, bar_y)
 
     # Longitudinal shower shape (profile_kind = "nhit" matches valcache default).
-    sh = metrics.shower_features(hits_layer, _SHOWER_THR, _SHOWER_PEAK, _START_FRAC)
+    # The onset criterion counts hits inside the shower core, so it needs the
+    # transverse positions. A tree without hit_x/hit_y falls back to the raw
+    # per-layer counts: the onset is still found, just without the guard against
+    # scattered noise inflating a layer's density.
+    if x is not None and np.isfinite(bar_x):
+        keep = energy > 0
+        core_hits = metrics.core_hits_per_layer(
+            slab[keep], x[keep], y[keep], bar_x, bar_y, n_layers, _CORE_RADIUS_MM)
+    else:
+        core_hits = hits_layer.astype(int)
+    sh = metrics.shower_features(hits_layer, _SHOWER_THR, _SHOWER_PEAK, _START_FRAC,
+                                 core_hits=core_hits, hits_layer=hits_layer,
+                                 onset_min_nhit=_ONSET_MIN_NHIT,
+                                 onset_min_consecutive=_ONSET_MIN_CONSEC)
 
     if sh.is_shower and x is not None and np.isfinite(bar_x):
         pos = energy > 0
@@ -142,4 +163,6 @@ def _metrics_one(slab, energy, x, y, w_over_x0, n_layers):
         "shower_start_10": sh.start_layer_10,
         "shower_end_10": sh.end_layer_10,
         "shower_length": sh.length,
+        "shower_onset": sh.onset,
+        "n_layers_before_onset": sh.n_layers_before_onset,
     }
