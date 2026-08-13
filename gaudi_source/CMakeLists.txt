@@ -19,6 +19,11 @@ find_package(ROOT REQUIRED COMPONENTS Core RIO Tree Spectrum)
 find_package(DD4hep REQUIRED COMPONENTS DDCore)
 # LCIO: only EcalLcioDecoder needs it (reads the EUDAQ ROC_run_*_tp.slcio files).
 find_package(LCIO REQUIRED)
+# ACTS tracking stage (ACTSGeoSvc, ShowerTagger, SiPadMeasConverter,
+# ACTSProtoTracker) -- same dependency pin as siwecal_k4sim's CMakeLists.txt,
+# both repos share the key4hep release (.key4hep-release).
+find_package(Acts 44.3.0 REQUIRED COMPONENTS Core PluginDD4hep)
+find_package(k4ActsTracking REQUIRED)
 
 gaudi_add_module(k4SiWEcalRecoPlugins
   SOURCES
@@ -29,6 +34,10 @@ gaudi_add_module(k4SiWEcalRecoPlugins
     src/components/EcalLcioDecoder.cpp
     src/components/PedestalMipCalibrator.cpp
     src/components/EcalEventBuilder.cpp
+    src/components/ACTSGeoSvc.cpp
+    src/components/ShowerTagger.cpp
+    src/components/SiPadMeasConverter.cpp
+    src/components/ACTSProtoTracker.cpp
   LINK
     Gaudi::GaudiKernel
     k4FWCore::k4FWCore
@@ -38,10 +47,23 @@ gaudi_add_module(k4SiWEcalRecoPlugins
     ROOT::Core ROOT::RIO ROOT::Tree ROOT::TreePlayer ROOT::Spectrum
     DD4hep::DDCore
     LCIO::lcio
+    Acts::Core
+    Acts::PluginDD4hep
+    k4ActsTracking::k4ActsTracking
 )
 
 target_include_directories(k4SiWEcalRecoPlugins
   PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/include)
+
+# ACTS headers: derived from the Acts::Core target find_package(Acts) sets up,
+# not hardcoded to one key4hep release's install path -- the release (and so
+# the hashed acts/<version>-<hash>/include directory) is pinned in
+# .key4hep-release and changes between stacks. Same workaround as
+# siwecal_k4sim's top-level CMakeLists.txt.
+get_target_property(_acts_include_dirs Acts::Core INTERFACE_INCLUDE_DIRECTORIES)
+if(_acts_include_dirs)
+    target_include_directories(k4SiWEcalRecoPlugins PRIVATE ${_acts_include_dirs})
+endif()
 
 install(TARGETS k4SiWEcalRecoPlugins
   EXPORT k4SiWEcalRecoTargets
