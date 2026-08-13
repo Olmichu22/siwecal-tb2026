@@ -83,7 +83,7 @@ def _jobs(args):
         yield run, paths.resolve_input(os.path.join(run, f"ecal_{run}.root")), {}
 
 
-def _post_process(temp, out_dir, label, effective_cut, mip_thresholds, fmt):
+def _post_process(temp, out_dir, label, effective_cut, mip_thresholds, fmt, ecal_path):
     """Apply ``effective_cut`` to the full EDM4hep ``temp`` file and write the
     requested final output(s). Returns the number of cut-passing events."""
     config = PlotConfig()
@@ -95,7 +95,14 @@ def _post_process(temp, out_dir, label, effective_cut, mip_thresholds, fmt):
 
     if fmt in ("edm4hep", "both"):
         out = os.path.join(out_dir, f"ecal_{label}.edm4hep.root")
-        edm4hep_pid.write_filtered(temp, out, frame_indices)
+        # Merge in the simulation's digitized+tracks file when one sits next to
+        # the ecal tree (siwecal_k4sim runs only) -- None for real test-beam
+        # data, which never has one. See "Single-file output" in
+        # siwecal_k4sim/docs/gaudi_pipeline.md.
+        tracks_path = paths.tracks_path_for(ecal_path)
+        edm4hep_pid.write_filtered(temp, out, frame_indices, merge_path=tracks_path)
+        if tracks_path:
+            print(f"[Output] merged ACTSTracks from {tracks_path}")
         print(f"[Output] {n_kept} event(s) -> {out}")
     if fmt in ("valtree", "both"):
         out = os.path.join(out_dir, f"ecal_{label}.valtree.root")
@@ -175,7 +182,8 @@ def main(argv=None):
             failures += 1
             continue
         try:
-            _post_process(temp, out_dir, label, effective_cut, mip_thresholds, args.format)
+            _post_process(temp, out_dir, label, effective_cut, mip_thresholds,
+                         args.format, ecal_path)
         except (OSError, RuntimeError, ValueError) as error:
             print(f"ERROR: post-processing failed for {label}: {error}")
             failures += 1

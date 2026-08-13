@@ -28,6 +28,12 @@ import numpy as np
 SHAPE_PARAM_META = "ECalPid_shapeParameterNames"
 IDENTIFIER_COLUMNS = ("run", "event", "spill", "bcid", "nhit_chan")
 
+# Collections write_filtered() pulls in from a merge_path (siwecal_k4sim's
+# digitized.edm4hep.root): job4_tracking.py's ACTS output, nothing that
+# duplicates ECalHits or carries a SimCalorimeterHit relation -- see
+# write_filtered()'s docstring for why.
+_MERGE_COLLECTIONS = ("ACTSTracks", "EMShowers", "SiPadMeasurements", "SiPadShowerFlags")
+
 # Canonical shapeParameters layout -- mirror of k4SiWEcalReco/EcalShowerVars.h
 # (scalarNames / perLayerNames) and EcalPidTransformer's MIP-cut prefixes. Kept
 # in Python so opening a file needs no podio call (the slow part); the actual
@@ -101,6 +107,8 @@ class PidFileReader:
         self._ids: Optional[Dict[str, np.ndarray]] = None
         self._hits: Optional[Dict[str, np.ndarray]] = None  # jagged object arrays
         self._fields: Optional[tuple] = None         # PERHIT_FIELDS minus absent optionals
+        self._track_counts: Optional[np.ndarray] = None
+        self._track_counts_built = False
 
     @property
     def _frames(self):
@@ -238,13 +246,38 @@ class PidFileReader:
             self._hits = store
         return self._hits
 
+    # ------------------------------------------------------- ACTS tracks -----
+    def track_counts(self) -> Optional[np.ndarray]:
+        """Per-event ``ACTSTracks`` count, or ``None`` if the file has none.
+
+        Simulation PID files get ``ACTSTracks`` merged straight in by
+        :func:`write_filtered` (see ``siwecal_k4sim/docs/gaudi_pipeline.md``,
+        "Single-file output"); real test-beam PID files never have the
+        collection, which is not an error -- just nothing to report.
+        """
+        if not self._track_counts_built:
+            self._track_counts_built = True
+            try:
+                import awkward as ak
+                import uproot
+
+                tree = uproot.open(self.path)["events"]
+                branch = "ACTSTracks/ACTSTracks.chi2"
+                if branch in tree.keys():
+                    self._track_counts = ak.to_numpy(
+                        ak.num(tree[branch].array())).astype(np.int64)
+            except Exception:
+                self._track_counts = None
+        return self._track_counts
+
     def close(self) -> None:
         # podio Reader has no explicit close; drop references.
         self._frames = None
 
 
 def write_filtered(in_path: str, out_path: str, frame_indices,
-                   events_category: str = "events") -> int:
+                   events_category: str = "events",
+                   merge_path: Optional[str] = None) -> int:
     """Write a filtered copy of an EDM4hep PID file (the ``--save-tree`` output).
 
     Copies only the ``events`` frames whose podio index is in ``frame_indices``
@@ -253,8 +286,31 @@ def write_filtered(in_path: str, out_path: str, frame_indices,
     with ``ECalPid_shapeParameterNames``, ``configuration_metadata``) verbatim so
     the result stays a self-describing, re-readable PID file. Returns the number
     of event frames written.
+
+    ``merge_path``, when given, is a second EDM4hep file (see
+    :func:`siwecal_common.paths.tracks_path_for` -- typically
+    ``digitized.edm4hep.root`` from the ``siwecal_k4sim`` simulation pipeline)
+    whose SAME-INDEX frames contribute :data:`_MERGE_COLLECTIONS` --
+    ``ACTSTracks``, ``EMShowers``, ``SiPadMeasurements``, ``SiPadShowerFlags``
+    -- into each kept event. Only those four: ``ECalHits`` already IS the raw
+    hits (from the same ``SiPadHits*`` chain, just re-shaped), so re-adding
+    ``SiPadHits*``/``MCParticles`` would duplicate that data for nothing, AND
+    they carry ``SimCalorimeterHit`` -> ``CaloHitContribution`` relations that
+    segfault (``setReferences()`` deep in podio) when resolved against a
+    second, concurrently-open ``Reader`` -- ``ACTSTracks`` et al. are plain
+    ``Track``/``Cluster``/``TrackerHit3D``/``UserDataCollection`` types with no
+    such relations, so they merge cleanly.
+
+    The frame index lines up exactly: ``analysis/sim_to_ecal_tree.py`` writes
+    ``event = <original frame index into digitized.edm4hep.root>`` for every
+    ecal-tree row, ``EcalToEDM4hep`` reads that tree in the same order, and
+    ``frame_indices`` here are positions into that same 1:1 chain -- so the two
+    files' frame ``idx`` always refer to the same physical event. A missing or
+    out-of-range ``merge_path`` frame is skipped silently -- the merge is
+    always a bonus, never a requirement for a valid PID file.
     """
     import podio.root_io as rio
+    from podio.frame import Frame
 
     indices = sorted({int(i) for i in frame_indices})
     out_dir = os.path.dirname(out_path)
@@ -263,10 +319,31 @@ def write_filtered(in_path: str, out_path: str, frame_indices,
 
     reader = rio.Reader(in_path)
     writer = rio.Writer(out_path)
-
     events = reader.get(events_category)
+
+    merge_events = None
+    merge_reader = None   # keep alive: an unbound Reader(...) temporary can be
+    # garbage-collected while merge_events still references it, a use-after-
+    # free that segfaults inside podio's relation resolution on next access.
+    if merge_path and os.path.exists(merge_path):
+        merge_reader = rio.Reader(merge_path)
+        merge_events = merge_reader.get(events_category)
+
     for idx in indices:
-        writer.write_frame(events[idx], events_category)
+        frame = events[idx]
+        if merge_events is None or idx >= len(merge_events):
+            writer.write_frame(frame, events_category)
+            continue
+        merged = Frame()
+        for name in frame.getAvailableCollections():
+            merged.put(frame.get(name), name)
+        merge_frame = merge_events[idx]
+        available = set(merge_frame.getAvailableCollections())
+        for name in _MERGE_COLLECTIONS:
+            if name not in available or name in merged.getAvailableCollections():
+                continue
+            merged.put(merge_frame.get(name), name)
+        writer.write_frame(merged, events_category)
 
     # Preserve the metadata / configuration categories unchanged.
     for category in reader.categories:

@@ -280,6 +280,23 @@ are pure functions of `hit_slab`). PID files written **before** those two
 collections existed stay readable — `siwecal_common.edm4hep_pid` reports them via
 `PidFileReader.perhit_fields()` and simply omits what a file does not carry.
 
+**Simulation runs also carry `ACTSTracks` / `EMShowers` / `SiPadMeasurements` /
+`SiPadShowerFlags`** — no separate tracks file. `run_pid_batch.py` looks for a
+`digitized.edm4hep.root` next to the input `ecal_<run>.root`
+(`siwecal_common.paths.tracks_path_for`) and, when found, `write_filtered`
+merges those four collections straight into the SAME `ecal_<run>.edm4hep.root`
+it writes (see `siwecal_k4sim/docs/gaudi_pipeline.md`, "Single-file output",
+for where `digitized.edm4hep.root` comes from). `SiPadHits*`/`MCParticles`
+are deliberately **not** pulled in: `ECalHits` already covers the raw hits,
+and those collections carry `SimCalorimeterHit`→`CaloHitContribution`
+relations that segfault when resolved against a second, concurrently-open
+podio `Reader` — the four merged collections are relation-free
+`Track`/`Cluster`/`TrackerHit3D`/`UserDataCollection` types, so they merge
+cleanly. Real test-beam runs never have a `digitized.edm4hep.root` sibling, so
+their PID files are unaffected — `PidFileReader.track_counts()` returns
+`None` for them, same as for any older simulation PID file written before
+this merge existed.
+
 The `shapeParameters` floats are stored in a fixed order (names listed once in
 the `metadata` frame parameter `ECalPid_shapeParameterNames`):
 
