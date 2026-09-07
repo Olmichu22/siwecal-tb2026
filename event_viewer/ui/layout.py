@@ -130,6 +130,25 @@ def _event_tab():
     ])
 
 
+def _complement_bar(button_id: str):
+    """The "Complementary" button and the sentence explaining what it selects.
+
+    The per-cut ``compl.`` checkboxes are the real control -- they are what lets
+    one cut stay applied while another is complemented -- and this button is the
+    shortcut that flips all of them at once."""
+    return html.Div(style={"display": "flex", "gap": "8px",
+                           "alignItems": "center", "margin": "6px 0"},
+                    children=[
+        html.Button("Complementary", id=button_id, n_clicks=0,
+                    title="Flip the compl. box on every cut. Tick them one by "
+                          "one to complement only some and leave the rest "
+                          "filtering as usual."),
+        html.Span("keeps events that pass the unticked cuts and fail the "
+                  "ticked ones",
+                  style={"fontSize": "11px", "color": "#666"}),
+    ])
+
+
 def _event_cuts_section():
     return html.Div(style={"marginTop": "14px"}, children=[
         html.H4("Distribution & cuts — limit the events shown above"),
@@ -149,6 +168,7 @@ def _event_cuts_section():
                 html.H5("Dynamic cuts"),
                 dcc.Dropdown(id="ev-cut-vars", multi=True,
                              placeholder="variables to cut on"),
+                _complement_bar("ev-cut-complement-btn"),
                 html.Div(id="ev-cut-sliders"),
             ]),
         ]),
@@ -180,6 +200,7 @@ def _distributions_tab():
                 html.H4("Dynamic cuts — limit distributions & clustering input"),
                 dcc.Dropdown(id="cut-vars", multi=True,
                              placeholder="variables to cut on"),
+                _complement_bar("cut-complement-btn"),
                 html.Div(id="cut-sliders"),
             ]),
             # Right: clustering.

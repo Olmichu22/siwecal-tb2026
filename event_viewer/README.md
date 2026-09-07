@@ -59,6 +59,40 @@ from the dropdown or change file at runtime.
   tab; run **clustering** (K-Means / DBSCAN / GMM / Spectral) on chosen features
   and view the labels on any 2-variable scatter.
 
+### Complementary selections
+
+Every cut carries a `compl.` checkbox, and **Complementary** flips all of them at
+once. Ticked cuts are complemented *as a group*, unticked ones keep filtering
+normally:
+
+    keep = AND(unticked cuts) AND NOT( AND(ticked cuts) )
+
+So leaving a window on `nhit` unticked and ticking `dl_score` selects *the events
+inside the occupancy window that the score rejected* — usually the question you
+want to ask of a discriminant, and the reason the checkboxes are per cut rather
+than one global invert. Ticking everything gives the complement of the whole
+selection.
+
+Note `NOT(A AND B)` is not `NOT A AND NOT B`: ticking two cuts gives the events
+failing *either*, not those failing both. Events whose value is NaN for a ticked
+variable stay out of the complement — they never failed that cut, they have
+nothing to compare.
+
+### Quantile cuts
+
+Every cut also carries a `%` checkbox. With it ticked the slider runs over
+0–100 % of that variable's own distribution instead of its value range, so
+10–90 means "keep the events between the 10th and the 90th percentile". An
+absolute threshold is not comparable across runs — the same `dl_score < 0.52`
+keeps 0.5 % of one beam energy and 40 % of another — while a percentile is.
+
+The percentiles are taken over the whole file (after the MIP cut), not over the
+events surviving the other cuts, so they do not depend on the order the cuts are
+applied; NaN values are left out of the percentile base. The store keeps the
+fraction, not the value it resolves to, so moving the MIP cut re-resolves it
+instead of leaving a stale number. Discrete variables (the slider that snaps to
+its unique values) keep the toggle disabled.
+
 ## Files without metrics
 
 Opening a plain `ecal_*.root` (no `.valcache.root`) still works: the viewer

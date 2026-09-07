@@ -61,6 +61,11 @@ class ViewerConfig:
     # valcache with ``siwecal_validation`` to re-enable the cut on big files).
     max_recompute_events: int = 10000
 
+    # A cut variable with at most this many distinct finite values gets a
+    # *discrete* slider (marks snapping to each value, e.g. a layer count or
+    # a threshold) instead of a continuous 100-step range slider.
+    discrete_max_unique: int = 20
+
     # Display.
     colorscale: str = "Viridis"
     host: str = "127.0.0.1"

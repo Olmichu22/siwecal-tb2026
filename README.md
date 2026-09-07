@@ -435,6 +435,9 @@ $EDITOR settings.yml          # set data_dir to your run/event directory
 
 # 4. Load the environment in every new shell
 source setup.sh
+
+# 5. (optional) register the Jupyter kernel that uses this same environment
+./jupyter_kernel.sh install
 ```
 
 ### Two scripts: `install.sh` (once) vs `setup.sh` (every shell)
@@ -460,12 +463,85 @@ KEY4HEP_RELEASE=2026-02-01 ./install.sh   # pin a different key4hep release
 The default key4hep release lives in **`.key4hep-release`** — the single source
 of truth read by both `install.sh` and `setup.sh`. Edit that file to move the
 whole suite to a new release; the `KEY4HEP_RELEASE` env var overrides it per run.
+The one deliberate exception is the Jupyter kernel, which tracks `latest` unless
+installed with `--pinned` (see below).
 
 `.venv-viewer` is **not** committed (it bakes in absolute CVMFS paths), and the
 `k4SiWEcalReco/build/` tree is machine-specific — both are recreated by
 `install.sh` per machine. After installing, `source setup.sh` wires everything
 up: it sources key4hep, puts the repo + the `k4SiWEcalReco` build on
 `PYTHONPATH`, and activates `.venv-viewer` automatically.
+
+### Jupyter: `jupyter_kernel.sh`
+
+Jupyter cannot `source` anything — a kernel is a fixed command line — so a
+notebook opened with the stock `python3` kernel has **no** ROOT, no uproot and
+no repo on `PYTHONPATH`. `jupyter_kernel.sh` registers a kernelspec whose
+command is that same script in launch mode: it sources `setup.sh` exactly like a
+terminal does and then execs `ipykernel`. One file, so the kernel cannot drift
+away from the rest of the environment.
+
+```bash
+# once per machine/user: register the kernel
+./jupyter_kernel.sh install
+
+# start a server here (headless; reach it over an SSH tunnel like the viewer)
+./jupyter_kernel.sh lab --port 8888
+#   ssh -N -L 8888:localhost:8888 <user>@<host>     (from your laptop)
+```
+
+Then pick **“SiW-ECAL (key4hep latest)”** in the JupyterLab launcher (or
+*Kernel → Change kernel* in an existing notebook, e.g.
+`notebooks/test_rootfiles.ipynb`). Inside it, `import ROOT`, `uproot`,
+`siwecal_common`, `siwecal_validation`, … all work, and so does the compiled
+`k4SiWEcalReco` plugin if it has been built.
+
+The kernel is installed under `~/.local/share/jupyter/kernels/`, so **any**
+Jupyter on the account sees it — your own JupyterLab, a JupyterHub with the
+default paths — without that server knowing anything about this repo.
+
+```bash
+./jupyter_kernel.sh install --bare        # key4hep only, no repo wiring
+./jupyter_kernel.sh install --force       # overwrite an existing kernel
+./jupyter_kernel.sh install --pinned      # use .key4hep-release instead of latest
+./jupyter_kernel.sh install --release 2026-02-01     # a specific release
+./jupyter_kernel.sh install --name x --display-name "…"   # custom kernel name
+./jupyter_kernel.sh list                  # kernels Jupyter can see
+./jupyter_kernel.sh remove [name]         # unregister
+```
+
+#### Which key4hep release the kernel uses
+
+The kernel defaults to **`latest`** and re-resolves it at *every start*, so it
+follows the key4hep stack as new releases appear — no reinstall needed. This is
+deliberately **not** `.key4hep-release`: that file pins what `gaudi_source` is
+*compiled* against (see above), while for interactive notebooks the useful
+default is the current stack. `setup.sh` prints which release latest resolved
+to, e.g. `[setup] key4hep latest (2026-04-08) + .venv-viewer active`.
+
+Use **`--pinned`** if a notebook has to load the compiled `k4SiWEcalReco`
+plugin: its ABI follows the release it was built with, so there the kernel must
+match `.key4hep-release`. `--release <date>` freezes the kernel on one release
+for good.
+
+> **`-r latest` is a trap** and the scripts never use it:
+> `releases/latest` is a dead 2024-04-12 tree (ROOT 6.28), while the real
+> latest is `releases/latest-opt` — which is what key4hep itself uses by
+> default and what `k4_setup_release` (in `key4hep_release.sh`) translates
+> `latest` into.
+
+`install` refuses to write the kernelspec if `ipykernel` cannot be imported in
+the resulting environment, so a broken setup shows up there instead of as a dead
+kernel in a notebook.
+
+> **Kernels inherit the server's environment**, and key4hep cannot be swapped
+> inside a live process: a Jupyter started from a shell with a *different*
+> release would poison every kernel it spawns. Two things prevent that.
+> `setup.sh` / `setupkey4hep.sh` skip the CVMFS step when the requested release
+> is already loaded (so re-sourcing and `jupyter_kernel.sh lab` work from any
+> shell), and if the inherited release is genuinely a different one the kernel
+> **restarts itself in a clean environment** — keeping only the account, PATH,
+> locale and Kerberos/X11/grid credentials — instead of dying.
 
 ## Configuration: `settings.yml`
 
@@ -506,7 +582,11 @@ siwecal-tb2026/
 ├── settings.yml / settings.example.yml   shared configuration
 ├── install.sh                           one-time installer (key4hep venv + k4 build)
 ├── setup.sh                              per-shell environment loader
+├── setupkey4hep.sh                       bare key4hep (no repo wiring)
+├── jupyter_kernel.sh                     Jupyter kernel on the key4hep stack (+ `lab`)
+├── notebooks/                            notebooks (run them with the kernel above)
 ├── requirements.txt                      dash + plotly (rest from key4hep)
+├── requirements-nodeps.txt               seaborn (--no-deps, deps from key4hep)
 ├── siwecal_common/                       shared path resolution
 ├── siwecal_eventbuilder/                 event building (+ README)
 ├── siwecal_validation/                   validation + metrics (+ README)

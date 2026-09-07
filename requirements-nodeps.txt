@@ -1,0 +1,11 @@
+# Packages installed with `pip install --no-deps` into .venv-viewer.
+#
+# These are pure add-ons whose dependencies key4hep ALREADY provides (numpy,
+# pandas, matplotlib, ...). Installing them normally makes pip "helpfully"
+# upgrade those into the venv -- seaborn alone pulls numpy 2.5 / pandas 3.0 /
+# matplotlib 3.11 on top of the stack's 2.2 / 2.3 / 3.10, which then shadow
+# key4hep for PyROOT, uproot and awkward. --no-deps keeps the stack's versions.
+#
+# So: anything whose deps are all in key4hep goes here, everything else in
+# requirements.txt.
+seaborn>=0.13

@@ -5,3 +5,6 @@
 # packages are the interactive viewer's web stack:
 dash>=3.0
 plotly>=6.0
+
+# Extras that only need what key4hep already ships live in
+# requirements-nodeps.txt (installed with --no-deps).
