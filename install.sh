@@ -81,6 +81,10 @@ if [ "${DO_VIEWER}" = 1 ]; then
     # shellcheck disable=SC1091
     source "${VENV}/bin/activate"
     pip install --no-input -r "${REPO_ROOT}/requirements.txt"
+    # Add-ons whose dependencies key4hep already ships -- installed
+    # without them so pip cannot shadow the stack's numpy/pandas/
+    # matplotlib inside the venv (see requirements-nodeps.txt).
+    pip install --no-input --no-deps -r "${REPO_ROOT}/requirements-nodeps.txt"
     deactivate
 else
     echo "==> [2/3] skipped (--no-viewer)"
