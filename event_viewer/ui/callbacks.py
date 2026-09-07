@@ -18,8 +18,10 @@ the matching cut-vars to ``[]`` clears it), which reads both the range sliders a
 the per-cut ``compl.`` checkboxes. Adding or removing a cut variable
 rebuilds the whole slider block, so the builder carries the existing selections
 *and* their complement flags over instead of resetting every cut to its full
-range. The "Complementary" button writes only the widgets, never the store, so
-the store keeps its single writer. ``store-pos`` has one primary writer
+range. The "Complementary" button and the per-variable ``%`` (quantile) toggle
+write only the widgets, never the store, so the store keeps its single writer:
+the ``%`` toggle rebuilds the slider on the 0-100% scale and the rebuilt slider
+is what feeds the store. ``store-pos`` has one primary writer
 (navigation) plus a reset on file / event-cut change.
 """
 
@@ -53,21 +55,80 @@ def _pos_of(passing, cur_index) -> int:
     return int(loc[0]) if loc.size else 0
 
 
-def _cut_slider(controller, path, var, thr, prev, id_type, prev_invert=()):
-    """One labelled cut slider, preserving a previous selection.
+def _fmt_mark(value: float) -> str:
+    """Short label for a discrete slider mark (integers without ``.0``)."""
+    return str(int(value)) if float(value).is_integer() else f"{value:g}"
+
+
+def _discrete_marks(values) -> dict:
+    """Snap marks for a discrete slider: one per value, labels thinned when
+    there are too many to read (every value is still a valid snap point)."""
+    n = len(values)
+    show_every = 1 if n <= 12 else int(np.ceil(n / 12))
+    marks = {}
+    for k, value in enumerate(values):
+        label = _fmt_mark(value) if k % show_every == 0 or k == n - 1 else ""
+        marks[value] = {"label": label,
+                        "style": {"fontSize": "10px",
+                                  "whiteSpace": "nowrap"}}
+    return marks
+
+
+def _toggled_var(id_type: str):
+    """The variable whose checkbox of ``id_type`` fired this callback, if any."""
+    trigger = ctx.triggered_id
+    if isinstance(trigger, dict) and trigger.get("type") == id_type:
+        return trigger.get("index")
+    return None
+
+
+def _cut_slider(controller, path, var, thr, prev, id_type, prev_invert=(),
+                prev_quantile=()):
+    """One labelled cut slider (discrete if the variable has few unique values,
+    otherwise a continuous 100-step range), preserving a previous selection.
 
     The label carries a ``compl.`` checkbox that moves this cut into the inverted
     group (see :mod:`event_viewer.analysis.cuts`), so a complementary selection
     can be built one variable at a time; the "Complementary" button flips them
-    all at once."""
-    lo, hi = controller.variable_range(path, var, thr)
-    step = (hi - lo) / 100 if hi > lo else 1.0
-    value = prev.get(var) or [lo, hi]
-    value = [max(lo, min(hi, value[0])), max(lo, min(hi, value[1]))]
-    slider = dcc.RangeSlider(
-        id={"type": id_type, "index": var},
-        min=lo, max=hi, value=value, step=step, allowCross=False,
-        tooltip={"placement": "bottom", "always_visible": False})
+    all at once.
+
+    It also carries a ``%`` checkbox: with it on, the slider runs over 0-100%
+    of the variable's own distribution instead of its value range, so the same
+    selection means the same thing across runs of different beam energy. The
+    toggle is disabled for discrete variables, where the slider snaps to the
+    unique values and a percentile has no useful meaning."""
+    lo, hi, values = controller.variable_domain(path, var, thr)
+    discrete = bool(values) and len(values) > 1
+    quantile = var in prev_quantile and not discrete
+    if quantile:
+        # 0-100% of the distribution; the store keeps fractions and the
+        # percentiles are resolved against the data at mask() time.
+        value = prev.get(var) or [0, 100]
+        value = [max(0, min(100, value[0])), max(0, min(100, value[1]))]
+        slider = dcc.RangeSlider(
+            id={"type": id_type, "index": var},
+            min=0, max=100, value=value, step=1, allowCross=False,
+            marks={0: "0%", 25: "25%", 50: "50%", 75: "75%", 100: "100%"},
+            tooltip={"placement": "bottom", "always_visible": False})
+    elif discrete:
+        # Discrete: snap to the unique values; carry the previous selection over
+        # by snapping each end to the nearest allowed value.
+        arr = np.asarray(values, dtype=float)
+        prev_val = prev.get(var) or [lo, hi]
+        value = [float(arr[np.abs(arr - v).argmin()]) for v in prev_val]
+        slider = dcc.RangeSlider(
+            id={"type": id_type, "index": var},
+            min=lo, max=hi, value=value, step=None, marks=_discrete_marks(values),
+            allowCross=False,
+            tooltip={"placement": "bottom", "always_visible": False})
+    else:
+        step = (hi - lo) / 100 if hi > lo else 1.0
+        value = prev.get(var) or [lo, hi]
+        value = [max(lo, min(hi, value[0])), max(lo, min(hi, value[1]))]
+        slider = dcc.RangeSlider(
+            id={"type": id_type, "index": var},
+            min=lo, max=hi, value=value, step=step, allowCross=False,
+            tooltip={"placement": "bottom", "always_visible": False})
     return html.Div(style={"marginBottom": "14px"}, children=[
         html.Div(style={"display": "flex", "gap": "8px",
                         "alignItems": "baseline"}, children=[
@@ -77,6 +138,13 @@ def _cut_slider(controller, path, var, thr, prev, id_type, prev_invert=()):
                 options=[{"label": " compl.", "value": "invert"}],
                 value=["invert"] if var in prev_invert else [],
                 style={"fontSize": "11px", "color": "#b45309"},
+                inputStyle={"marginRight": "3px"}),
+            dcc.Checklist(
+                id={"type": f"{id_type}-quantile", "index": var},
+                options=[{"label": " %", "value": "quantile",
+                          "disabled": discrete}],
+                value=["quantile"] if quantile else [],
+                style={"fontSize": "11px", "color": "#2563eb"},
                 inputStyle={"marginRight": "3px"}),
         ]),
         slider])
@@ -89,34 +157,54 @@ def _flagged(ids, values):
 
 
 def _cut_sliders(controller, cut_vars, path, hit_threshold, cur_values, cur_ids,
-                 id_type, cur_invert=None, cur_invert_ids=None):
-    """Rebuild every cut slider, carrying over existing selections."""
+                 id_type, cur_invert=None, cur_invert_ids=None,
+                 cur_quantile=None, cur_quantile_ids=None, toggled=None):
+    """Rebuild every cut slider, carrying over existing selections.
+
+    ``toggled`` is the variable whose value/quantile mode just changed, if any:
+    its slider is rebuilt on the new scale, so the carried-over range (a value
+    range on one scale, percentages on the other) is dropped and it reopens
+    fully open instead of keeping a number that now means something else."""
     if not path or not cut_vars:
         return []
     thr = float(hit_threshold or 0.0)
     # Adding/removing a variable rebuilds every slider; carry over the values of
     # variables that were already there so their selections survive.
     prev = {ident["index"]: val
-            for ident, val in zip(cur_ids or [], cur_values or [])}
+            for ident, val in zip(cur_ids or [], cur_values or [])
+            if ident["index"] != toggled}
     prev_invert = _flagged(cur_invert_ids, cur_invert)
-    return [_cut_slider(controller, path, var, thr, prev, id_type, prev_invert)
+    prev_quantile = _flagged(cur_quantile_ids, cur_quantile)
+    return [_cut_slider(controller, path, var, thr, prev, id_type, prev_invert,
+                        prev_quantile)
             for var in cut_vars]
 
 
-def _cuts_from_widgets(values, ids, invert_values, invert_ids):
+def _cuts_from_widgets(values, ids, invert_values, invert_ids,
+                       quantile_values=None, quantile_ids=None):
     """The cut store, from the slider values and the per-cut checkboxes.
 
     Matched by variable name rather than by position: the pattern-matching
     groups are built in the same order today, but a store that silently pairs a
-    range with another variable's checkbox would be a nasty bug to find."""
+    range with another variable's checkbox would be a nasty bug to find.
+
+    A slider in quantile mode runs over 0-100 and is stored as the fractions
+    [0, 1] that :class:`~event_viewer.analysis.cuts.Cut` expects; the
+    percentiles themselves stay unresolved until the cut is applied."""
     inverted = _flagged(invert_ids, invert_values)
+    quantile = _flagged(quantile_ids, quantile_values)
     cuts = []
     for value, ident in zip(values, ids):
         if value is None:
             continue
         var = ident["index"]
-        cuts.append({"variable": var, "lo": value[0], "hi": value[1],
-                     "invert": var in inverted})
+        lo, hi = value[0], value[1]
+        is_quantile = var in quantile
+        if is_quantile:
+            lo, hi = lo / 100.0, hi / 100.0
+        cuts.append({"variable": var, "lo": lo, "hi": hi,
+                     "invert": var in inverted,
+                     "mode": "quantile" if is_quantile else "value"})
     return cuts
 
 
@@ -204,18 +292,25 @@ def register_callbacks(app, controller) -> None:
     @app.callback(
         Output("cut-sliders", "children"),
         Input("cut-vars", "value"),
+        # The ``%`` toggles rebuild the block so the slider can change scale;
+        # this stays the only writer of the sliders, and the store below keeps
+        # its single writer.
+        Input({"type": "cut-slider-quantile", "index": ALL}, "value"),
         State("store-file", "data"),
         State("store-hit-threshold", "data"),
         State({"type": "cut-slider", "index": ALL}, "value"),
         State({"type": "cut-slider", "index": ALL}, "id"),
         State({"type": "cut-slider-invert", "index": ALL}, "value"),
         State({"type": "cut-slider-invert", "index": ALL}, "id"),
+        State({"type": "cut-slider-quantile", "index": ALL}, "id"),
     )
-    def build_sliders(cut_vars, path, hit_threshold, cur_values, cur_ids,
-                      cur_invert, cur_invert_ids):
+    def build_sliders(cut_vars, cur_quantile, path, hit_threshold, cur_values, cur_ids,
+                      cur_invert, cur_invert_ids, cur_quantile_ids):
         return _cut_sliders(controller, cut_vars, path, hit_threshold,
                             cur_values, cur_ids, "cut-slider",
-                            cur_invert, cur_invert_ids)
+                            cur_invert, cur_invert_ids,
+                            cur_quantile, cur_quantile_ids,
+                            _toggled_var("cut-slider-quantile"))
 
     @app.callback(
         Output("store-cuts", "data"),
@@ -223,9 +318,15 @@ def register_callbacks(app, controller) -> None:
         Input({"type": "cut-slider-invert", "index": ALL}, "value"),
         State({"type": "cut-slider", "index": ALL}, "id"),
         State({"type": "cut-slider-invert", "index": ALL}, "id"),
+        # Read as State: toggling ``%`` rebuilds the slider, and it is the new
+        # slider value that re-triggers this callback, mode already set.
+        State({"type": "cut-slider-quantile", "index": ALL}, "value"),
+        State({"type": "cut-slider-quantile", "index": ALL}, "id"),
     )
-    def update_cuts(values, invert_values, ids, invert_ids):
-        return _cuts_from_widgets(values, ids, invert_values, invert_ids)
+    def update_cuts(values, invert_values, ids, invert_ids,
+                    quantile_values, quantile_ids):
+        return _cuts_from_widgets(values, ids, invert_values, invert_ids,
+                                  quantile_values, quantile_ids)
 
     @app.callback(
         Output({"type": "cut-slider-invert", "index": ALL}, "value"),
@@ -243,18 +344,25 @@ def register_callbacks(app, controller) -> None:
     @app.callback(
         Output("ev-cut-sliders", "children"),
         Input("ev-cut-vars", "value"),
+        # The ``%`` toggles rebuild the block so the slider can change scale;
+        # this stays the only writer of the sliders, and the store below keeps
+        # its single writer.
+        Input({"type": "ev-cut-slider-quantile", "index": ALL}, "value"),
         State("store-file", "data"),
         State("store-hit-threshold", "data"),
         State({"type": "ev-cut-slider", "index": ALL}, "value"),
         State({"type": "ev-cut-slider", "index": ALL}, "id"),
         State({"type": "ev-cut-slider-invert", "index": ALL}, "value"),
         State({"type": "ev-cut-slider-invert", "index": ALL}, "id"),
+        State({"type": "ev-cut-slider-quantile", "index": ALL}, "id"),
     )
-    def build_sliders_event(cut_vars, path, hit_threshold, cur_values, cur_ids,
-                            cur_invert, cur_invert_ids):
+    def build_sliders_event(cut_vars, cur_quantile, path, hit_threshold, cur_values, cur_ids,
+                            cur_invert, cur_invert_ids, cur_quantile_ids):
         return _cut_sliders(controller, cut_vars, path, hit_threshold,
                             cur_values, cur_ids, "ev-cut-slider",
-                            cur_invert, cur_invert_ids)
+                            cur_invert, cur_invert_ids,
+                            cur_quantile, cur_quantile_ids,
+                            _toggled_var("ev-cut-slider-quantile"))
 
     @app.callback(
         Output("store-event-cuts", "data"),
@@ -262,9 +370,15 @@ def register_callbacks(app, controller) -> None:
         Input({"type": "ev-cut-slider-invert", "index": ALL}, "value"),
         State({"type": "ev-cut-slider", "index": ALL}, "id"),
         State({"type": "ev-cut-slider-invert", "index": ALL}, "id"),
+        # Read as State: toggling ``%`` rebuilds the slider, and it is the new
+        # slider value that re-triggers this callback, mode already set.
+        State({"type": "ev-cut-slider-quantile", "index": ALL}, "value"),
+        State({"type": "ev-cut-slider-quantile", "index": ALL}, "id"),
     )
-    def update_cuts_event(values, invert_values, ids, invert_ids):
-        return _cuts_from_widgets(values, ids, invert_values, invert_ids)
+    def update_cuts_event(values, invert_values, ids, invert_ids,
+                          quantile_values, quantile_ids):
+        return _cuts_from_widgets(values, ids, invert_values, invert_ids,
+                                  quantile_values, quantile_ids)
 
     @app.callback(
         Output({"type": "ev-cut-slider-invert", "index": ALL}, "value"),

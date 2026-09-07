@@ -27,6 +27,19 @@ everything either cut rejected.
 NaN is excluded from the complement too. An event with no value for an inverted
 variable did not *fail* that cut, it has nothing to compare, and letting it in
 would fill the complement with events that were never candidates.
+
+Quantile cuts
+-------------
+A cut can instead be expressed in ``mode="quantile"``, where ``lo``/``hi`` are
+fractions in [0, 1] and the actual edges are the corresponding percentiles of the
+variable. Absolute thresholds are not comparable across runs -- the same
+``dl_score < 0.52`` keeps 0.5% of one beam energy and 40% of another -- while
+"the lowest 10%" means the same thing everywhere.
+
+The percentiles are resolved at ``mask()`` time rather than being frozen into a
+value when the cut is created, because the reference sample depends on the MIP
+threshold: moving that slider would otherwise leave a stale number silently
+claiming to be a percentile it no longer is.
 """
 
 from __future__ import annotations
@@ -44,18 +57,53 @@ class Cut:
 
     ``invert`` does not negate this cut on its own; it marks it as belonging to
     the group that :class:`CutModel` complements together.
+
+    With ``mode="quantile"`` the range is given as fractions in [0, 1] of the
+    variable's own distribution instead of absolute values: ``lo=0.1, hi=0.9``
+    keeps the events between the 10th and the 90th percentile.
     """
 
     variable: str
     lo: float
     hi: float
     invert: bool = False
+    mode: str = "value"
+
+    def resolve_range(self, df: pd.DataFrame):
+        """The ``(lo, hi)`` edges of this cut in the units of the variable.
+
+        For a quantile cut the edges are the ``lo``/``hi`` percentiles of the
+        finite values of the column, so the caller (e.g. the histogram shading)
+        sees the same numbers the mask compares against. Returns ``None`` when
+        the column has no finite value to take percentiles of.
+
+        ``df`` is expected to be the *whole* table the cuts are applied to, not
+        a subset already filtered by the other cuts: percentiles taken over a
+        pre-filtered subset would depend on the order the cuts were applied and
+        become circular once combined with the complement. Every caller today
+        passes the full (MIP-threshold filtered) table.
+        """
+        if self.mode != "quantile":
+            return float(self.lo), float(self.hi)
+        if self.variable not in df.columns:
+            return None
+        col = df[self.variable].to_numpy(dtype=float)
+        col = col[np.isfinite(col)]
+        if col.size == 0:
+            return None
+        qlo, qhi = sorted((min(max(float(self.lo), 0.0), 1.0),
+                           min(max(float(self.hi), 0.0), 1.0)))
+        return float(np.quantile(col, qlo)), float(np.quantile(col, qhi))
 
     def mask(self, df: pd.DataFrame) -> np.ndarray:
         if self.variable not in df.columns:
             return np.ones(len(df), dtype=bool)
+        edges = self.resolve_range(df)
+        if edges is None:
+            return np.zeros(len(df), dtype=bool)
+        lo, hi = edges
         col = df[self.variable].to_numpy(dtype=float)
-        return (col >= self.lo) & (col <= self.hi)
+        return (col >= lo) & (col <= hi)
 
     def defined(self, df: pd.DataFrame) -> np.ndarray:
         """Events that have a value for this variable at all."""
@@ -103,14 +151,15 @@ class CutModel:
     # -------------------------------------------------------- (de)serialise --
     def to_store(self) -> List[dict]:
         return [{"variable": c.variable, "lo": c.lo, "hi": c.hi,
-                 "invert": bool(c.invert)} for c in self.cuts]
+                 "invert": bool(c.invert), "mode": c.mode} for c in self.cuts]
 
     @classmethod
     def from_store(cls, data) -> "CutModel":
         if not data:
             return cls()
-        # ``invert`` is read with a default so a store written by an older
-        # session (or a bookmarked layout) still loads.
+        # ``invert`` and ``mode`` are read with defaults so a store written by an
+        # older session (or a bookmarked layout) still loads.
         return cls([Cut(d["variable"], float(d["lo"]), float(d["hi"]),
-                        bool(d.get("invert", False)))
+                        bool(d.get("invert", False)),
+                        str(d.get("mode", "value")))
                     for d in data])

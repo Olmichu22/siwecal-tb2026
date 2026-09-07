@@ -198,11 +198,13 @@ class ViewerController:
         if variable not in df.columns:
             return self.distributions.histogram(np.empty(0), variable)
 
+        # Resolved against the full table, so a quantile cut shades the values
+        # its percentiles actually land on rather than the fractions 0-1.
         cut_range = None
         cut_inverted = False
         for cut in (cut_model.cuts if cut_model else []):
             if cut.variable == variable:
-                cut_range = (cut.lo, cut.hi)
+                cut_range = cut.resolve_range(df)
                 cut_inverted = cut.invert
 
         if cluster is not None:
@@ -236,17 +238,27 @@ class ViewerController:
         values = df[variable].to_numpy(dtype=float)
         return self.distributions.histogram_split(values, keep, variable, nbins)
 
-    def variable_range(self, path: str, variable: str,
-                       hit_threshold: float = 0.0):
-        """``(min, max)`` of a finite variable, for slider bounds."""
+    def variable_domain(self, path: str, variable: str,
+                        hit_threshold: float = 0.0):
+        """``(lo, hi, values)`` describing the slider domain of a variable.
+
+        ``lo``/``hi`` are the finite min/max (slider bounds). ``values`` is the
+        sorted list of distinct finite values when the variable is *discrete*
+        (few unique values, e.g. a layer count or a threshold), so the caller
+        can build a snapping slider with one mark per value; it is ``None`` for
+        a continuous variable.
+        """
         df = self._filtered_table(path, hit_threshold)
         if variable not in df.columns:
-            return 0.0, 1.0
+            return 0.0, 1.0, None
         col = df[variable].to_numpy(dtype=float)
         col = col[np.isfinite(col)]
         if col.size == 0:
-            return 0.0, 1.0
-        return float(col.min()), float(col.max())
+            return 0.0, 1.0, None
+        uniq = np.unique(col)
+        values = (uniq.tolist()
+                  if uniq.size <= self.config.discrete_max_unique else None)
+        return float(uniq[0]), float(uniq[-1]), values
 
     # ----------------------------------------------------------- clustering --
     def run_clustering(self, path: str, cut_model: CutModel, features: List[str],

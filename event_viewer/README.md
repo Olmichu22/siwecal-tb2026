@@ -78,6 +78,21 @@ failing *either*, not those failing both. Events whose value is NaN for a ticked
 variable stay out of the complement — they never failed that cut, they have
 nothing to compare.
 
+### Quantile cuts
+
+Every cut also carries a `%` checkbox. With it ticked the slider runs over
+0–100 % of that variable's own distribution instead of its value range, so
+10–90 means "keep the events between the 10th and the 90th percentile". An
+absolute threshold is not comparable across runs — the same `dl_score < 0.52`
+keeps 0.5 % of one beam energy and 40 % of another — while a percentile is.
+
+The percentiles are taken over the whole file (after the MIP cut), not over the
+events surviving the other cuts, so they do not depend on the order the cuts are
+applied; NaN values are left out of the percentile base. The store keeps the
+fraction, not the value it resolves to, so moving the MIP cut re-resolves it
+instead of leaving a stale number. Discrete variables (the slider that snaps to
+its unique values) keep the toggle disabled.
+
 ## Files without metrics
 
 Opening a plain `ecal_*.root` (no `.valcache.root`) still works: the viewer
