@@ -59,6 +59,25 @@ from the dropdown or change file at runtime.
   tab; run **clustering** (K-Means / DBSCAN / GMM / Spectral) on chosen features
   and view the labels on any 2-variable scatter.
 
+### Complementary selections
+
+Every cut carries a `compl.` checkbox, and **Complementary** flips all of them at
+once. Ticked cuts are complemented *as a group*, unticked ones keep filtering
+normally:
+
+    keep = AND(unticked cuts) AND NOT( AND(ticked cuts) )
+
+So leaving a window on `nhit` unticked and ticking `dl_score` selects *the events
+inside the occupancy window that the score rejected* — usually the question you
+want to ask of a discriminant, and the reason the checkboxes are per cut rather
+than one global invert. Ticking everything gives the complement of the whole
+selection.
+
+Note `NOT(A AND B)` is not `NOT A AND NOT B`: ticking two cuts gives the events
+failing *either*, not those failing both. Events whose value is NaN for a ticked
+variable stay out of the complement — they never failed that cut, they have
+nothing to compare.
+
 ## Files without metrics
 
 Opening a plain `ecal_*.root` (no `.valcache.root`) still works: the viewer

@@ -199,20 +199,24 @@ class ViewerController:
             return self.distributions.histogram(np.empty(0), variable)
 
         cut_range = None
+        cut_inverted = False
         for cut in (cut_model.cuts if cut_model else []):
             if cut.variable == variable:
                 cut_range = (cut.lo, cut.hi)
+                cut_inverted = cut.invert
 
         if cluster is not None:
             sub = df.iloc[cluster["passing"]]
             values = sub[variable].to_numpy(dtype=float)
             return self.distributions.histogram(
-                values, variable, cut_range, nbins, labels=cluster["labels"])
+                values, variable, cut_range, nbins, labels=cluster["labels"],
+                cut_inverted=cut_inverted)
 
         keep = cut_model.mask(df) if cut_model and not cut_model.is_empty \
             else np.ones(len(df), bool)
         values = df.loc[keep, variable].to_numpy(dtype=float)
-        return self.distributions.histogram(values, variable, cut_range, nbins)
+        return self.distributions.histogram(values, variable, cut_range, nbins,
+                                            cut_inverted=cut_inverted)
 
     def histogram_split(self, path: str, variable: str, cut_model: CutModel,
                         nbins: int = 60, hit_threshold: float = 0.0):

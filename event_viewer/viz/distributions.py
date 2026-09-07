@@ -22,14 +22,18 @@ class DistributionPlots:
 
     def histogram(self, values: np.ndarray, variable: str,
                   cut_range: Optional[tuple] = None, nbins: int = 60,
-                  labels: Optional[np.ndarray] = None) -> go.Figure:
+                  labels: Optional[np.ndarray] = None,
+                  cut_inverted: bool = False) -> go.Figure:
         """1-D histogram of ``values`` with ``nbins`` bins.
 
         If ``labels`` is given (one cluster label per value), the histogram is
         split into one overlaid series per cluster (``barmode="overlay"`` with
         alpha) so each cluster's shape stays visible; otherwise a single series is
-        drawn. The bin edges are shared across series so they align. ``cut_range``
-        is shaded when provided.
+        drawn. The bin edges are shared across series so they align.
+
+        The shading marks the *selected* side of ``cut_range``, so with
+        ``cut_inverted`` it moves to the two tails outside the range rather than
+        highlighting the band the cut is now throwing away.
         """
         values = np.asarray(values, dtype=float)
         finite = values[np.isfinite(values)]
@@ -63,8 +67,14 @@ class DistributionPlots:
 
         if cut_range is not None:
             lo, hi = cut_range
-            fig.add_vrect(x0=lo, x1=hi, fillcolor="orange", opacity=0.15,
-                          line_width=0)
+            shade = dict(fillcolor="orange", opacity=0.15, line_width=0)
+            if cut_inverted:
+                # The axis range, not the cut edges, so the shading reaches the
+                # end of the plot on both sides.
+                fig.add_vrect(x0=min(start, lo), x1=lo, **shade)
+                fig.add_vrect(x0=hi, x1=max(end + size, hi), **shade)
+            else:
+                fig.add_vrect(x0=lo, x1=hi, **shade)
         fig.update_layout(
             xaxis_title=variable, yaxis_title="events",
             margin=dict(l=50, r=20, t=20, b=40), bargap=0.02,
