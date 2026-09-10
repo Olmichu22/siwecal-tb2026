@@ -21,6 +21,11 @@ Two subtleties handled here:
 
 * **min_slabs_hit.** A genuine high-energy shower lights up many slabs. Windows
   spanning fewer than ``min_slabs_hit`` distinct slabs are discarded as noise.
+
+* **Retriggers.** A SKIROC can fire again on its own a couple of BCIDs after a
+  real trigger. Those SCAs are not physics, but left alone they open and extend
+  windows. ``drop_retrigger_scas`` masks them here, before merging; it is off by
+  default. See :class:`~siwecal_eventbuilder.config.BuilderConfig`.
 """
 
 import numpy as np
@@ -111,8 +116,13 @@ class BcidClusterer:
         """Gather the surviving raw BCID of every ``(slab, chip)`` SCA.
 
         A cell is kept only if it has a configured chip, is non-empty
-        (``nhits != 0``), and its raw BCID passes the start/drop cuts. We iterate
-        over *all* SCAs (the reference ignores ``nColumns``).
+        (``nhits != 0``), optionally is not a retrigger, and its raw BCID passes
+        the start/drop cuts. We iterate over *all* SCAs (the reference ignores
+        ``nColumns``).
+
+        Cut order follows ``BCIDHandler._get_bcids``: occupancy first, then the
+        retrigger cut, and only then the BCID start/drop cuts -- so a retrigger is
+        masked even when the SCA that triggered it sits below ``skip_bcid_start``.
 
         Returns ``{(slab, chip): {sca: raw_bcid}}``.
         """
@@ -125,17 +135,42 @@ class BcidClusterer:
             for chip in range(n_chips):
                 if acquisition.chip_id(slab, chip) < 0:
                     continue
+                row = raw_matrix[slab * n_chips + chip]
+                occupied = [acquisition.n_hits(slab, chip, sca) != 0
+                            for sca in range(n_scas)]
                 for sca in range(n_scas):
                     n_hits = acquisition.n_hits(slab, chip, sca)
                     if n_hits == 0 or n_hits > config.max_hits_per_sca:
                         continue
-                    raw_bcid = int(raw_matrix[slab * n_chips + chip, sca])
+                    raw_bcid = int(row[sca])
+                    if self._is_retrigger(row, occupied, sca, raw_bcid):
+                        continue
                     if (raw_bcid < 0
                             or raw_bcid < config.skip_bcid_start
                             or raw_bcid in config.drop_bcids):
                         continue
                     chip_to_scas_bcid.setdefault((slab, chip), {})[sca] = raw_bcid
         return chip_to_scas_bcid
+
+    def _is_retrigger(self, row, occupied: list, sca: int, raw_bcid: int) -> bool:
+        """True if this SCA is a SKIROC retrigger of the previous occupied slot.
+
+        Port of ``BCIDHandler._is_retrigger`` (``bcid_handling.py:38-41``), which
+        masks ``bcids[:, 1:]`` only: the *follower* of the pair, never the SCA that
+        starts the chain. See ``BuilderConfig.drop_retrigger_delta`` for why the
+        decoder's ``badbcid`` branch is deliberately not used instead.
+
+        The comparison is against the immediately preceding SCA *slot*, and an
+        unoccupied slot breaks the chain rather than being looked through -- in the
+        reference an empty SCA holds ``bad_value``, so its delta always falls
+        outside the retrigger range.
+        """
+        if not self._config.drop_retrigger_scas or sca == 0:
+            return False
+        if not occupied[sca - 1]:
+            return False
+        delta = raw_bcid - int(row[sca - 1])
+        return 0 < delta <= self._config.drop_retrigger_delta
 
     def _merge_into_windows(self, chip_to_scas_bcid: dict) -> list:
         """Greedy single-pass merge of all raw BCIDs into ``(start, stop)`` windows.

@@ -197,15 +197,52 @@ All of these are `EcalEventBuilder` Gaudi properties (defaults match
 | `DropBcids` | `{0, 901}` | specific BCID values always discarded |
 | `MinSlabsHit` | `10` | minimum distinct slabs for a window to become an event |
 | `BcidOverflow` | `4096` | 12-bit BCID counter modulus (overflow unwrapping) |
+| `DropRetriggerScas` | `false` | mask SKIROC retriggers before clustering (see below) |
+| `DropRetriggerDelta` | `2` | BCID distance within one chip that counts as a retrigger |
 
-**Configurable, with a caveat:** these are real Gaudi properties, but the
-pipeline steering [`options/run_event_builder.py`](options/run_event_builder.py)
-does **not** plumb them through `EVBLD_*` env vars (it forwards the
-calibration/gain/mapping ones only), so from `run_full_pipeline_batch.py` /
-the Condor DAG they stay at the defaults above. To change e.g. the merge
-distance you pass `MergeDelta=<n>` to the `EcalEventBuilder(...)` constructor
-in your own steering (or add an `EVBLD_MERGE_DELTA` line to
-`run_event_builder.py`).
+**Retrigger masking.** A SKIROC can fire again on its own a couple of BCIDs after
+a real trigger. Those SCAs are not physics, but unmasked they open and extend BCID
+windows and add hits to events. `DropRetriggerScas` masks them, following the
+reference builder (`bcid_handling.py::_is_retrigger`): within one chip's memory, an
+SCA whose BCID is within `DropRetriggerDelta` of the previous *occupied* SCA's is
+dropped — **the follower only**, since the SCA starting the chain is the one
+carrying the real signal.
+
+The cut is recomputed rather than read from the decoder's `badbcid` branch on
+purpose: `badbcid == 3` tags the whole chain, leader included
+(`SlbFrameDecoder.h:418-420,471-472`), so masking on it deletes physics.
+
+Measured on three chunks of run 44: turning it on moves 1361 → 1368 events and
+−18.7% hits, and the mean window span (`bcid_merge_end - bcid`) drops from 1.42 to
+0.91 BCIDs. **Default off** — turning it on is behaviour-changing (rule 5) and
+makes earlier reconstructions non-comparable.
+
+The output tree also carries **`bcid_merge_end`**, the last BCID merged into the
+event (`bcid` is the window's start, so the difference is the window's span). It
+ports the reference's branch of the same name.
+
+**Configurable, with a caveat:** `MergeDelta`, `MinSlabsHit`, `DropRetriggerScas`
+and `DropRetriggerDelta` are plumbed through the pipeline steering
+[`options/run_event_builder.py`](options/run_event_builder.py) as
+`EVBLD_MERGE_DELTA`, `EVBLD_MIN_SLABS_HIT`, `EVBLD_DROP_RETRIGGER` (`0`/`1`) and
+`EVBLD_RETRIGGER_DELTA`, so exporting any of them before
+`run_full_pipeline_batch.py` changes the event building (the script passes its
+whole environment to `k4run`):
+
+```bash
+EVBLD_MERGE_DELTA=1 python gaudi_jobs/run_full_pipeline_batch.py --run <run> \
+    --reco-dir <a-separate-dir>
+```
+
+Use a separate `--reco-dir`: the output file name does not encode the window, so
+a non-default run overwrites the nominal reconstruction otherwise.
+
+The other three (`SkipBcidStart`, `DropBcids`, `BcidOverflow`) are **not**
+plumbed through; to change those you pass them to the `EcalEventBuilder(...)`
+constructor in your own steering. Neither are any of them forwarded by the
+Condor DAG — [`condor/generate_reco_dag.py`](condor/generate_reco_dag.py) writes
+the `EVBLD_*` block into its wrapper explicitly, so an exported variable does
+not reach farm jobs until it is added there too.
 
 ### PID / EDM4hep
 

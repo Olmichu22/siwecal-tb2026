@@ -33,6 +33,38 @@ class BuilderConfig:
     min_slabs_hit: int = 10
     """A BCID window is kept only if it spans at least this many distinct slabs."""
 
+    drop_retrigger_scas: bool = False
+    """Mask SKIROC retriggers before clustering (off = the behaviour shipped so far).
+
+    A retrigger is the chip firing again on its own a couple of BCIDs after a real
+    trigger. Left unmasked, those SCAs open and extend BCID windows and add hits to
+    physics events. The reference builder had this cut
+    (``bcid_handling.py::_is_retrigger``) behind ``merge_within_chip``, which its
+    config left on, so the cut never ran and was not carried over in the port.
+
+    Measured on 20 chunks of run 44: masking removes 15.9% of the SCAs entering the
+    clustering and 21.5% of their hits, and cuts the mean window span at
+    ``merge_delta=3`` from 1.19 to 0.72 BCIDs -- most of the window chaining was
+    retriggers bridging neighbouring events. It does NOT remove the gap-1
+    population, which survives at 65% and stays real: that part is genuine
+    inter-slab skew and is the window's job, not this cut's.
+
+    Default off so that existing reconstructions stay reproducible; turning it on
+    is behaviour-changing (README rule 5).
+    """
+
+    drop_retrigger_delta: int = 2
+    """Within one chip's memory, an SCA whose BCID is this close to the previous
+    occupied SCA's is a retrigger. Value from the reference (``config_run.cfg:48``).
+
+    Only the *follower* is masked; the SCA that starts the chain is kept, because it
+    is the one carrying the real signal. This is why the cut is recomputed here
+    instead of read from the decoder's ``badbcid`` branch: ``badbcid == 3`` tags the
+    whole chain, leader included (``SlbFrameDecoder.h:418-420,471-472``), and
+    masking on it deletes physics -- measured as an extra 5.2% of hits and 19
+    acquisitions emptied outright.
+    """
+
     bcid_overflow: int = 4096
     """The BCID counter is 12-bit; it wraps (overflows) every 4096 counts."""
 

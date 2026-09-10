@@ -179,6 +179,7 @@ class EcalWriter:
         self._event = np.zeros(1, dtype=np.int32)
         self._spill = np.zeros(1, dtype=np.int32)
         self._bcid = np.zeros(1, dtype=np.int32)
+        self._bcid_merge_end = np.zeros(1, dtype=np.int32)
         self._n_slab = np.zeros(1, dtype=np.int32)
         self._n_chip = np.zeros(1, dtype=np.int32)
         self._n_chan = np.zeros(1, dtype=np.int32)
@@ -205,6 +206,7 @@ class EcalWriter:
         self._tree.Branch("event", self._event, "event/I")
         self._tree.Branch("spill", self._spill, "spill/I")
         self._tree.Branch("bcid", self._bcid, "bcid/I")
+        self._tree.Branch("bcid_merge_end", self._bcid_merge_end, "bcid_merge_end/I")
         self._tree.Branch("nhit_slab", self._n_slab, "nhit_slab/I")
         self._tree.Branch("nhit_chip", self._n_chip, "nhit_chip/I")
         self._tree.Branch("nhit_chan", self._n_chan, "nhit_chan/I")
@@ -240,6 +242,7 @@ class EcalWriter:
         self._spill[0] = spill_index
         self._event[0] = spill_index * 1000 + event_index
         self._bcid[0] = event.bcid
+        self._bcid_merge_end[0] = event.bcid_merge_end
         self._n_chan[0] = event.n_channels
         self._n_slab[0] = event.n_slabs
         self._n_chip[0] = event.n_chips
