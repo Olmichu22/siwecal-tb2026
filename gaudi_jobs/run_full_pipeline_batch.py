@@ -13,6 +13,12 @@ Stages 2 and 3 are separate processes because k4FWCore needs EvtMax fixed before
 the process starts, and the event count is only known once the event builder has
 run (run_pid.py reads it back from the ecal file).
 
+Stage 3 here always writes ONE thing: an unfiltered EDM4hep file. The output
+format and the event-selection cuts are not configurable from this script --
+that is gaudi_jobs/run_pid_batch.py (--format {edm4hep,valtree,both}, plus the
+CutSet flags). For a valtree, run this with --skip-pid and then run_pid_batch.py
+on the resulting ecal file.
+
 Stage 1 used to be folded into stage 2 -- a single k4run decoding every chunk of
 the run at once. That silently dropped ~75% of the acquisitions on some runs (see
 gaudi_jobs/decode_chunks.py). It is now one process per chunk, and the decode is
@@ -93,6 +99,11 @@ def main(argv=None):
                    help="Slab-12 pad map override. Default: mappings/fev11_cob_good_rotate_chip_channel_x_y_mapping.txt")
     p.add_argument("--slab-z-file", default=None, help="Default: mappings/slab_z_positions.yml")
     p.add_argument("--hit-mip-cut", type=float, default=0.5, help="Hit-level MIP cut for the PID stage (default 0.5)")
+    p.add_argument("--skip-pid", action="store_true",
+                   help="Stop after stage 2 (the ecal tree). Use it when the PID output is going to be "
+                        "produced by gaudi_jobs/run_pid_batch.py instead -- that driver is the one with "
+                        "--format {edm4hep,valtree,both} and the event-selection cuts; stage 3 here only "
+                        "ever writes an unfiltered EDM4hep file.")
     args = p.parse_args(argv)
 
     run = args.run
@@ -166,6 +177,10 @@ def main(argv=None):
     result = subprocess.run(["k4run", _EVBLD_STEERING], env=env)
     if result.returncode != 0:
         raise SystemExit(f"ERROR: stage2 (event building) k4run failed for {run}")
+
+    if args.skip_pid:
+        print(f"\n[Done] {ecal_out} (stage 3 skipped: --skip-pid)")
+        return 0
 
     # Stage 3: PID/EDM4hep -- separate k4run process, see module docstring.
     f = ROOT.TFile.Open(ecal_out)
