@@ -37,5 +37,11 @@ class EventBuilder:
             hits = self._hit_collector.collect(acquisition, window)
             if not hits:
                 continue
-            events.append(ReconstructedEvent(bcid=window.bcid_label, hits=hits))
+            # The window's end carries the same overflow offset as its start, so
+            # unwrap it by shifting the label rather than re-deriving the cycle.
+            events.append(ReconstructedEvent(
+                bcid=window.bcid_label,
+                hits=hits,
+                bcid_merge_end=window.bcid_label + (window.stop_raw - window.start_raw),
+            ))
         return events

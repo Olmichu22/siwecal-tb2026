@@ -63,6 +63,13 @@ class ReconstructedEvent:
 
     bcid: int
     hits: List[Hit]
+    bcid_merge_end: int = -1
+    """Last BCID merged into this event; ``bcid`` is the window's start.
+
+    ``bcid_merge_end - bcid`` is the window's span, i.e. how far the merge actually
+    reached for this event. Port of the reference's ``bcid_merge_end`` branch
+    (``build_events.py:101``), which was not carried over in the original port.
+    """
 
     @property
     def n_channels(self) -> int:

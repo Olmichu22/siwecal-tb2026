@@ -72,6 +72,13 @@ builder = EcalEventBuilder(
     PedestalFileLowGain=pedestal_file_lg,
     MipFileLowGain=mip_file_lg,
     AdcSaturationThreshold=int(os.environ.get("EVBLD_ADC_SATURATION", "1500")),
+    # BCID merge distance -- the effective event-building "time window": two BCIDs
+    # land in the same event iff they are < MergeDelta apart. 1 means no merging
+    # at all (one event per BCID). See gaudi_source/README.md.
+    MergeDelta=int(os.environ.get("EVBLD_MERGE_DELTA", "3")),
+    MinSlabsHit=int(os.environ.get("EVBLD_MIN_SLABS_HIT", "10")),
+    DropRetriggerScas=os.environ.get("EVBLD_DROP_RETRIGGER", "0") == "1",
+    DropRetriggerDelta=int(os.environ.get("EVBLD_RETRIGGER_DELTA", "2")),
     # LG->HG anchor line (per threshold, from calibration/MuonCalib_gaudi/anchor/thN/).
     # Defaults keep the previous global values if unset.
     GainRatio=float(os.environ.get("EVBLD_GAIN_RATIO", "0.0962")),

@@ -54,6 +54,31 @@ struct BuilderConfig {
   std::set<long long> dropBcids = {0, 901};
   int mergeDelta = 3;
   int minSlabsHit = 10;
+  // Mask SKIROC retriggers before clustering. Off = the behaviour shipped so far.
+  //
+  // A retrigger is the chip firing again on its own a couple of BCIDs after a real
+  // trigger. Unmasked, those SCAs open and extend BCID windows and add hits to
+  // physics events. The reference builder had the cut
+  // (bcid_handling.py::_is_retrigger) behind `merge_within_chip`, which its config
+  // left ON, so the cut never ran -- and the port carried over that arm only,
+  // losing the knob entirely.
+  //
+  // Measured on 20 chunks of run 44: masking removes 15.9% of the SCAs entering
+  // the clustering and 21.5% of their hits, and cuts the mean window span at
+  // mergeDelta=3 from 1.19 to 0.72 BCIDs (most window chaining was retriggers
+  // bridging neighbouring events). It does NOT remove the gap-1 population, which
+  // survives at 65% and stays real -- that is genuine inter-slab skew, which is
+  // the window's job and not this cut's.
+  bool dropRetriggerScas = false;
+  // Within one chip's memory, an SCA whose BCID is this close to the previous
+  // occupied SCA's is a retrigger (config_run.cfg:48). Only the FOLLOWER is
+  // masked; the SCA starting the chain is kept, since it carries the real signal.
+  //
+  // That is why the cut is recomputed here rather than read from the decoder's
+  // `badbcid` branch: badbcid==3 tags the whole chain, leader included
+  // (SlbFrameDecoder.h:418-420,471-472), so masking on it deletes physics --
+  // measured as an extra 5.2% of hits and 19 acquisitions emptied outright.
+  int dropRetriggerDelta = 2;
   long long bcidOverflow = 4096;
   long long badValue = -999;
   int adcUnderflowThreshold = 11;
@@ -182,6 +207,10 @@ struct BcidWindow {
 struct ReconstructedEvent {
   long long bcid = 0;
   std::vector<Hit> hits;
+  // Last BCID merged into this event; `bcid` is the window's start, so
+  // (bcidMergeEnd - bcid) is the window's span. Port of the reference's
+  // bcid_merge_end branch (build_events.py:101), not carried over originally.
+  long long bcidMergeEnd = -1;
 
   int nChannels() const { return static_cast<int>(hits.size()); }
   int nSlabs() const {
@@ -360,8 +389,30 @@ class BcidClusterer {
     return overflowMap;
   }
 
+  // True if this SCA is a SKIROC retrigger of the previous occupied slot.
+  //
+  // Port of BCIDHandler::_is_retrigger (bcid_handling.py:38-41), which masks
+  // bcids[:, 1:] only: the FOLLOWER of the pair, never the SCA starting the chain.
+  // See BuilderConfig::dropRetriggerDelta for why `badbcid` is not used instead.
+  //
+  // The comparison is against the immediately preceding SCA *slot*, and an
+  // unoccupied slot breaks the chain rather than being looked through -- in the
+  // reference an empty SCA holds bad_value, so its delta always falls outside the
+  // retrigger range.
+  bool isRetrigger(const AcquisitionView& acq, const BcidMatrix& matrix, int slab, int chip, int sca,
+                   long long rawBcid) const {
+    if (!m_cfg.dropRetriggerScas || sca == 0) return false;
+    if (acq.nHits(slab, chip, sca - 1) == 0) return false;
+    const long long delta = rawBcid - matrix[slab * kSkirocsPerAsu + chip][sca - 1];
+    return delta > 0 && delta <= m_cfg.dropRetriggerDelta;
+  }
+
   // Port of _collect_valid_bcids (bcid_clustering.py:110-138). Iterates all
   // SCAs regardless of nColumns, matching the Python's own comment.
+  //
+  // Cut order follows BCIDHandler::_get_bcids: occupancy first, then the retrigger
+  // cut, and only then the BCID start/drop cuts -- so a retrigger is masked even
+  // when the SCA that triggered it sits below skipBcidStart.
   std::map<ChipKey, std::map<int, long long>> collectValidBcids(const AcquisitionView& acq,
                                                                   const BcidMatrix& matrix) const {
     std::map<ChipKey, std::map<int, long long>> result;
@@ -372,6 +423,7 @@ class BcidClusterer {
           const int nHits = acq.nHits(slab, chip, sca);
           if (nHits == 0 || static_cast<double>(nHits) > m_cfg.maxHitsPerSca) continue;
           const long long rawBcid = matrix[slab * kSkirocsPerAsu + chip][sca];
+          if (isRetrigger(acq, matrix, slab, chip, sca, rawBcid)) continue;
           if (rawBcid < 0 || rawBcid < m_cfg.skipBcidStart || m_cfg.dropBcids.count(rawBcid)) continue;
           result[{slab, chip}][sca] = rawBcid;
         }
@@ -600,6 +652,9 @@ class EventBuilder {
       if (hits.empty()) continue;
       ReconstructedEvent ev;
       ev.bcid = window.bcidLabel;
+      // The window's end carries the same overflow offset as its start, so unwrap
+      // it by shifting the label rather than re-deriving the cycle.
+      ev.bcidMergeEnd = window.bcidLabel + (window.stopRaw - window.startRaw);
       ev.hits = std::move(hits);
       events.push_back(std::move(ev));
     }

@@ -60,6 +60,9 @@ settings.yml
 # build artifacts
 build/
 k4SiWEcalReco/build/
+# Output of a non-default event-building window (EVBLD_* scan), kept out of the
+# nominal reco dir on purpose -- see gaudi_source/README.md.
+reco-test-window/
 
 # Diagnostic PLOTS and NOTES are local scratch and are not versioned. The SCRIPTS
 # that make them are: they are the measurements the calibration constants come
@@ -72,6 +75,7 @@ diagnostics/*
 # Notes and plans elsewhere in the tree, same rule. A README.md documents how to
 # run the pipeline it sits in and IS tracked; these are working notes.
 siwecal_validation/PLAN_particle_id_metrics.md
+event_building_window_study.md
 
 # Private credential (grid/condor token) -- must never be tracked
 marquezh.cc

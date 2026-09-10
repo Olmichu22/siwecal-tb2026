@@ -640,7 +640,10 @@ That BCID clustering is *adjacency-based*, not a fixed-width time window:
 hits within `MergeDelta` (default **3**) BCID counts of each other form one
 event. The window granularity and the other clustering knobs
 (`SkipBcidStart`, `MinSlabsHit`, …) are `EcalEventBuilder` Gaudi properties;
-the pipeline leaves them at their defaults. See
+the pipeline leaves them at their defaults unless you export `EVBLD_MERGE_DELTA`,
+`EVBLD_MIN_SLABS_HIT`, `EVBLD_DROP_RETRIGGER` or `EVBLD_RETRIGGER_DELTA` (the ones
+it forwards). `EVBLD_DROP_RETRIGGER=1` masks SKIROC retriggers before clustering —
+off by default, and behaviour-changing. See
 [gaudi_source/README.md → "How hits become events"](gaudi_source/README.md#how-hits-become-events-bcid-clustering-the-time-window)
 for the algorithm and the full property table.
 

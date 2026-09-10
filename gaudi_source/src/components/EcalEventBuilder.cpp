@@ -174,6 +174,8 @@ struct EcalEventBuilder final : Gaudi::Algorithm {
     for (int v : m_dropBcids.value()) cfg.dropBcids.insert(v);
     cfg.mergeDelta = m_mergeDelta.value();
     cfg.minSlabsHit = m_minSlabsHit.value();
+    cfg.dropRetriggerScas = m_dropRetriggerScas.value();
+    cfg.dropRetriggerDelta = m_dropRetriggerDelta.value();
     cfg.bcidOverflow = m_bcidOverflow.value();
     cfg.badValue = m_badValue.value();
     cfg.adcUnderflowThreshold = m_adcUnderflowThreshold.value();
@@ -322,6 +324,17 @@ struct EcalEventBuilder final : Gaudi::Algorithm {
   Gaudi::Property<std::vector<int>> m_dropBcids{this, "DropBcids", {0, 901}, ""};
   Gaudi::Property<int> m_mergeDelta{this, "MergeDelta", 3, ""};
   Gaudi::Property<int> m_minSlabsHit{this, "MinSlabsHit", 10, ""};
+  Gaudi::Property<bool> m_dropRetriggerScas{
+      this, "DropRetriggerScas", false,
+      "Mask SKIROC retriggers before BCID clustering: within one chip's memory, an SCA whose BCID is "
+      "within DropRetriggerDelta of the previous occupied SCA's is dropped (the follower only -- the SCA "
+      "starting the chain carries the real signal and is kept). Off by default: turning it on is "
+      "behaviour-changing and makes earlier reconstructions non-comparable. See BuilderConfig for the "
+      "measured effect and for why this is recomputed rather than read from the decoder's badbcid."};
+  Gaudi::Property<int> m_dropRetriggerDelta{
+      this, "DropRetriggerDelta", 2,
+      "BCID distance within one chip below which a following SCA counts as a retrigger. Only used when "
+      "DropRetriggerScas is set. 2 is the reference builder's value (config_run.cfg:48)."};
   Gaudi::Property<int> m_bcidOverflow{this, "BcidOverflow", 4096, ""};
   Gaudi::Property<int> m_badValue{this, "BadValue", -999, ""};
   Gaudi::Property<int> m_adcUnderflowThreshold{this, "AdcUnderflowThreshold", 11, ""};
@@ -439,6 +452,7 @@ struct EcalEventBuilder final : Gaudi::Algorithm {
       m_tree->Branch("event", &m_event, "event/I");
       m_tree->Branch("spill", &m_spill, "spill/I");
       m_tree->Branch("bcid", &m_bcid, "bcid/I");
+      m_tree->Branch("bcid_merge_end", &m_bcidMergeEnd, "bcid_merge_end/I");
       m_tree->Branch("nhit_slab", &m_nSlab, "nhit_slab/I");
       m_tree->Branch("nhit_chip", &m_nChip, "nhit_chip/I");
       m_tree->Branch("nhit_chan", &m_nChan, "nhit_chan/I");
@@ -473,6 +487,7 @@ struct EcalEventBuilder final : Gaudi::Algorithm {
       m_spill = spillIndex;
       m_event = spillIndex * 1000 + eventIndex;
       m_bcid = static_cast<int>(event.bcid);
+      m_bcidMergeEnd = static_cast<int>(event.bcidMergeEnd);
       m_nChan = event.nChannels();
       m_nSlab = event.nSlabs();
       m_nChip = event.nChips();
@@ -504,7 +519,7 @@ struct EcalEventBuilder final : Gaudi::Algorithm {
 
     int m_maxHits;
     TTree* m_tree = nullptr;
-    int m_run = -1, m_thresholdDac = -1, m_event = 0, m_spill = 0, m_bcid = 0;
+    int m_run = -1, m_thresholdDac = -1, m_event = 0, m_spill = 0, m_bcid = 0, m_bcidMergeEnd = -1;
     int m_nSlab = 0, m_nChip = 0, m_nChan = 0;
     float m_sumHg = 0.f, m_sumEnergy = 0.f, m_sumEnergyNoCalib = 0.f, m_sumWEnergy = 0.f;
     std::vector<int> m_hitSlab, m_hitChip, m_hitChan, m_hitSca, m_hitIsMasked;
