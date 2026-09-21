@@ -40,3 +40,82 @@ w_thickness_mm:
   - 5.6     # slab 12
   - 5.6     # slab 13
   - 5.6     # slab 14
+
+# --------------------------------------------------------------------------- #
+# Per-slab technology.  Hardware facts only; measured digitiser parameters live in
+# digi_calibration.yml.  Everything below is optional: without it every slab is a
+# FEV10 with a 500 um sensor, the default pad map and the run's own threshold DAC.
+#
+# technologies:        per-technology defaults; pad_map is relative to mappings/.
+# slab_technology:     one entry per slab 0..14.
+# sensor_thickness_um: per slab, overrides the technology default.  Must match the
+#                      sensitive slice of simulation/geometry/SiPadDetector.xml
+#                      (analysis/tests/test_sensor_thickness.py pins it).
+# threshold_dac:       per slab; -1 = the run's own ThresholdDAC.  Slab 12, the
+#                      FEV11 chip-on-board, ran at 243 while the rest ran at
+#                      215/220/230 (run book: "Applied 220 to all slabs, all Asics
+#                      but slab 12 (at 243)"), because it was noisy.  That higher
+#                      discriminator truncates its MIP spectrum, which is why its
+#                      MIP tables read 1.2-1.9x the others (a real gain would not
+#                      change with the DAC) and why it needs its own trigger model
+#                      (digi_calibration.yml: slab_overrides) and MIP window.
+# --------------------------------------------------------------------------- #
+
+technologies:
+  FEV10:
+    sensor_thickness_um: 500
+    pad_map: fev10_rotate_chip_channel_x_y_mapping.txt
+  FEV11_COB:
+    sensor_thickness_um: 500
+    pad_map: fev11_cob_good_rotate_chip_channel_x_y_mapping.txt
+
+slab_technology:
+  - FEV10       # slab  0
+  - FEV10       # slab  1
+  - FEV10       # slab  2
+  - FEV10       # slab  3
+  - FEV10       # slab  4
+  - FEV10       # slab  5
+  - FEV10       # slab  6
+  - FEV10       # slab  7
+  - FEV10       # slab  8
+  - FEV10       # slab  9
+  - FEV10       # slab 10
+  - FEV10       # slab 11
+  - FEV11_COB   # slab 12  (chip-on-board, own pad map, own threshold)
+  - FEV10       # slab 13
+  - FEV10       # slab 14
+
+sensor_thickness_um:
+  - 500     # slab  0
+  - 500     # slab  1
+  - 500     # slab  2
+  - 500     # slab  3
+  - 500     # slab  4
+  - 500     # slab  5
+  - 500     # slab  6
+  - 500     # slab  7
+  - 500     # slab  8
+  - 500     # slab  9
+  - 500     # slab 10
+  - 500     # slab 11
+  - 500     # slab 12  (not documented; showers and muons give a normal ADC/hit)
+  - 500     # slab 13
+  - 650     # slab 14  (asu2026_13, thicker sensor -- SiPadDetector.xml last block)
+
+threshold_dac:
+  - -1      # slab  0
+  - -1      # slab  1
+  - -1      # slab  2
+  - -1      # slab  3
+  - -1      # slab  4
+  - -1      # slab  5
+  - -1      # slab  6
+  - -1      # slab  7
+  - -1      # slab  8
+  - -1      # slab  9
+  - -1      # slab 10
+  - -1      # slab 11
+  - 243     # slab 12  (run book)
+  - -1      # slab 13
+  - -1      # slab 14

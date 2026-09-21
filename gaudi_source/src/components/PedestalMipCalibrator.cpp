@@ -30,6 +30,7 @@
  * per-event EDM4hep collection. All work happens in initialize(), same
  * self-contained-I/O pattern as EcalToEDM4hep/EcalRawDecoder.
  */
+#include "k4SiWEcalReco/PadMapGeometry.h"
 #include "k4SiWEcalReco/PedestalMipCalib.h"
 #include "k4SiWEcalReco/SlbFrameDecoder.h"  // kSlbDepth, kSkirocsPerAsu, kScasInSkiroc, kChannelsInSkiroc
 
@@ -43,6 +44,8 @@
 #include "TTree.h"
 
 #include <cmath>
+#include <sstream>
+#include <utility>
 #include <fstream>
 #include <memory>
 #include <string>
@@ -221,6 +224,18 @@ struct PedestalMipCalibrator final : Gaudi::Algorithm {
   Gaudi::Property<double> m_mipHighLim{
       this, "MipHighLim", 50.0,
       "Upper bound of the 'looks like a real MIP' range check, high gain -- see MipLowLim"};
+  Gaudi::Property<std::vector<std::string>> m_mipWindowSlabOverrides{
+      this, "MipWindowSlabOverrides", {},
+      "Per-slab 'looks like a real MIP' windows, high gain, as 'slab:low:high' entries; a slab not listed "
+      "keeps [MipLowLim, MipHighLim] (or MipWindowThresholdSlabHigh, see SlabZFile)"};
+  Gaudi::Property<std::string> m_slabZFile{
+      this, "SlabZFile", "",
+      "mappings/slab_z_positions.yml; when set, every slab its technology block marks with a threshold_dac "
+      "of its own (slab 12, the chip-on-board, at DAC 243) gets MipWindowThresholdSlabHigh as the upper bound "
+      "of its MIP window, because a higher discriminator truncates the spectrum and pushes the fitted MPV up"};
+  Gaudi::Property<double> m_mipWindowThresholdSlabHigh{
+      this, "MipWindowThresholdSlabHigh", 90.0,
+      "Upper MIP-window bound [ADC] for the slabs with a threshold_dac of their own (see SlabZFile)"};
   Gaudi::Property<double> m_mipLowLimLowGain{
       this, "MipLowLimLowGain", 2.0,
       "'Looks like a real MIP' lower bound, low gain (pllolow in the reference tool was 5.; scaled down "
@@ -645,8 +660,41 @@ struct PedestalMipCalibrator final : Gaudi::Algorithm {
     // original 45 ADC floor, so a bare lower bound alone would accept
     // nothing; an upper bound also guards against a peak bin picked from
     // noise/tail far out in the histogram.
-    const double lowlim = highGain ? m_mipLowLim.value() : m_mipLowLimLowGain.value();
-    const double highlim = highGain ? m_mipHighLim.value() : m_mipHighLimLowGain.value();
+    const double lowlimDefault = highGain ? m_mipLowLim.value() : m_mipLowLimLowGain.value();
+    const double highlimDefault = highGain ? m_mipHighLim.value() : m_mipHighLimLowGain.value();
+    // Per-slab windows: a slab that ran at a discriminator of its own (slab 12,
+    // the FEV11 chip-on-board, at DAC 243 against the others' 215-230) has its
+    // MIP spectrum truncated and its fitted MPV pushed up -- 31-35 ADC where the
+    // rest sit at 20-27 -- and would otherwise be routed to the fallbacks by
+    // the detector-wide window.  Explicit "slab:low:high" entries first; then
+    // every slab the slab file marks with a threshold_dac of its own gets
+    // MipWindowThresholdSlabHigh as its upper bound (high gain only).
+    std::vector<std::pair<double, double>> window(kSlbDepth, {lowlimDefault, highlimDefault});
+    if (highGain) {
+      if (!m_slabZFile.value().empty()) {
+        const auto geom = k4siwecal::SlabGeometry::fromYamlFile(m_slabZFile.value());
+        for (int layer = 0; layer < kSlbDepth; ++layer) {
+          if (geom.thresholdDacOverride(layer) >= 0) {
+            window[layer].second = m_mipWindowThresholdSlabHigh.value();
+            info() << "MIP window: slab " << layer << " ran at DAC " << geom.thresholdDacOverride(layer)
+                   << " (its own), window [" << window[layer].first << ", " << window[layer].second
+                   << "] ADC" << endmsg;
+          }
+        }
+      }
+      for (const auto& entry : m_mipWindowSlabOverrides.value()) {
+        int slab = -1;
+        double lo = 0., hi = 0.;
+        char c1 = 0, c2 = 0;
+        std::istringstream in(entry);
+        if (!(in >> slab >> c1 >> lo >> c2 >> hi) || c1 != ':' || c2 != ':' || slab < 0 || slab >= kSlbDepth) {
+          error() << "MipWindowSlabOverrides entry '" << entry << "' is not 'slab:low:high'" << endmsg;
+          continue;
+        }
+        window[slab] = {lo, hi};
+        info() << "MIP window: slab " << slab << " [" << lo << ", " << hi << "] ADC (explicit)" << endmsg;
+      }
+    }
 
     // Pass 1: compute the raw per-channel result (fit, histogram-peak
     // fallback, or masked) exactly as before, but store it instead of
@@ -707,7 +755,7 @@ struct PedestalMipCalibrator final : Gaudi::Algorithm {
                   mip1 += hmips.GetBinContent(k);
                 }
               }
-              if (mip1 > 4. && mpvIsTrustworthy(r, hmips, lowlim, highlim)) {
+              if (mip1 > 4. && mpvIsTrustworthy(r, hmips, window[layer].first, window[layer].second)) {
                 entry = {r.mpv, r.empv, r.width, r.chi2ndf, entry.integral, 1};
               } else if (histMax > 0.0 && histMax <= m_mipFallbackMaxAdc.value()) {
                 entry = {histMax, -2., 0., 0., entry.integral, 2};
@@ -787,7 +835,7 @@ struct PedestalMipCalibrator final : Gaudi::Algorithm {
         // entirely: a chip carries ~64x a channel's statistics, so its chi2/ndf is
         // inflated by that alone, not by being a worse fit. If not believed, the
         // slab pass gets these channels; if that fails too, they are masked.
-        if (!mpvIsTrustworthy(rChip, hmipsChip, lowlim, highlim)) {
+        if (!mpvIsTrustworthy(rChip, hmipsChip, window[layer].first, window[layer].second)) {
           continue;
         }
         const double peakMpvChip = rChip.mpv;
@@ -861,7 +909,7 @@ struct PedestalMipCalibrator final : Gaudi::Algorithm {
       // exceeded -- the slab fallback fired ZERO times across all of th220, and
       // channels that should have inherited their own slab's MPV (~25 in slab 14)
       // fell through to the detector-wide average (22.6) instead.
-      if (!mpvIsTrustworthy(rSlab, hmipsSlab, lowlim, highlim)) {
+      if (!mpvIsTrustworthy(rSlab, hmipsSlab, window[layer].first, window[layer].second)) {
         continue;  // slab fit not believed -- the channel is masked
       }
       for (int chip = 0; chip < kSkirocsPerAsu; ++chip) {
@@ -880,9 +928,13 @@ struct PedestalMipCalibrator final : Gaudi::Algorithm {
     // could fit is MASKED -- it does not inherit a detector-wide average MPV.
     //
     // That average was a fiction. It pooled every fitted channel in the detector,
-    // including slab 12, the chip-on-board: by design its gain is ~1.65x every
-    // other slab's (MPV ~35 vs ~21.5), so the "average MIP" it produced belongs
-    // to no real channel anywhere. The one channel that ever reached it in th220
+    // including slab 12, the chip-on-board, whose table MPV sits at 1.2-1.9x the
+    // others' (~35 vs ~21.5 at th220).  That is NOT a gain "by design" -- a real
+    // gain would give the same factor in every threshold set, and it gives 1.91 /
+    // 1.63 / 1.22 in th210 / th220 / th230 -- it is the truncation of its MIP
+    // spectrum by the higher discriminator that slab ran at (DAC 243, see the
+    // threshold_dac list of mappings/slab_z_positions.yml).  Either way the
+    // "average MIP" it produced belongs to no real channel anywhere. The one channel that ever reached it in th220
     // (slab 14, chip 0, channel 27) was handed 22.62 while its own slab's mean is
     // 25.11 and its immediate neighbours fit at 23-26 -- a ~10% error on every hit
     // that channel would ever record. A wrong MIP is worse than no MIP: a masked

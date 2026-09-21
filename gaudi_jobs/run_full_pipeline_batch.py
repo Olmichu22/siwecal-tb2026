@@ -52,6 +52,7 @@ import ROOT
 
 from siwecal_common import paths
 from siwecal_eventbuilder.cli import MIP_CALIB_TH, resolve_gaudi_calib_files
+from siwecal_eventbuilder.geometry import load_slab_technology
 from siwecal_eventbuilder.run_settings import read_threshold_dac
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
@@ -95,8 +96,9 @@ def main(argv=None):
     p.add_argument("--no-calibration", action="store_true", help="Raw-ADC mode: pedestal=0, mip=1")
     p.add_argument("--padmap-default", default=None,
                    help="Default pad map file. Default: mappings/fev10_rotate_chip_channel_x_y_mapping.txt")
-    p.add_argument("--padmap-slab12", default=None,
-                   help="Slab-12 pad map override. Default: mappings/fev11_cob_good_rotate_chip_channel_x_y_mapping.txt")
+    p.add_argument("--padmap-overrides", default=None,
+                   help="Per-slab pad map overrides as 'slab:path,...'. Default: derived from the "
+                        "technology block of the slab-z file (slab 12, the FEV11 chip-on-board)")
     p.add_argument("--slab-z-file", default=None, help="Default: mappings/slab_z_positions.yml")
     p.add_argument("--hit-mip-cut", type=float, default=0.5, help="Hit-level MIP cut for the PID stage (default 0.5)")
     p.add_argument("--skip-pid", action="store_true",
@@ -116,8 +118,8 @@ def main(argv=None):
 
     mappings_dir = paths.geometry_dir()
     padmap_default = args.padmap_default or os.path.join(mappings_dir, "fev10_rotate_chip_channel_x_y_mapping.txt")
-    padmap_slab12 = args.padmap_slab12 or os.path.join(mappings_dir, "fev11_cob_good_rotate_chip_channel_x_y_mapping.txt")
     slab_z_file = args.slab_z_file or os.path.join(mappings_dir, "slab_z_positions.yml")
+    padmap_overrides = args.padmap_overrides or load_slab_technology(slab_z_file, mappings_dir).pad_map_overrides_env()
 
     run_settings_file = os.path.join(raw_dir, "Run_Settings.txt")
 
@@ -171,7 +173,7 @@ def main(argv=None):
         "EVBLD_PEDESTAL_FILE": pedestal_file,
         "EVBLD_MIP_FILE": mip_file,
         "EVBLD_PADMAP_DEFAULT": padmap_default,
-        "EVBLD_PADMAP_SLAB_OVERRIDES": f"12:{padmap_slab12}",
+        "EVBLD_PADMAP_SLAB_OVERRIDES": padmap_overrides,
         "EVBLD_SLAB_Z_FILE": slab_z_file,
     }
     result = subprocess.run(["k4run", _EVBLD_STEERING], env=env)

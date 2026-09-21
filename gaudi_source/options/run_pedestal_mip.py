@@ -53,6 +53,11 @@ if mode in ("Pedestal", "Mip", "Fill") and not input_files_raw:
     raise SystemExit(f"CALIB_MODE={mode} requires CALIB_INPUT_FILES (comma-separated siwecaldecoded ROOT files)")
 input_files = [f for f in input_files_raw.split(",") if f.strip()]
 
+_default_slab_z_file = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..",
+                                    "mappings", "slab_z_positions.yml")
+if not os.path.isfile(_default_slab_z_file):
+    _default_slab_z_file = ""
+
 calib = PedestalMipCalibrator(
     "PedestalMipCalibrator",
     InputFiles=input_files,
@@ -81,6 +86,14 @@ calib = PedestalMipCalibrator(
     MipHighLim=float(os.environ.get("CALIB_MIP_HIGH_LIM", "50")),
     MipLowLimLowGain=float(os.environ.get("CALIB_MIP_LOW_LIM_LOW_GAIN", "2")),
     MipHighLimLowGain=float(os.environ.get("CALIB_MIP_HIGH_LIM_LOW_GAIN", "20")),
+    # Per-slab MIP windows.  The slab file's technology block marks the slabs
+    # that ran at a discriminator of their own (slab 12, the chip-on-board, at
+    # DAC 243); their truncated spectra fit at 31-35 ADC and need a wider window.
+    # CALIB_SLAB_Z_FILE="" disables it; CALIB_MIP_WINDOW_OVERRIDES="12:10:90,..."
+    # sets explicit windows.
+    SlabZFile=os.environ.get("CALIB_SLAB_Z_FILE", _default_slab_z_file),
+    MipWindowThresholdSlabHigh=float(os.environ.get("CALIB_MIP_WINDOW_THRESHOLD_SLAB_HIGH", "90")),
+    MipWindowSlabOverrides=[e for e in os.environ.get("CALIB_MIP_WINDOW_OVERRIDES", "").split(",") if e.strip()],
     DiagnosticsFile=os.environ.get("CALIB_DIAGNOSTICS_FILE", ""),
     OutputHistogramFile=os.environ.get("CALIB_OUTPUT_HISTOGRAM_FILE", ""),
     InputHistogramFile=os.environ.get("CALIB_INPUT_HISTOGRAM_FILE", ""),

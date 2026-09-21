@@ -76,3 +76,56 @@ def test_event_viewer_default_agrees():
     viewer = _read_thicknesses_from_source(
         "event_viewer/_geometry.py", r"DEFAULT_SLAB_W_THICKNESS_MM\s*=\s*\(([^)]*)\)")
     assert viewer == EXPECTED_MM
+
+
+# --------------------------------------------------------------------------- #
+# The per-slab technology block of slab_z_positions.yml
+# --------------------------------------------------------------------------- #
+
+def _slab_yaml():
+    return os.path.join(_REPO, "mappings", "slab_z_positions.yml")
+
+
+def test_slab_12_is_the_chip_on_board():
+    """Slab 12 is the FEV11 COB: its own pad map, its own threshold DAC (243,
+    run book), read from the YAML and not from a hard-coded 12 anywhere."""
+    from siwecal_eventbuilder.geometry import load_slab_technology
+
+    t = load_slab_technology(_slab_yaml())
+    assert t.has_technology_block
+    assert t.technology[12] == "FEV11_COB"
+    assert all(v == "FEV10" for s, v in enumerate(t.technology) if s != 12)
+    assert list(t.pad_map_overrides()) == [12]
+    assert os.path.basename(t.pad_map_overrides()[12]).startswith("fev11_cob")
+    assert os.path.isfile(t.pad_map_overrides()[12])
+    assert t.pad_map_overrides_env().startswith("12:")
+    assert t.slabs_with_threshold_override() == {12: 243}
+    assert t.sensor_thickness_um[14] == 650
+
+
+def test_cli_and_viewer_pad_maps_come_from_the_yaml():
+    from siwecal_eventbuilder.cli import PAD_MAP_FILES_DEFAULT
+    from siwecal_eventbuilder.geometry import load_slab_technology
+
+    files = load_slab_technology(_slab_yaml()).pad_map_files()
+    assert PAD_MAP_FILES_DEFAULT == {k: os.path.basename(v) for k, v in files.items()}
+    assert set(PAD_MAP_FILES_DEFAULT) == {"default", 12}
+
+
+def test_conversion_copy_of_the_slab_yaml_is_identical():
+    """event_display/conversion/slab_z_positions.yml is a copy the reco.sh jobs
+    read; it must not drift from mappings/."""
+    twin = os.path.join(_REPO, "event_display", "conversion", "slab_z_positions.yml")
+    assert open(twin).read() == open(_slab_yaml()).read()
+
+
+def test_cpp_parser_reads_the_technology_block_without_corrupting_the_lists():
+    """SlabGeometry::fromYamlFile used to append any '- value' line to the last
+    list it had opened, so the technology block would have landed in
+    w_thickness_mm.  The source must reset on every top-level key and know the
+    three new ones."""
+    src = open(os.path.join(_REPO, "gaudi_source", "include", "k4SiWEcalReco", "PadMapGeometry.h")).read()
+    for key in ("slab_technology:", "sensor_thickness_um:", "threshold_dac:"):
+        assert key in src, key
+    assert "thresholdDacOverride" in src and "sensorThicknessUm" in src and "technology(" in src
+    assert "current = nullptr;" in src

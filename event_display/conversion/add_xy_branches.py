@@ -50,10 +50,21 @@ _DEFAULT_MAP_DIR = os.path.normpath(os.path.join(_SCRIPT_DIR, "..", ".."))
 # detector orientation (chip 0 in the bottom-left instead of its real top-right),
 # so hit_x/hit_y came out mirrored through the origin. Keep in sync with
 # siwecal_eventbuilder/cli.py PAD_MAP_FILES_DEFAULT.
-MAP_FILES = {
-    "default": "fev10_rotate_chip_channel_x_y_mapping.txt",
-    12: "fev11_cob_good_rotate_chip_channel_x_y_mapping.txt",
-}
+def _map_files() -> dict:
+    """From the technology block of mappings/slab_z_positions.yml (the slab that
+    is the FEV11 chip-on-board gets its own map); all-FEV10 without it."""
+    slab_file = os.path.join(_SCRIPT_DIR, "..", "..", "mappings", "slab_z_positions.yml")
+    if os.path.isfile(slab_file):
+        try:
+            sys.path.insert(0, os.path.join(_SCRIPT_DIR, "..", ".."))
+            from siwecal_eventbuilder.geometry import load_slab_technology
+            return {k: os.path.basename(v) for k, v in load_slab_technology(slab_file).pad_map_files().items()}
+        except ImportError:
+            pass
+    return {"default": "fev10_rotate_chip_channel_x_y_mapping.txt"}
+
+
+MAP_FILES = _map_files()
 
 TREE_NAME = "ecal"
 NAN_SENTINEL = -999.0   # written for hits with no mapping entry

@@ -57,6 +57,16 @@ if not no_calibration and (not pedestal_file or not mip_file):
     raise SystemExit("Set EVBLD_PEDESTAL_FILE and EVBLD_MIP_FILE, or EVBLD_NO_CALIBRATION=1 for raw-ADC mode")
 
 pad_map_overrides = [e for e in os.environ.get("EVBLD_PADMAP_SLAB_OVERRIDES", "").split(",") if e.strip()]
+slab_z_file = os.environ.get("EVBLD_SLAB_Z_FILE", "")
+if not pad_map_overrides and slab_z_file:
+    # Which slabs need a pad map of their own is the technology block of the
+    # slab file (slab 12, the FEV11 chip-on-board); nothing here says "12".
+    try:
+        from siwecal_eventbuilder.geometry import load_slab_technology
+        pad_map_overrides = [f"{s}:{path}" for s, path in
+                             sorted(load_slab_technology(slab_z_file).pad_map_overrides().items())]
+    except ImportError:
+        pass   # the package is not on PYTHONPATH: the explicit env var is the only way
 
 builder = EcalEventBuilder(
     "EcalEventBuilder",
@@ -87,6 +97,15 @@ builder = EcalEventBuilder(
     PadMapSlabOverrides=pad_map_overrides,
     SlabZFile=os.environ.get("EVBLD_SLAB_Z_FILE", ""),
     NoMapping=os.environ.get("EVBLD_NO_MAPPING", "0") == "1",
+    # 'hitbit' (default) or 'adc': see BuilderConfig::hitSelection in EventBuilder.h
+    HitSelection=os.environ.get("EVBLD_HIT_SELECTION", "hitbit"),
+    AdcHitThreshold=float(os.environ.get("EVBLD_ADC_HIT_THRESHOLD", "30")),
+    # Chip trigger bursts (>= 3 SCAs per chip-window, samples at the pedestal): see BuilderConfig::chipNoiseVeto.
+    # ON by default; EVBLD_CHIP_NOISE_VETO=0 switches it off.
+    ChipNoiseVeto=os.environ.get("EVBLD_CHIP_NOISE_VETO", "1") not in ("0", "", "no", "false"),
+    ChipNoiseMinScas=int(os.environ.get("EVBLD_CHIP_NOISE_MIN_SCAS", "3")),
+    ChipNoiseMinBits=int(os.environ.get("EVBLD_CHIP_NOISE_MIN_BITS", "40")),
+    ChipNoiseMaxMedianAdc=float(os.environ.get("EVBLD_CHIP_NOISE_MAX_MEDIAN_ADC", "20")),
 )
 
 ApplicationMgr(TopAlg=[builder],

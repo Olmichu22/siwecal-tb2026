@@ -126,8 +126,14 @@ class SlabGeometry {
     std::ifstream fin(path);
     if (!fin.is_open()) return g;
 
+    // Flat lists under known top-level keys.  Any OTHER "key:" line ends the
+    // list being read (the file also carries the per-slab technology block, a
+    // nested "technologies:" mapping and string lists; before this reset those
+    // lines were appended to whatever list came last).
     std::vector<double>* current = nullptr;
-    std::vector<double> parsedZ, parsedW;
+    std::vector<std::string>* currentStr = nullptr;
+    std::vector<double> parsedZ, parsedW, parsedThick, parsedDac;
+    std::vector<std::string> parsedTech;
     std::string line;
     while (std::getline(fin, line)) {
       const auto hashPos = line.find('#');
@@ -137,25 +143,58 @@ class SlabGeometry {
       const std::size_t end = content.find_last_not_of(" \t\r\n");
       const std::string trimmed = content.substr(start, end - start + 1);
 
-      if (trimmed.rfind("slab_z_mm:", 0) == 0) {
-        current = &parsedZ;
+      if (trimmed[0] != '-') {
+        // a key line: select the list it opens, or none
+        current = nullptr;
+        currentStr = nullptr;
+        if (start == 0) {   // only TOP-LEVEL keys; indented ones belong to a nested mapping
+          if (trimmed.rfind("slab_z_mm:", 0) == 0) current = &parsedZ;
+          else if (trimmed.rfind("w_thickness_mm:", 0) == 0) current = &parsedW;
+          else if (trimmed.rfind("sensor_thickness_um:", 0) == 0) current = &parsedThick;
+          else if (trimmed.rfind("threshold_dac:", 0) == 0) current = &parsedDac;
+          else if (trimmed.rfind("slab_technology:", 0) == 0) currentStr = &parsedTech;
+        }
         continue;
       }
-      if (trimmed.rfind("w_thickness_mm:", 0) == 0) {
-        current = &parsedW;
-        continue;
-      }
-      if (!trimmed.empty() && trimmed[0] == '-' && current != nullptr) {
+      if (current != nullptr) {
         try {
           current->push_back(std::stod(trimmed.substr(1)));
         } catch (const std::exception&) {
           // malformed line: skip, keep whatever was parsed so far
         }
+      } else if (currentStr != nullptr) {
+        const std::string item = trimmed.substr(1);
+        const std::size_t a = item.find_first_not_of(" \t");
+        const std::size_t b = item.find_last_not_of(" \t");
+        if (a != std::string::npos) currentStr->push_back(item.substr(a, b - a + 1));
       }
     }
     if (!parsedZ.empty()) g.m_slabZMm = parsedZ;
     if (!parsedW.empty()) g.m_slabWThicknessMm = parsedW;
+    if (!parsedTech.empty()) g.m_technology = parsedTech;
+    if (!parsedThick.empty()) g.m_sensorThicknessUm = parsedThick;
+    if (!parsedDac.empty()) g.m_thresholdDac = parsedDac;
     return g;
+  }
+
+  // --- the per-slab technology block (optional in the file) ---------------
+  // Absent block: every slab a FEV10, 500 um, no threshold override -- what the
+  // code assumed before slab 12's chip-on-board was described anywhere.
+  bool hasTechnologyBlock() const { return !m_technology.empty(); }
+  std::string technology(int slab) const {
+    if (slab >= 0 && static_cast<std::size_t>(slab) < m_technology.size()) return m_technology[slab];
+    return "FEV10";
+  }
+  double sensorThicknessUm(int slab) const {
+    if (slab >= 0 && static_cast<std::size_t>(slab) < m_sensorThicknessUm.size()) return m_sensorThicknessUm[slab];
+    return 500.0;
+  }
+  // The slab's own threshold DAC, or -1 when it ran at the run's setting.
+  int thresholdDacOverride(int slab) const {
+    if (slab >= 0 && static_cast<std::size_t>(slab) < m_thresholdDac.size()) {
+      return static_cast<int>(m_thresholdDac[slab]);
+    }
+    return -1;
   }
 
   double slabZ(int slab) const {
@@ -186,6 +225,9 @@ class SlabGeometry {
  private:
   std::vector<double> m_slabZMm;
   std::vector<double> m_slabWThicknessMm;
+  std::vector<std::string> m_technology;
+  std::vector<double> m_sensorThicknessUm;
+  std::vector<double> m_thresholdDac;
 };
 
 }  // namespace k4siwecal

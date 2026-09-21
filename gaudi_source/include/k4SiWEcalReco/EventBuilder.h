@@ -38,9 +38,11 @@
 
 #include <array>
 #include <limits>
+#include <algorithm>
 #include <map>
 #include <optional>
 #include <set>
+#include <string>
 #include <utility>
 #include <vector>
 
@@ -165,6 +167,55 @@ struct BuilderConfig {
   double gainIntercept = 1.45;   // c: low-gain ADC at zero high-gain signal
   double maxHitsPerSca = 1.0e18;  // math.inf equivalent; see EcalEventBuilder.cpp for why not literal infinity
   int maxHitsPerEvent = 15360;  // 15 slabs * 16 chips * 64 channels
+
+  // HIT SELECTION. Which channels of a triggered chip become hits.
+  //
+  //   "hitbit" (default, the historical behaviour): a channel exists only if its
+  //            hit_bit_high is set, read from the first SCA of the window where
+  //            it is set (bestScaPerChannel).
+  //   "adc"    : a channel exists if its hit bit is set in any SCA of the window
+  //            OR its pedestal-subtracted high-gain ADC exceeds adcHitThreshold
+  //            in some SCA of the window; it is read from the SCA where that ADC
+  //            is largest (bestScaByAmplitude).
+  //
+  // Why the second exists. When a SKIROC chip triggers, the hold samples all 64
+  // channels, hit bit or not, and the sample is real: on the 52 GeV electron run
+  // 13 (th230) about 15% of the high-gain ADC of every layer sits in channels
+  // with a clear signal (tens of MIP in the worst cases) and no hit bit in the
+  // SCA where the signal peaks -- 80% of them have no bit in any SCA of the
+  // window, 17% only in an earlier SCA (so "hitbit" reads the rising edge), 3%
+  // only in the retrigger SCA (reads ~0.4 of the peak). The fraction is the
+  // same at 20, 52 and 74 GeV and flat over layers 1-12, so it is not occupancy.
+  // Requiring the bit therefore under-reads every shower by ~15% and widens the
+  // event sum; with "adc" the Gaussian core of the event ADC sum moves from
+  // 1.17x / 1.18x below the digitised simulation (20 / 52 GeV) to 0.99x / 1.01x.
+  //
+  // adcHitThreshold is in ADC above the pedestal. 30 is ~15 pedestal widths
+  // (sigma_ped ~ 2 ADC) and ~1.4 MIP: noise cannot reach it, the discriminator
+  // (16-25 ADC) sits below it, so every channel it admits is one the chip's
+  // own trigger would have flagged had the flag been latched.
+  std::string hitSelection = "hitbit";
+  double adcHitThreshold = 30.0;
+
+  // CHIP NOISE VETO. The other failure of the hit flag: a chip goes into a
+  // burst -- it keeps triggering over many consecutive BCIDs, each SCA with
+  // 10-30 hit bits, and the stored samples are noise (median pedestal-subtracted
+  // ADC ~7, each channel off in its own direction). The BCID window merges the
+  // burst into one chip-window with 3 to 15 SCAs, where physics gives 1 (or 2
+  // with a retrigger). On the run-4 muons it is 1.6% of the chip-windows, in 12%
+  // of the events, on 234 of the 240 chips, ~1 chip per event, uncorrelated
+  // between the chips of a slab, constant in time, and it passes the badbcid
+  // selection. It carries no energy (the values cancel) but every channel counts
+  // as a hit -- what inflated hits/event on the muon runs. Dense showers can
+  // also chain 3-4 SCAs in one chip, with real signal (52 GeV: median 78-87
+  // ADC), so the veto looks at the ADC too: a chip-window with
+  // >= chipNoiseMinScas SCAs, or one SCA with >= chipNoiseMinBits hit bits,
+  // whose median pedestal-subtracted high-gain ADC over its flagged channels is
+  // below chipNoiseMaxMedianAdc is dropped whole from the window.
+  bool chipNoiseVeto = true;   // default since 2026-09-20 (user decision): see above
+  int chipNoiseMinScas = 3;
+  int chipNoiseMinBits = 40;
+  double chipNoiseMaxMedianAdc = 20.0;
 };
 
 using ChipKey = std::pair<int, int>;  // (slab, chip)
@@ -507,7 +558,14 @@ class HitCollector {
       const int chipId = acq.chipId(slab, chip);  // hardware ID -- used for calibration + output branch
       if (chipId < 0) continue;
       const int slabId = acq.slboardId(slab);
-      for (const auto& [channel, sca] : bestScaPerChannel(acq, slab, chip, scas)) {
+      if (m_cfg.chipNoiseVeto && isNoisyChipWindow(acq, slab, chip, scas, slabId, chipId)) {
+        ++noisyChipWindowsVetoed;
+        continue;
+      }
+      const auto chosen = (m_cfg.hitSelection == "adc")
+                              ? bestScaByAmplitude(acq, slab, chip, scas, slabId, chipId)
+                              : bestScaPerChannel(acq, slab, chip, scas);
+      for (const auto& [channel, sca] : chosen) {
         auto hit = buildHit(acq, slab, chip, sca, channel, slabId, chipId);
         if (hit.has_value()) hits.push_back(*hit);
       }
@@ -515,7 +573,39 @@ class HitCollector {
     return hits;
   }
 
+ public:
+  // Number of chip-windows the chip-noise veto dropped since construction;
+  // read by EcalEventBuilder for its end-of-run summary.
+  mutable long long noisyChipWindowsVetoed = 0;
+
  private:
+  // The chip-noise veto (BuilderConfig::chipNoiseVeto). A chip-window is a
+  // candidate when it spans >= chipNoiseMinScas SCAs or one of its SCAs carries
+  // >= chipNoiseMinBits hit bits; it is vetoed when the median pedestal-
+  // subtracted high-gain ADC of its flagged channels (masked channels and
+  // underflows left out) is below chipNoiseMaxMedianAdc. Fewer than 4 usable
+  // flagged samples: never vetoed.
+  bool isNoisyChipWindow(const AcquisitionView& acq, int slab, int chip, const std::vector<int>& scas, int slabId,
+                         int chipId) const {
+    bool candidate = static_cast<int>(scas.size()) >= m_cfg.chipNoiseMinScas;
+    std::vector<double> amps;
+    for (int sca : scas) {
+      int nBits = 0;
+      for (int channel = 0; channel < kChannelsInSkiroc; ++channel) {
+        if (acq.hitbitHigh(slab, chip, sca, channel) <= 0) continue;
+        ++nBits;
+        if (m_calib.isMasked(slabId, chipId, channel)) continue;
+        const int adcHigh = acq.adcHigh(slab, chip, sca, channel);
+        if (adcHigh <= m_cfg.adcUnderflowThreshold) continue;
+        amps.push_back(adcHigh - m_calib.pedestal(slabId, chipId, channel, sca));
+      }
+      if (nBits >= m_cfg.chipNoiseMinBits) candidate = true;
+    }
+    if (!candidate || amps.size() < 4) return false;
+    std::nth_element(amps.begin(), amps.begin() + amps.size() / 2, amps.end());
+    return amps[amps.size() / 2] < m_cfg.chipNoiseMaxMedianAdc;
+  }
+
   // Port of _best_sca_per_channel (hit_collector.py:49-65): for each
   // triggered channel, keep the SCA with the largest hitbit_high (strictly
   // greater, so the first-seen SCA wins ties).
@@ -533,6 +623,38 @@ class HitCollector {
           bestSca[channel] = sca;
         }
       }
+    }
+    return bestSca;
+  }
+
+  // The "adc" selection (BuilderConfig::hitSelection): a channel is a hit if
+  // its bit is set in any SCA of the window or its pedestal-subtracted
+  // high-gain ADC is above adcHitThreshold in any of them, and it is read from
+  // the SCA where that ADC is largest. Masked channels (no usable pedestal or
+  // MIP) can only enter through the bit, as before.
+  std::map<int, int> bestScaByAmplitude(const AcquisitionView& acq, int slab, int chip,
+                                        const std::vector<int>& scas, int slabId, int chipId) const {
+    std::map<int, int> bestSca;
+    for (int channel = 0; channel < kChannelsInSkiroc; ++channel) {
+      double bestAmp = -std::numeric_limits<double>::infinity();
+      int bestScaIdx = -1;
+      bool anyBit = false;
+      bool anyAbove = false;
+      for (int sca : scas) {
+        const int adcHigh = acq.adcHigh(slab, chip, sca, channel);
+        if (adcHigh <= m_cfg.adcUnderflowThreshold) continue;
+        const bool bit = acq.hitbitHigh(slab, chip, sca, channel) > 0;
+        anyBit = anyBit || bit;
+        const bool pedOk = !m_calib.isMasked(slabId, chipId, channel);
+        const double amp = pedOk ? adcHigh - m_calib.pedestal(slabId, chipId, channel, sca)
+                                 : (bit ? 0.0 : -std::numeric_limits<double>::infinity());
+        if (pedOk && amp > m_cfg.adcHitThreshold) anyAbove = true;
+        if (amp > bestAmp) {
+          bestAmp = amp;
+          bestScaIdx = sca;
+        }
+      }
+      if (bestScaIdx >= 0 && (anyBit || anyAbove)) bestSca[channel] = bestScaIdx;
     }
     return bestSca;
   }
@@ -660,6 +782,8 @@ class EventBuilder {
     }
     return events;
   }
+
+  long long noisyChipWindowsVetoed() const { return m_hitCollector.noisyChipWindowsVetoed; }
 
  private:
   BcidClusterer m_clusterer;

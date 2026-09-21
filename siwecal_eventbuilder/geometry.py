@@ -20,6 +20,7 @@ channel  : pixel / pad read out by a chip, indexed by ``ipix`` in 0..63.
 from dataclasses import dataclass, fields, replace
 from typing import Mapping, Optional
 
+import os
 import yaml
 
 # Radiation length of tungsten [mm].
@@ -49,6 +50,97 @@ def load_slab_w_thickness_mm(path: str) -> tuple:
     with open(path) as handle:
         document = yaml.safe_load(handle) or {}
     return tuple(float(t) for t in document.get("w_thickness_mm", ()))
+
+
+# --------------------------------------------------------------------------- #
+# Per-slab technology (the optional block of slab_z_positions.yml)
+# --------------------------------------------------------------------------- #
+
+DEFAULT_TECHNOLOGY = "FEV10"
+DEFAULT_SENSOR_THICKNESS_UM = 500
+DEFAULT_PAD_MAP = "fev10_rotate_chip_channel_x_y_mapping.txt"
+
+
+@dataclass(frozen=True)
+class SlabTechnology:
+    """What each slab physically is: board technology, sensor thickness, pad
+    map, and whether it ran at a threshold DAC of its own (-1 = the run's).
+
+    Slab 12 of the 2026 stack is the FEV11 chip-on-board with its own pad map
+    and its own DAC (243 against 215-230); this is where that fact lives, so
+    nothing downstream carries a hard-coded 12.  Without the block in the YAML
+    every slab is a FEV10 with a 500 um sensor and the default map.
+    """
+
+    technology: tuple
+    sensor_thickness_um: tuple
+    pad_map: tuple            # per slab, absolute path
+    threshold_dac: tuple
+    has_technology_block: bool = False
+
+    def default_pad_map(self) -> str:
+        counts: dict = {}
+        for p in self.pad_map:
+            counts[p] = counts.get(p, 0) + 1
+        return max(counts, key=lambda k: (counts[k], k == self.pad_map[0]))
+
+    def pad_map_overrides(self) -> dict:
+        """``{slab: path}`` for the slabs whose map is not the default one --
+        exactly the ``PadMapSlabOverrides`` list of the event builder."""
+        default = self.default_pad_map()
+        return {s: p for s, p in enumerate(self.pad_map) if p != default}
+
+    def pad_map_overrides_env(self) -> str:
+        """The same, as the ``EVBLD_PADMAP_SLAB_OVERRIDES`` value (``12:path,...``)."""
+        return ",".join(f"{s}:{p}" for s, p in sorted(self.pad_map_overrides().items()))
+
+    def pad_map_files(self) -> dict:
+        """``{"default": path, slab: path, ...}`` -- the ``pad_map_files`` shape
+        of the event viewer and the CLI config."""
+        out = {"default": self.default_pad_map()}
+        out.update(self.pad_map_overrides())
+        return out
+
+    def slabs_with_threshold_override(self) -> dict:
+        return {s: d for s, d in enumerate(self.threshold_dac) if d >= 0}
+
+
+def load_slab_technology(path: str, mappings_dir: Optional[str] = None,
+                         n_slabs: int = 15) -> SlabTechnology:
+    """Read the technology block of a ``slab_z_positions`` YAML; pad maps are
+    resolved against ``mappings_dir`` (default: the YAML's own directory)."""
+    with open(path) as handle:
+        document = yaml.safe_load(handle) or {}
+    mappings_dir = mappings_dir or os.path.dirname(os.path.abspath(path))
+    technologies = document.get("technologies") or {}
+
+    def per_slab(key, default):
+        values = document.get(key)
+        if values is None:
+            return [default] * n_slabs
+        if len(values) != n_slabs:
+            raise ValueError(f"{path}: {key} has {len(values)} entries, expected {n_slabs}")
+        return list(values)
+
+    tech = per_slab("slab_technology", DEFAULT_TECHNOLOGY)
+    for s, t in enumerate(tech):
+        if t not in technologies and t != DEFAULT_TECHNOLOGY:
+            raise ValueError(f"{path}: slab {s} technology '{t}' is not declared under 'technologies'")
+
+    def tech_default(t, key, fallback):
+        return (technologies.get(t) or {}).get(key, fallback)
+
+    thickness = document.get("sensor_thickness_um")
+    if thickness is None:
+        thickness = [tech_default(t, "sensor_thickness_um", DEFAULT_SENSOR_THICKNESS_UM) for t in tech]
+    thickness = [int(v) for v in per_slab("sensor_thickness_um", None)] if "sensor_thickness_um" in document \
+        else [int(v) for v in thickness]
+    pad_map = [tech_default(t, "pad_map", DEFAULT_PAD_MAP) for t in tech]
+    pad_map = [p if os.path.isabs(p) else os.path.join(mappings_dir, p) for p in pad_map]
+    dac = [int(v) for v in per_slab("threshold_dac", -1)]
+    return SlabTechnology(technology=tuple(tech), sensor_thickness_um=tuple(thickness),
+                         pad_map=tuple(pad_map), threshold_dac=tuple(dac),
+                         has_technology_block="slab_technology" in document)
 
 
 @dataclass(frozen=True)

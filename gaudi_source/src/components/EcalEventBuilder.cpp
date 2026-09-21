@@ -184,6 +184,25 @@ struct EcalEventBuilder final : Gaudi::Algorithm {
     cfg.gainIntercept = m_gainIntercept.value();
     cfg.maxHitsPerSca = m_maxHitsPerSca.value();
     cfg.maxHitsPerEvent = m_maxHitsPerEvent.value();
+    cfg.hitSelection = m_hitSelection.value();
+    cfg.adcHitThreshold = m_adcHitThreshold.value();
+    cfg.chipNoiseVeto = m_chipNoiseVeto.value();
+    cfg.chipNoiseMinScas = m_chipNoiseMinScas.value();
+    cfg.chipNoiseMinBits = m_chipNoiseMinBits.value();
+    cfg.chipNoiseMaxMedianAdc = m_chipNoiseMaxMedianAdc.value();
+    if (cfg.hitSelection != "hitbit" && cfg.hitSelection != "adc") {
+      error() << "HitSelection must be 'hitbit' or 'adc', got '" << cfg.hitSelection << "'" << endmsg;
+      return StatusCode::FAILURE;
+    }
+    info() << "Hit selection: " << cfg.hitSelection
+           << (cfg.hitSelection == "adc" ? " (hit bit in any SCA of the window, or adc_high - pedestal > " +
+                                               std::to_string(cfg.adcHitThreshold) + " ADC; read at the largest SCA)"
+                                         : " (hit bit only, first SCA of the window where it is set)")
+           << endmsg;
+    if (cfg.chipNoiseVeto)
+      info() << "Chip noise veto: a chip-window spanning >= " << cfg.chipNoiseMinScas << " SCAs (or one SCA with >= "
+             << cfg.chipNoiseMinBits << " hit bits) whose flagged channels have a median pedestal-subtracted ADC below "
+             << cfg.chipNoiseMaxMedianAdc << " is dropped" << endmsg;
 
     const k4siwecal::EventBuilder builder(cfg, calib, geom, padMap.get());
 
@@ -280,6 +299,8 @@ struct EcalEventBuilder final : Gaudi::Algorithm {
     fout->Close();
     info() << "EcalEventBuilder: wrote " << totalEvents << " event(s) from " << nEntries
            << " acquisition(s) to " << m_outputFile.value() << endmsg;
+    if (cfg.chipNoiseVeto)
+      info() << "Chip noise veto dropped " << builder.noisyChipWindowsVetoed() << " chip-window(s)" << endmsg;
     return StatusCode::SUCCESS;
   }
 
@@ -360,6 +381,26 @@ struct EcalEventBuilder final : Gaudi::Algorithm {
   // finite sentinel instead, which is behaviourally identical for this cut
   // (per-SCA hit counts realistically top out around 64).
   Gaudi::Property<double> m_maxHitsPerSca{this, "MaxHitsPerSca", 1.0e18, "math.inf equivalent (disabled)"};
+  Gaudi::Property<std::string> m_hitSelection{
+      this, "HitSelection", "hitbit",
+      "Which channels of a triggered chip become hits: 'hitbit' (hit_bit_high set, first SCA where it is set) "
+      "or 'adc' (hit bit in any SCA of the window OR adc_high - pedestal > AdcHitThreshold, read at the SCA "
+      "with the largest amplitude). See BuilderConfig::hitSelection for why the second exists."};
+  Gaudi::Property<double> m_adcHitThreshold{
+      this, "AdcHitThreshold", 30.0,
+      "HitSelection='adc': pedestal-subtracted high-gain ADC above which a channel without a hit bit is kept"};
+  Gaudi::Property<bool> m_chipNoiseVeto{
+      this, "ChipNoiseVeto", true,
+      "Drop a chip from a BCID window when it spans >= ChipNoiseMinScas SCAs (or one SCA carries >= ChipNoiseMinBits "
+      "hit bits) and the median pedestal-subtracted high-gain ADC of its flagged channels is below "
+      "ChipNoiseMaxMedianAdc: chip trigger bursts, see BuilderConfig::chipNoiseVeto"};
+  Gaudi::Property<int> m_chipNoiseMinScas{this, "ChipNoiseMinScas", 3,
+                                          "ChipNoiseVeto: SCAs per chip-window from which the chip is a candidate"};
+  Gaudi::Property<int> m_chipNoiseMinBits{this, "ChipNoiseMinBits", 40,
+                                          "ChipNoiseVeto: hit bits in one SCA from which the chip is a candidate"};
+  Gaudi::Property<double> m_chipNoiseMaxMedianAdc{
+      this, "ChipNoiseMaxMedianAdc", 20.0,
+      "ChipNoiseVeto: a candidate is vetoed when its median pedestal-subtracted ADC is below this"};
   Gaudi::Property<int> m_maxHitsPerEvent{this, "MaxHitsPerEvent", 15360, "15 slabs * 16 chips * 64 channels"};
 
  private:

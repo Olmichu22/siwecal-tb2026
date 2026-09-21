@@ -20,7 +20,7 @@ from siwecal_common import paths
 from .calibration import Calibration
 from .config import BuilderConfig
 from .run_settings import read_threshold_dac, run_settings_path
-from .geometry import DetectorGeometry, load_slab_z_mm, load_slab_w_thickness_mm
+from .geometry import DetectorGeometry, load_slab_technology, load_slab_z_mm, load_slab_w_thickness_mm
 from .pad_map import PadMap
 from .pipeline import EventBuildingPipeline
 from .settings import AppSettings
@@ -56,14 +56,23 @@ PAD_MAP_DIR_DEFAULT = paths.geometry_dir()
 # bottom-left corner instead of its real top-right position), so the
 # reconstructed hit_x/hit_y were mirrored through the origin w.r.t. the real
 # detector. The rotated maps put every layer back in the true orientation.
-PAD_MAP_FILES_DEFAULT = {
-    "default": "fev10_rotate_chip_channel_x_y_mapping.txt",
-    12: "fev11_cob_good_rotate_chip_channel_x_y_mapping.txt",
-}
-
 # Per-slab z positions for hit_z. This file is the live source of truth; if it
-# exists it overrides the DetectorGeometry default.
+# exists it overrides the DetectorGeometry default.  Its technology block also
+# says which slab needs a pad map of its own (slab 12, the FEV11 chip-on-board).
 SLAB_Z_FILE_DEFAULT = paths.geometry_file("slab_z_positions.yml")
+
+
+def _default_pad_map_files() -> dict:
+    """``{"default": file, slab: file}`` (basenames, resolved later against the
+    mappings directory) from the slab file's technology block; the all-FEV10
+    fallback when the file does not exist."""
+    if os.path.isfile(SLAB_Z_FILE_DEFAULT):
+        files = load_slab_technology(SLAB_Z_FILE_DEFAULT).pad_map_files()
+        return {k: os.path.basename(v) for k, v in files.items()}
+    return {"default": "fev10_rotate_chip_channel_x_y_mapping.txt"}
+
+
+PAD_MAP_FILES_DEFAULT = _default_pad_map_files()
 
 # Raw DAQ data directory: contains per-run subdirs with Run_Settings.txt.
 RAW_BASE_DEFAULT = "/eos/experiment/drdcalo/siw-ecal/TB2026-06/rundata"

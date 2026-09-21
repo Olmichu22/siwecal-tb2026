@@ -19,13 +19,19 @@ from . import PROJECT_ROOT
 def _default_pad_map_files() -> Dict:
     """``(chip,channel)->(x,y)`` maps: a mandatory default + per-slab overrides.
 
-    Mirrors the mapping the event builder uses: FEV10 wafers everywhere, with the
-    FEV11 chip-on-board (rotated) wafer overriding slab 12.
+    From the technology block of slab_z_positions.yml, the same source the event
+    builder uses: FEV10 wafers everywhere, with the FEV11 chip-on-board (rotated)
+    wafer overriding the slab the file says (12 in the 2026 stack).
     """
-    return {
-        "default": "fev10_rotate_chip_channel_x_y_mapping.txt",
-        12: "fev11_cob_good_rotate_chip_channel_x_y_mapping.txt",
-    }
+    slab_file = paths.geometry_file("slab_z_positions.yml")
+    if os.path.isfile(slab_file):
+        try:
+            from siwecal_eventbuilder.geometry import load_slab_technology
+            files = load_slab_technology(slab_file).pad_map_files()
+            return {k: os.path.basename(v) for k, v in files.items()}
+        except ImportError:
+            pass
+    return {"default": "fev10_rotate_chip_channel_x_y_mapping.txt"}
 
 
 def _default_data_dirs() -> List[str]:

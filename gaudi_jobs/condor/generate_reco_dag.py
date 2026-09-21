@@ -66,6 +66,7 @@ from condor_common import DEFAULT_CONVERTED_DIR, OPTIONS_DIR, chunks_dir, condor
     mkdirs_line, write_executable, write_text
 from siwecal_common import paths
 from siwecal_eventbuilder.cli import MIP_CALIB_TH, resolve_gaudi_calib_files
+from siwecal_eventbuilder.geometry import load_slab_technology
 from siwecal_eventbuilder.run_settings import read_threshold_dac
 
 _CLEANUP = os.path.join(_REPO, "gaudi_jobs", "calibration", "condor", "cleanup_job_logs.sh")
@@ -135,10 +136,11 @@ def _reco_sh(out_dir):
     # reads it from the ecal file itself, so no driver is needed in between.
     content = f"""#!/bin/bash
 set -eo pipefail
-# reco.sh <run> <chunks_glob> <ecal_out> <pid_out> <ped> <mip> <ped_lg> <mip_lg> <padmap> <padmap_ovr> <slab_z> <run_id>
+# reco.sh <run> <chunks_glob> <ecal_out> <pid_out> <ped> <mip> <ped_lg> <mip_lg> <padmap> <padmap_ovr> <slab_z> <run_id> <hit_selection> <chip_noise_veto>
 RUN="$1"; CHUNKS="$2"; ECAL_OUT="$3"; PID_OUT="$4"
 PED="$5"; MIP="$6"; PED_LG="$7"; MIP_LG="$8"
 PADMAP="$9"; PADMAP_OVR="${{10}}"; SLAB_Z="${{11}}"; RUN_ID="${{12}}"
+HIT_SELECTION="${{13:-hitbit}}"; CHIP_NOISE_VETO="${{14:-1}}"
 
 """ + env_wrapper_preamble() + f"""
 """ + mkdirs_line('$(dirname "$ECAL_OUT")') + f"""
@@ -153,6 +155,8 @@ EVBLD_MIP_FILE_LOWGAIN="$MIP_LG" \\
 EVBLD_PADMAP_DEFAULT="$PADMAP" \\
 EVBLD_PADMAP_SLAB_OVERRIDES="$PADMAP_OVR" \\
 EVBLD_SLAB_Z_FILE="$SLAB_Z" \\
+EVBLD_HIT_SELECTION="$HIT_SELECTION" \\
+EVBLD_CHIP_NOISE_VETO="$CHIP_NOISE_VETO" \\
   k4run "{OPTIONS_DIR}/run_event_builder.py"
 
 echo "[reco] $RUN: PID/EDM4hep -> $PID_OUT"
@@ -222,7 +226,7 @@ queue grouplist,run_settings from {out_dir}/grouplist_{run}.txt
 def _reco_sub(out_dir, log_dir, request_memory, job_flavour):
     content = f"""universe                = vanilla
 executable              = {out_dir}/reco.sh
-arguments               = "$(run) '$(chunks)' $(ecal_out) $(pid_out) $(ped) $(mip) $(ped_lg) $(mip_lg) $(padmap) $(padmap_ovr) $(slab_z) $(run_id)"
+arguments               = "$(run) '$(chunks)' $(ecal_out) $(pid_out) $(ped) $(mip) $(ped_lg) $(mip_lg) $(padmap) $(padmap_ovr) $(slab_z) $(run_id) $(hit_selection) $(chip_noise_veto)"
 log                     = {log_dir}/reco_$(run).log
 output                  = {log_dir}/reco_$(run).out
 error                   = {log_dir}/reco_$(run).err
@@ -281,6 +285,15 @@ def main(argv=None):
     p.add_argument("--validate-request-memory", type=int, default=6000,
                    help="request_memory in MB for a VALIDATE job.")
     p.add_argument("--validate-job-flavour", default="workday", help="+JobFlavour for VALIDATE (default 8h).")
+    p.add_argument("--hit-selection", default="hitbit", choices=("hitbit", "adc"),
+                   help="EcalEventBuilder.HitSelection for every RECO job: 'hitbit' (historical) or 'adc' "
+                        "(hit bit in any SCA of the window OR adc - pedestal > 30 ADC; see BuilderConfig::hitSelection). "
+                        "A campaign with 'adc' belongs in its own --reco-dir: the energy scale is 17-20%% higher.")
+    p.add_argument("--chip-noise-veto", dest="chip_noise_veto", action="store_true", default=True,
+                   help="EcalEventBuilder.ChipNoiseVeto for every RECO job (drop chip trigger bursts; see "
+                        "BuilderConfig::chipNoiseVeto). ON by default; --no-chip-noise-veto reproduces the "
+                        "campaigns made before 2026-09-20.")
+    p.add_argument("--no-chip-noise-veto", dest="chip_noise_veto", action="store_false")
     p.add_argument("--keep-job-logs", action="store_true",
                    help="Keep every job's .out/.err. By default they are deleted when the node succeeds, to "
                         "protect the AFS logs/ directory's entry limit (see calibration/condor/README.md).")
@@ -296,8 +309,10 @@ def main(argv=None):
 
     mappings = paths.geometry_dir()
     padmap = os.path.join(mappings, "fev10_rotate_chip_channel_x_y_mapping.txt")
-    padmap_slab12 = os.path.join(mappings, "fev11_cob_good_rotate_chip_channel_x_y_mapping.txt")
-    slab_z = os.path.join(_REPO, "event_display", "conversion", "slab_z_positions.yml")
+    # One slab file for everything: z, W, and the technology block that says
+    # which slab needs its own pad map (slab 12, the FEV11 chip-on-board).
+    slab_z = os.path.join(mappings, "slab_z_positions.yml")
+    padmap_ovr = load_slab_technology(slab_z, mappings).pad_map_overrides_env()
 
     dag = []
     for results_id, (run, raw_dir) in enumerate(run_folders, 1):
@@ -353,7 +368,8 @@ def main(argv=None):
             f'VARS reco_{run} run="{run}" chunks="{os.path.join(cdir, "chunk_*.root")}" '
             f'ecal_out="{ecal_out}" pid_out="{pid_out}" ped="{ped}" mip="{mip}" '
             f'ped_lg="{ped_lg}" mip_lg="{mip_lg}" padmap="{padmap}" '
-            f'padmap_ovr="12:{padmap_slab12}" slab_z="{slab_z}" run_id="{run_id}"')
+            f'padmap_ovr="{padmap_ovr}" slab_z="{slab_z}" run_id="{run_id}" '
+            f'hit_selection="{args.hit_selection}" chip_noise_veto="{1 if args.chip_noise_veto else 0}"')
         dag.append(f"RETRY reco_{run} 2")
         dag.append(f"PARENT convert_{run} CHILD reco_{run}")
         if not args.keep_job_logs:
