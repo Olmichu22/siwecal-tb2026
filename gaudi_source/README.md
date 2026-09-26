@@ -221,6 +221,24 @@ The output tree also carries **`bcid_merge_end`**, the last BCID merged into the
 event (`bcid` is the window's start, so the difference is the window's span). It
 ports the reference's branch of the same name.
 
+**Run settings and acquisition sharing.** Four more branches (C++ builder only; the
+legacy Python writer does not have them):
+
+| Branch | Type | Meaning |
+|---|---|---|
+| `acq_window_ms` | F | `ACQWindow` of the run (`acqWindowMs` of `siwecaldecoded`, from `Run_Settings.txt`; −1 if absent) |
+| `delay_between_cycle_ms` | F | `DelayBetweenCycle` of the run (−1 if absent) |
+| `n_events_acq` | I | events written from this event's DAQ acquisition (= entries sharing its `spill`) |
+| `single_run` | I | 1 when `n_events_acq == 1`: the event is alone in its acquisition |
+
+Events that share an acquisition are distorted by the other triggers of the same
+chips (hits relocated to other channels, pedestals of earlier SCAs shifted), so
+`single_run == 1` is the clean sample for shower shapes. Counted after
+`MinSlabsHit`: a trigger burst that never becomes an event does not count.
+`SingleRunOnly` (`EVBLD_SINGLE_RUN_ONLY=1`, default off) writes only those events;
+`generate_reco_dag.py --single-run-only` sets it for a whole campaign, which
+belongs in its own `--reco-dir` (`TB2026-06/Reconstructed_singlerun`).
+
 **Configurable, with a caveat:** `MergeDelta`, `MinSlabsHit`, `DropRetriggerScas`
 and `DropRetriggerDelta` are plumbed through the pipeline steering
 [`options/run_event_builder.py`](options/run_event_builder.py) as
