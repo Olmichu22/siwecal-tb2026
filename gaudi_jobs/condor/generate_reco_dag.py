@@ -136,11 +136,11 @@ def _reco_sh(out_dir):
     # reads it from the ecal file itself, so no driver is needed in between.
     content = f"""#!/bin/bash
 set -eo pipefail
-# reco.sh <run> <chunks_glob> <ecal_out> <pid_out> <ped> <mip> <ped_lg> <mip_lg> <padmap> <padmap_ovr> <slab_z> <run_id> <hit_selection> <chip_noise_veto> <single_run_only>
+# reco.sh <run> <chunks_glob> <ecal_out> <pid_out> <ped> <mip> <ped_lg> <mip_lg> <padmap> <padmap_ovr> <slab_z> <run_id> <hit_selection> <chip_noise_veto> <single_run_only> <hit_mip_cut>
 RUN="$1"; CHUNKS="$2"; ECAL_OUT="$3"; PID_OUT="$4"
 PED="$5"; MIP="$6"; PED_LG="$7"; MIP_LG="$8"
 PADMAP="$9"; PADMAP_OVR="${{10}}"; SLAB_Z="${{11}}"; RUN_ID="${{12}}"
-HIT_SELECTION="${{13:-hitbit}}"; CHIP_NOISE_VETO="${{14:-1}}"; SINGLE_RUN_ONLY="${{15:-0}}"
+HIT_SELECTION="${{13:-hitbit}}"; CHIP_NOISE_VETO="${{14:-1}}"; SINGLE_RUN_ONLY="${{15:-0}}"; HIT_MIP_CUT="${{16:--1}}"
 
 """ + env_wrapper_preamble() + f"""
 """ + mkdirs_line('$(dirname "$ECAL_OUT")') + f"""
@@ -161,7 +161,7 @@ EVBLD_SINGLE_RUN_ONLY="$SINGLE_RUN_ONLY" \\
   k4run "{OPTIONS_DIR}/run_event_builder.py"
 
 echo "[reco] $RUN: PID/EDM4hep -> $PID_OUT"
-ECAL_FILE="$ECAL_OUT" ECAL_PID_OUT="$PID_OUT" \\
+ECAL_FILE="$ECAL_OUT" ECAL_PID_OUT="$PID_OUT" ECAL_HIT_MIP_CUT="$HIT_MIP_CUT" \\
   k4run "{OPTIONS_DIR}/run_pid.py"
 
 echo "[reco] $RUN: done"
@@ -227,7 +227,7 @@ queue grouplist,run_settings from {out_dir}/grouplist_{run}.txt
 def _reco_sub(out_dir, log_dir, request_memory, job_flavour):
     content = f"""universe                = vanilla
 executable              = {out_dir}/reco.sh
-arguments               = "$(run) '$(chunks)' $(ecal_out) $(pid_out) $(ped) $(mip) $(ped_lg) $(mip_lg) $(padmap) $(padmap_ovr) $(slab_z) $(run_id) $(hit_selection) $(chip_noise_veto) $(single_run_only)"
+arguments               = "$(run) '$(chunks)' $(ecal_out) $(pid_out) $(ped) $(mip) $(ped_lg) $(mip_lg) $(padmap) $(padmap_ovr) $(slab_z) $(run_id) $(hit_selection) $(chip_noise_veto) $(single_run_only) $(hit_mip_cut)"
 log                     = {log_dir}/reco_$(run).log
 output                  = {log_dir}/reco_$(run).out
 error                   = {log_dir}/reco_$(run).err
@@ -299,6 +299,10 @@ def main(argv=None):
                    help="EcalEventBuilder.SingleRunOnly for every RECO job: write only the events that are the "
                         "single event built from their DAQ acquisition (single_run == 1). Belongs in its own "
                         "--reco-dir (e.g. Reconstructed_singlerun).")
+    p.add_argument("--hit-mip-cut", type=float, default=-1.0,
+                   help="ECAL_HIT_MIP_CUT of the PID stage: drop hits below this energy [MIP] from the EDM4hep "
+                        "output (and every ECalPid variable). Default -1 = off, as before; 0.5 is what "
+                        "run_pid_batch.py applies in physics mode and what the simulation carries.")
     p.add_argument("--keep-job-logs", action="store_true",
                    help="Keep every job's .out/.err. By default they are deleted when the node succeeds, to "
                         "protect the AFS logs/ directory's entry limit (see calibration/condor/README.md).")
@@ -375,7 +379,7 @@ def main(argv=None):
             f'ped_lg="{ped_lg}" mip_lg="{mip_lg}" padmap="{padmap}" '
             f'padmap_ovr="{padmap_ovr}" slab_z="{slab_z}" run_id="{run_id}" '
             f'hit_selection="{args.hit_selection}" chip_noise_veto="{1 if args.chip_noise_veto else 0}" '
-            f'single_run_only="{1 if args.single_run_only else 0}"')
+            f'single_run_only="{1 if args.single_run_only else 0}" hit_mip_cut="{args.hit_mip_cut}"')
         dag.append(f"RETRY reco_{run} 2")
         dag.append(f"PARENT convert_{run} CHILD reco_{run}")
         if not args.keep_job_logs:
