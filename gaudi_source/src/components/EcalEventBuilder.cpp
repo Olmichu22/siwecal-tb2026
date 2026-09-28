@@ -508,6 +508,8 @@ struct EcalEventBuilder final : Gaudi::Algorithm {
       m_hitChan.resize(maxHitsPerEvent);
       m_hitSca.resize(maxHitsPerEvent);
       m_hitIsMasked.resize(maxHitsPerEvent);
+      m_hitBit.resize(maxHitsPerEvent);
+      m_hitBitWindow.resize(maxHitsPerEvent);
       m_hitHg.resize(maxHitsPerEvent);
       m_hitLg.resize(maxHitsPerEvent);
       m_hitEnergy.resize(maxHitsPerEvent);
@@ -555,6 +557,9 @@ struct EcalEventBuilder final : Gaudi::Algorithm {
       m_tree->Branch("hit_z", m_hitZ.data(), "hit_z[nhit_chan]/F");
       m_tree->Branch("hit_X0", m_hitX0.data(), "hit_X0[nhit_chan]/F");
       m_tree->Branch("hit_ismasked", m_hitIsMasked.data(), "hit_ismasked[nhit_chan]/I");
+      // Fast-shaper hit bit in the SCA read / in any SCA of the window (see Hit::hitBit).
+      m_tree->Branch("hit_bit", m_hitBit.data(), "hit_bit[nhit_chan]/I");
+      m_tree->Branch("hit_bit_window", m_hitBitWindow.data(), "hit_bit_window[nhit_chan]/I");
     }
 
     bool accepts(const k4siwecal::ReconstructedEvent& event) const {
@@ -596,6 +601,8 @@ struct EcalEventBuilder final : Gaudi::Algorithm {
         m_hitZ[i] = hit.z;
         m_hitX0[i] = hit.x0;
         m_hitIsMasked[i] = hit.isMasked ? 1 : 0;
+        m_hitBit[i] = hit.hitBit ? 1 : 0;
+        m_hitBitWindow[i] = hit.hitBitWindow ? 1 : 0;
       }
       m_tree->Fill();
       return true;
@@ -608,7 +615,7 @@ struct EcalEventBuilder final : Gaudi::Algorithm {
     int m_nEventsAcq = 0, m_singleRun = 0;
     int m_nSlab = 0, m_nChip = 0, m_nChan = 0;
     float m_sumHg = 0.f, m_sumEnergy = 0.f, m_sumEnergyNoCalib = 0.f, m_sumWEnergy = 0.f;
-    std::vector<int> m_hitSlab, m_hitChip, m_hitChan, m_hitSca, m_hitIsMasked;
+    std::vector<int> m_hitSlab, m_hitChip, m_hitChan, m_hitSca, m_hitIsMasked, m_hitBit, m_hitBitWindow;
     std::vector<float> m_hitHg, m_hitLg, m_hitEnergy, m_hitEnergyNoCalib, m_hitWEnergy, m_hitX, m_hitY,
         m_hitZ, m_hitX0;
   };

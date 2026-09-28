@@ -230,6 +230,8 @@ legacy Python writer does not have them):
 | `delay_between_cycle_ms` | F | `DelayBetweenCycle` of the run (−1 if absent) |
 | `n_events_acq` | I | events written from this event's DAQ acquisition (= entries sharing its `spill`) |
 | `single_run` | I | 1 when `n_events_acq == 1`: the event is alone in its acquisition |
+| `hit_bit[nhit_chan]` | I | fast-shaper hit bit (`hitbit_high`) set in the SCA the hit is read from; always 1 with `HitSelection=hitbit` |
+| `hit_bit_window[nhit_chan]` | I | the same bit set in any SCA of the event window for that channel |
 
 Events that share an acquisition are distorted by the other triggers of the same
 chips (hits relocated to other channels, pedestals of earlier SCAs shifted), so
