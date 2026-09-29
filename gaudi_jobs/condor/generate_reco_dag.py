@@ -262,6 +262,9 @@ def main(argv=None):
                    help="Threshold whose PEDESTAL tables (and so pedestal mask) every run uses. Default: the "
                         "run's own threshold. With --mip-th, puts every run on one calibration "
                         "(e.g. --ped-th 210 --mip-th 210).")
+    p.add_argument("--calib-dir", default=None,
+                   help="Calibration folder with the MuonCalib_gaudi layout ({pedestals,mips}/th<N>/), e.g. "
+                        "calibration/MuonCalib_gaudi_fixed. Default: calibration/MuonCalib_gaudi.")
     p.add_argument("--out-dir", required=True, help="Directory to write the DAG, subs, wrappers and logs into.")
     p.add_argument("--chunks-per-job", type=int, default=20,
                    help="Raw chunks decoded by ONE Condor job, each in its own k4run (default 20). "
@@ -344,7 +347,8 @@ def main(argv=None):
         if args.convert_only:
             ped = mip = ped_lg = mip_lg = ""
         else:
-            ped, mip, ped_lg, mip_lg = resolve_gaudi_calib_files(th, mip_th=args.mip_th, ped_th=args.ped_th)
+            ped, mip, ped_lg, mip_lg = resolve_gaudi_calib_files(th, mip_th=args.mip_th, ped_th=args.ped_th,
+                                                                calib_dir=args.calib_dir and os.path.abspath(args.calib_dir))
 
         cdir = chunks_dir(args.converted_dir, run)
         os.makedirs(cdir, exist_ok=True)
