@@ -96,7 +96,8 @@ struct EcalRawDecoder final : Gaudi::Algorithm {
                << endmsg;
       }
     } else {
-      k4siwecal::CycleAssembler assembler(m_maxReadoutCycleJump.value(), m_bcidThreshold.value());
+      k4siwecal::CycleAssembler assembler(m_maxReadoutCycleJump.value(), m_bcidThreshold.value(),
+                                          m_dataColumnsLatestFirst.value());
       for (const auto& path : m_inputFiles.value()) {
         if (!streamFile(path, assembler, sink)) {
           return error() << "Cannot open raw file: " << path << endmsg, StatusCode::FAILURE;
@@ -135,6 +136,11 @@ struct EcalRawDecoder final : Gaudi::Algorithm {
   Gaudi::Property<bool> m_eudaqFormat{this, "EudaqFormat", false,
                                       "Use the 0xABCD EUDAQ frame sync instead of the plain 0xEEEEEEEE one"};
   Gaudi::Property<bool> m_computeBadBcid{this, "ComputeBadBcid", true, "Run the bad-BCID tagging state machine"};
+  Gaudi::Property<bool> m_dataColumnsLatestFirst{
+      this, "DataColumnsLatestFirst", true,
+      "Pair the SCA data blocks with the BCID list latest-first, as the chip emits them (SlbFrameDecoder.h, "
+      "deviation 2). False reproduces the reference converter's pairing, which attributes the hits of a "
+      "chip's other triggers to each event."};
   Gaudi::Property<bool> m_resetStatePerInputFile{
       this, "ResetStatePerInputFile", true,
       "Match legacy behaviour: fresh cycle-buffer state at each input chunk-file boundary"};
@@ -217,7 +223,7 @@ struct EcalRawDecoder final : Gaudi::Algorithm {
     constexpr int kMaxAttempts = 6;
     for (int attempt = 0; attempt < kMaxAttempts; ++attempt) {
       if (countRepeatedCyclesKeyOnly(path, maxJump) == 0) {
-        k4siwecal::CycleAssembler assembler(maxJump, m_bcidThreshold.value());
+        k4siwecal::CycleAssembler assembler(maxJump, m_bcidThreshold.value(), m_dataColumnsLatestFirst.value());
         if (!streamFile(path, assembler, sink)) {
           error() << "Cannot open raw file: " << path << endmsg;
           return false;

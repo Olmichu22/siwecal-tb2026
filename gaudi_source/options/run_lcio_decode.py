@@ -32,6 +32,9 @@ decoder = EcalLcioDecoder(
     CollectionName=os.environ.get("LCIO_COLLECTION", "EUDAQDataSiECAL"),
     RunSettingsFile=os.environ.get("LCIO_RUN_SETTINGS_FILE", ""),
     MaxAcq=int(os.environ.get("LCIO_MAX_ACQ", "-1")),
+    # the EUDAQ producer pairs a chip's SCA data with its BCIDs like the reference
+    # converter; reverse the columns (SlbFrameDecoder.h, deviation 2). "0" keeps them.
+    DataColumnsLatestFirst=os.environ.get("LCIO_DATA_LATEST_FIRST", "1") == "1",
 )
 
 ApplicationMgr(TopAlg=[decoder],

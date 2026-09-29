@@ -80,8 +80,19 @@ final, cut-passing output(s), deleting the temporary file.
   chunk files of one run (`<run>_raw.bin`, `_raw.bin_0001`, ...) into the
   `siwecaldecoded` ROOT tree: Gray-code ADC/BCID decoding, per-(slab,chip,sca)
   cycle buffering with overflow-jump retry, and the bad-BCID
-  (retrigger/empty-event) tagging state machine — a faithful port of the
-  external reference tool `SLBraw2ROOT.cc`. Also reads `Run_Settings.txt`
+  (retrigger/empty-event) tagging state machine — a port of the external
+  reference tool `SLBraw2ROOT.cc` with one physics correction (2026-09-29):
+  the reference pairs a chip's SCA data blocks with its BCID list in opposite
+  orders, so the data of column *j* were attributed to `bcid[n-1-j]` — with
+  two or more triggers in a chip, every event built by BCID received another
+  particle's hits from that chip (the "acquisition sharing" damage: σ/μ 0.29
+  instead of 0.07, core fraction 0.13 instead of 0.52 on run 291). Property
+  `DataColumnsLatestFirst` (default true; env `RAW2ROOT_DATA_LATEST_FIRST`)
+  pairs them as the chip emits them; `false` reproduces the reference. The
+  proof and the measurements are in `SlbFrameDecoder.h` (deviation 2).
+  `EcalLcioDecoder` applies the same correction (`reverseDataColumns`,
+  `LCIO_DATA_LATEST_FIRST`), since the EUDAQ producer pairs like the
+  reference. Also reads `Run_Settings.txt`
   (via `include/k4SiWEcalReco/RunSettings.h`, property `RunSettingsFile`) and
   writes six extra run-constant branches, repeated on every entry (same
   convention as `threshold_dac`/`run` further down the chain):
@@ -534,7 +545,7 @@ application or output-file naming):
 
 | Stage | Steering file | Key env vars |
 |---|---|---|
-| raw2root (ONE chunk per process) | `run_raw2root.py` | `RAW_FILES`, `RAW2ROOT_OUT`, `RAW2ROOT_RUN_SETTINGS_FILE` |
+| raw2root (ONE chunk per process) | `run_raw2root.py` | `RAW_FILES`, `RAW2ROOT_OUT`, `RAW2ROOT_RUN_SETTINGS_FILE`, `RAW2ROOT_DATA_LATEST_FIRST` (default 1) |
 | pedestal/MIP calibration | `run_pedestal_mip.py` | `CALIB_INPUT_FILES`, `CALIB_MODE`, `CALIB_GAIN`, `CALIB_OUTPUT_PEDESTAL_FILE`/`CALIB_OUTPUT_MIP_FILE` |
 | event building | `run_event_builder.py` | `EVBLD_INPUT`, `EVBLD_OUTPUT`, `EVBLD_PEDESTAL_FILE`, `EVBLD_MIP_FILE`, `EVBLD_PADMAP_DEFAULT`, `EVBLD_SLAB_Z_FILE` |
 | PID/EDM4hep | `run_pid.py` | `ECAL_FILE`, `ECAL_PID_OUT`, `ECAL_HIT_MIP_CUT` (`<0` disables), `ECAL_MIP_THRESHOLDS` (`""` = no variant blocks) |
