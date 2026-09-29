@@ -9,8 +9,7 @@ fix): mean, width (RMS of the Gaussian fit), per slab and per SCA, both gains.
 Table format: '#layer chip channel' then (ped_mean, ped_error, ped_width) per SCA; ped_error <= 0 marks an
 unfitted SCA. Only (channel, SCA) cells valid in BOTH tables are compared.
 
-Writes pedestal_compare_<gain>gain.png, pedestal_width_<gain>gain.png, pedestal_sca_<gain>gain.png and
-pedestal_compare.txt (tables: per slab, per SCA, global).
+Writes pedestal_{compare,width,sca}_th<N>_<gain>gain.png and pedestal_compare_th<N>.txt (tables: per slab, per SCA, global).
 """
 import argparse
 import glob
@@ -59,7 +58,7 @@ def main(argv=None):
     p.add_argument("--label-new", default="fixed SCA pairing")
     args = p.parse_args(argv)
     os.makedirs(args.out, exist_ok=True)
-    txt = open(os.path.join(args.out, "pedestal_compare.txt"), "w")
+    txt = open(os.path.join(args.out, f"pedestal_compare_th{args.th}.txt"), "w")
 
     def out(s=""):
         print(s); txt.write(s + "\n")
@@ -135,7 +134,7 @@ def main(argv=None):
         ax[2].legend(fontsize=9)
         fig.suptitle(f"th{args.th} pedestal tables, {gain} gain: {args.label_new} vs {args.label_old}", fontsize=13)
         fig.tight_layout(rect=[0, 0, 1, 0.94])
-        fig.savefig(os.path.join(args.out, f"pedestal_compare_{gain}gain.png"), dpi=110); plt.close(fig)
+        fig.savefig(os.path.join(args.out, f"pedestal_compare_th{args.th}_{gain}gain.png"), dpi=110); plt.close(fig)
 
         # ---- figure 2: width (RMS) ------------------------------------------------------------------
         fig, ax = plt.subplots(1, 3, figsize=(18, 5.2))
@@ -160,7 +159,7 @@ def main(argv=None):
         ax[2].legend(fontsize=9)
         fig.suptitle(f"th{args.th} pedestal widths (RMS), {gain} gain", fontsize=13)
         fig.tight_layout(rect=[0, 0, 1, 0.94])
-        fig.savefig(os.path.join(args.out, f"pedestal_width_{gain}gain.png"), dpi=110); plt.close(fig)
+        fig.savefig(os.path.join(args.out, f"pedestal_width_th{args.th}_{gain}gain.png"), dpi=110); plt.close(fig)
 
         # ---- figure 3: per SCA ----------------------------------------------------------------------
         fig, ax = plt.subplots(1, 2, figsize=(14, 5.2))
@@ -175,7 +174,7 @@ def main(argv=None):
         ax[1].grid(alpha=0.25)
         fig.suptitle(f"th{args.th} pedestals per SCA, {gain} gain", fontsize=13)
         fig.tight_layout(rect=[0, 0, 1, 0.93])
-        fig.savefig(os.path.join(args.out, f"pedestal_sca_{gain}gain.png"), dpi=110); plt.close(fig)
+        fig.savefig(os.path.join(args.out, f"pedestal_sca_th{args.th}_{gain}gain.png"), dpi=110); plt.close(fig)
     txt.close()
 
 

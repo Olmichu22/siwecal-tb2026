@@ -36,17 +36,21 @@ def compare_chunk(fa, fb):
     if ta.num_entries != tb.num_entries:
         return res
     br = ["acqNumber", "nColumns", "adc_high"]
-    a = ta.arrays(br, library="np")
-    b = tb.arrays(br + ["hitbit_high", "hitbit_low"], library="np")
-    res["acq_equal"] = bool(np.array_equal(a["acqNumber"], b["acqNumber"]))
-    for e in range(len(b["acqNumber"])):
-        res["hitbit_hl_mismatch"] += int(np.count_nonzero(b["hitbit_high"][e] != b["hitbit_low"][e]))
-        multi = b["nColumns"][e] >= 2
-        res["multi_col_chips"] += int(multi.sum())
-        if multi.any():
-            diff = (a["adc_high"][e] != b["adc_high"][e]).any(axis=(-1, -2)) if a["adc_high"][e].ndim == 4 \
-                else (a["adc_high"][e] != b["adc_high"][e]).reshape(multi.shape + (-1,)).any(axis=-1)
-            res["moved_chips"] += int((diff & multi).sum())
+    res["acq_equal"] = True
+    # Blocks of entries: an LCIO-decoded run is ONE chunk of ~2 GB.
+    step, n_max = 500, 10000   # content checked on the first n_max entries of a sampled chunk
+    for start in range(0, min(ta.num_entries, n_max), step):
+        stop = min(start + step, ta.num_entries, n_max)
+        a = ta.arrays(br, entry_start=start, entry_stop=stop, library="np")
+        b = tb.arrays(br + ["hitbit_high", "hitbit_low"], entry_start=start, entry_stop=stop, library="np")
+        res["acq_equal"] &= bool(np.array_equal(a["acqNumber"], b["acqNumber"]))
+        for e in range(len(b["acqNumber"])):
+            res["hitbit_hl_mismatch"] += int(np.count_nonzero(b["hitbit_high"][e] != b["hitbit_low"][e]))
+            multi = b["nColumns"][e] >= 2
+            res["multi_col_chips"] += int(multi.sum())
+            if multi.any():
+                diff = (a["adc_high"][e] != b["adc_high"][e]).reshape(multi.shape + (-1,)).any(axis=-1)
+                res["moved_chips"] += int((diff & multi).sum())
     return res
 
 

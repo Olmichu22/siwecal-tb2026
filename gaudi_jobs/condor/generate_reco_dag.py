@@ -72,6 +72,24 @@ from siwecal_eventbuilder.run_settings import read_threshold_dac
 _CLEANUP = os.path.join(_REPO, "gaudi_jobs", "calibration", "condor", "cleanup_job_logs.sh")
 
 
+def _read_anchor(calib_dir, th):
+    """(k, c) of <calib_dir>/anchor/th<th>/gain_anchor_th<th>.txt, or ("-", "-") if absent (the event-builder
+    steering then keeps its built-in GainRatio/GainIntercept). Before --calib-dir existed no campaign passed the
+    per-threshold line, so every one ran on the steering default (0.0962, 1.45)."""
+    if not calib_dir:
+        return ("-", "-")
+    path = os.path.join(calib_dir, "anchor", f"th{th}", f"gain_anchor_th{th}.txt")
+    if not os.path.exists(path):
+        print(f"[anchor] no {path}: steering default GainRatio/GainIntercept")
+        return ("-", "-")
+    vals = {}
+    for line in open(path):
+        parts = line.split()
+        if len(parts) >= 2 and not line.startswith("#"):
+            vals[parts[0]] = parts[1]
+    return (vals["k"], vals["c"])
+
+
 def _convert_sh(out_dir):
     # A job decodes a GROUP of chunks, each in its own k4run process.
     #
@@ -136,11 +154,15 @@ def _reco_sh(out_dir):
     # reads it from the ecal file itself, so no driver is needed in between.
     content = f"""#!/bin/bash
 set -eo pipefail
-# reco.sh <run> <chunks_glob> <ecal_out> <pid_out> <ped> <mip> <ped_lg> <mip_lg> <padmap> <padmap_ovr> <slab_z> <run_id> <hit_selection> <chip_noise_veto> <single_run_only> <hit_mip_cut>
+# reco.sh <run> <chunks_glob> <ecal_out> <pid_out> <ped> <mip> <ped_lg> <mip_lg> <padmap> <padmap_ovr> <slab_z> <run_id> <hit_selection> <chip_noise_veto> <single_run_only> <hit_mip_cut> <gain_ratio> <gain_intercept>
 RUN="$1"; CHUNKS="$2"; ECAL_OUT="$3"; PID_OUT="$4"
 PED="$5"; MIP="$6"; PED_LG="$7"; MIP_LG="$8"
 PADMAP="$9"; PADMAP_OVR="${{10}}"; SLAB_Z="${{11}}"; RUN_ID="${{12}}"
 HIT_SELECTION="${{13:-hitbit}}"; CHIP_NOISE_VETO="${{14:-1}}"; SINGLE_RUN_ONLY="${{15:-0}}"; HIT_MIP_CUT="${{16:--1}}"
+# LG->HG anchor line; "-" = the steering default
+GAIN_RATIO="${{17:--}}"; GAIN_INTERCEPT="${{18:--}}"
+[ "$GAIN_RATIO" != "-" ] && export EVBLD_GAIN_RATIO="$GAIN_RATIO"
+[ "$GAIN_INTERCEPT" != "-" ] && export EVBLD_GAIN_INTERCEPT="$GAIN_INTERCEPT"
 
 """ + env_wrapper_preamble() + f"""
 """ + mkdirs_line('$(dirname "$ECAL_OUT")') + f"""
@@ -227,7 +249,7 @@ queue grouplist,run_settings from {out_dir}/grouplist_{run}.txt
 def _reco_sub(out_dir, log_dir, request_memory, job_flavour):
     content = f"""universe                = vanilla
 executable              = {out_dir}/reco.sh
-arguments               = "$(run) '$(chunks)' $(ecal_out) $(pid_out) $(ped) $(mip) $(ped_lg) $(mip_lg) $(padmap) $(padmap_ovr) $(slab_z) $(run_id) $(hit_selection) $(chip_noise_veto) $(single_run_only) $(hit_mip_cut)"
+arguments               = "$(run) '$(chunks)' $(ecal_out) $(pid_out) $(ped) $(mip) $(ped_lg) $(mip_lg) $(padmap) $(padmap_ovr) $(slab_z) $(run_id) $(hit_selection) $(chip_noise_veto) $(single_run_only) $(hit_mip_cut) $(gain_ratio) $(gain_intercept)"
 log                     = {log_dir}/reco_$(run).log
 output                  = {log_dir}/reco_$(run).out
 error                   = {log_dir}/reco_$(run).err
@@ -346,7 +368,9 @@ def main(argv=None):
         # the whole point of converting first and calibrating (e.g. th210) after.
         if args.convert_only:
             ped = mip = ped_lg = mip_lg = ""
+            anchor = ("-", "-")
         else:
+            anchor = _read_anchor(args.calib_dir, args.ped_th or th)
             ped, mip, ped_lg, mip_lg = resolve_gaudi_calib_files(th, mip_th=args.mip_th, ped_th=args.ped_th,
                                                                 calib_dir=args.calib_dir and os.path.abspath(args.calib_dir))
 
@@ -387,7 +411,8 @@ def main(argv=None):
             f'ped_lg="{ped_lg}" mip_lg="{mip_lg}" padmap="{padmap}" '
             f'padmap_ovr="{padmap_ovr}" slab_z="{slab_z}" run_id="{run_id}" '
             f'hit_selection="{args.hit_selection}" chip_noise_veto="{1 if args.chip_noise_veto else 0}" '
-            f'single_run_only="{1 if args.single_run_only else 0}" hit_mip_cut="{args.hit_mip_cut}"')
+            f'single_run_only="{1 if args.single_run_only else 0}" hit_mip_cut="{args.hit_mip_cut}" '
+            f'gain_ratio="{anchor[0]}" gain_intercept="{anchor[1]}"')
         dag.append(f"RETRY reco_{run} 2")
         dag.append(f"PARENT convert_{run} CHILD reco_{run}")
         if not args.keep_job_logs:

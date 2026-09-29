@@ -23,6 +23,7 @@ Usage::
     condor_submit_dag gaudi_jobs/calibration/condor/generated/th220/calibration_th220.dag
 """
 import argparse
+import glob
 import os
 import sys
 
@@ -84,6 +85,20 @@ def _check_decoded_chunks(run_folders, converted_dir):
             f"Missing:\n{preview}{more}"
         )
     return expected
+
+
+def _decoded_as_found(run_folders, converted_dir):
+    """{run_name: [chunk_NNNN.root, ...]} as they exist on disk. For runs decoded
+    from EUDAQ LCIO (gaudi_jobs/decode_lcio_runs.py), which write ONE chunk_0000
+    for the whole run instead of one per raw chunk."""
+    found = {}
+    for run_name, _ in run_folders:
+        names = sorted(os.path.basename(f) for f in glob.glob(os.path.join(chunks_dir(converted_dir, run_name),
+                                                                            "chunk_*.root")))
+        if not names:
+            raise SystemExit(f"ERROR: no decoded chunks for {run_name} under {converted_dir}")
+        found[run_name] = names
+    return found
 
 
 def _fill_sh(out_dir):
@@ -293,6 +308,9 @@ def main(argv=None):
     p.add_argument("--gain", choices=("high", "low", "both"), default="high")
     p.add_argument("--dag-dir", required=True,
                    help="Directory to write the .dag/.sub/.sh/file-lists/logs/ into.")
+    p.add_argument("--decoded-as-found", action="store_true",
+                   help="Fill from the decoded chunks that exist, instead of requiring one per raw chunk. "
+                        "Needed for runs decoded from EUDAQ LCIO (one chunk_0000 for the whole run).")
     p.add_argument("--diagnostics", action="store_true",
                     help="Also write a <output>.diagnostics.root cross-check file per Fit job.")
     p.add_argument("--keep-job-logs", action="store_true",
@@ -328,7 +346,8 @@ def main(argv=None):
     kwargs = {"default_base": args.raw_base} if args.raw_base else {}
     run_folders = parse_run_folder_list(args.runs, **kwargs)
 
-    expected_chunks = _check_decoded_chunks(run_folders, args.converted_dir)
+    expected_chunks = (_decoded_as_found(run_folders, args.converted_dir) if args.decoded_as_found
+                       else _check_decoded_chunks(run_folders, args.converted_dir))
 
     th = _check_threshold_consistency(run_folders, args.th)
     label = _combined_label(run_folders, th)
