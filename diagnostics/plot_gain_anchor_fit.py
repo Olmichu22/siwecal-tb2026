@@ -27,6 +27,7 @@ least-squares fit to the hits (least squares on this band is pulled off the data
 tails).
 
 Usage:  RUN=TB2026CERN_run_000072 TH=220 python3 diagnostics/plot_gain_anchor_fit.py
+        (CALIB_DIR / CONVERTED_DIR: another table tree / decoded-chunk area, e.g. the fixed-pairing ones)
 """
 import glob
 import os
@@ -82,15 +83,15 @@ def read_ped(path):
     return a
 
 
-G = f"calibration/MuonCalib_gaudi/pedestals/th{TH}"
+G = os.path.join(os.environ.get("CALIB_DIR", "calibration/MuonCalib_gaudi"), "pedestals", f"th{TH}")
 tag = "TB2026CERN_run_000004" if TH == "230" else f"TB2026CERN_run_000th{TH}"
 PH = read_ped(f"{G}/Pedestal_{tag}_highgain.txt")
 PL = read_ped(f"{G}/Pedestal_{tag}_lowgain.txt")
 HAVE = (PH > 0) & (PL > 0)
 
 chain = ROOT.TChain("siwecaldecoded")
-for c in sorted(glob.glob(f"/eos/experiment/drdcalo/siw-ecal/TB2026-06/Data/"
-                          f"rundata_converted_gaudi/{RUN}/chunks/chunk_*.root"))[:60]:
+CONVERTED = os.environ.get("CONVERTED_DIR", "/eos/experiment/drdcalo/siw-ecal/TB2026-06/Data/rundata_converted_gaudi")
+for c in sorted(glob.glob(f"{CONVERTED}/{RUN}/chunks/chunk_*.root"))[:60]:
     chain.AddFile(c)
 if chain.GetEntries() == 0:
     raise SystemExit(f"ERROR: no decoded chunks for {RUN}")
