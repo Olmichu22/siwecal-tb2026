@@ -123,17 +123,25 @@ CHUNKLIST="$1"; OUT_HIST="$2"
 """ + env_wrapper_preamble() + f"""
 # Idempotent: if a VALID histogram already exists (from a previous submission of
 # this DAG), skip -- makes relaunching the whole DAG cheap without re-filling
-# everything. Validity is checked by actually opening the ROOT file (non-empty +
-# not a zombie + has keys), so a partial file left by a killed job is NOT trusted
-# and gets refilled.
-if [ -s "$OUT_HIST" ] && python3 -c "import ROOT,sys; f=ROOT.TFile.Open(sys.argv[1]); sys.exit(0 if f and not f.IsZombie() and f.GetListOfKeys().GetSize()>0 else 1)" "$OUT_HIST" >/dev/null 2>&1; then
+# everything. Valid = opens, not a zombie, has keys AND was closed properly (ROOT
+# did not have to Recover it). Keys alone are not enough: a job killed mid-write
+# leaves a file ROOT recovers with a fraction of its histograms (th220, 2026-09-29:
+# 76 of 290 groups at 384k of 540k keys), and the retry used to skip over it.
+VALID='import ROOT,sys; ROOT.gErrorIgnoreLevel=ROOT.kFatal; f=ROOT.TFile.Open(sys.argv[1]); sys.exit(0 if f and not f.IsZombie() and not f.TestBit(ROOT.TFile.kRecovered) and f.GetListOfKeys().GetSize()>0 else 1)'
+if [ -s "$OUT_HIST" ] && python3 -c "$VALID" "$OUT_HIST" >/dev/null 2>&1; then
   echo "[fill] $OUT_HIST already valid -- skipping"
   exit 0
 fi
 INPUTS=$(paste -sd, "$CHUNKLIST")
 echo "[fill] $(wc -l < "$CHUNKLIST") chunk(s) -> $OUT_HIST"
-""" + mkdirs_line('$(dirname "$OUT_HIST")') + f"""CALIB_INPUT_FILES="$INPUTS" CALIB_MODE=Fill CALIB_OUTPUT_HISTOGRAM_FILE="$OUT_HIST" \\
+""" + mkdirs_line('$(dirname "$OUT_HIST")') + f"""# Written locally, then copied: EOS only ever sees a complete file.
+TMP_HIST="$(mktemp --tmpdir="${{TMPDIR:-/tmp}}" fill_XXXXXX.root)"
+trap 'rm -f "$TMP_HIST"' EXIT
+CALIB_INPUT_FILES="$INPUTS" CALIB_MODE=Fill CALIB_OUTPUT_HISTOGRAM_FILE="$TMP_HIST" \\
   k4run "{OPTIONS_DIR}/run_pedestal_mip.py"
+python3 -c "$VALID" "$TMP_HIST" || {{ echo "[fill] local output invalid" >&2; exit 1; }}
+cp -f "$TMP_HIST" "$OUT_HIST"
+python3 -c "$VALID" "$OUT_HIST" || {{ echo "[fill] copy to $OUT_HIST invalid" >&2; exit 1; }}
 """
     write_executable(os.path.join(out_dir, "fill.sh"), content)
 
