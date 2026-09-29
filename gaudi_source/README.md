@@ -308,15 +308,18 @@ not reach farm jobs until it is added there too.
 
 ### shapeParameters layout (canonical, see `EcalShowerVars.h`)
 ```
-[ scalarNames() ]                                              21 base scalars
+[ scalarNames() ]                                              24 base scalars
 [ hits_per_layer[15] | energy_per_layer[15] | weighte_per_layer[15] ]
 [ mip05_<scalarNames()> ] [ mip1_<scalarNames()> ]            MIP-cut variants
 ```
 The `mip05_/mip1_` variant blocks are computed **only in `--validation` mode**
 (they feed the `event_viewer`'s interactive threshold slider). In the default
 physics mode the hits are already cleaned by the `0.5` MIP hit cut, so the blocks
-are omitted and the layout is just the 21 base scalars + the three per-layer
+are omitted and the layout is just the 24 base scalars + the three per-layer
 profiles. Readers (`PidFileReader`) auto-detect which layout a file uses.
+The last three scalars were appended later (`shower_onset`, `n_layers_before_onset`,
+then `fractal_dimension`, the CALICE shower fractal dimension -- definition in the
+top-level README); older files carry fewer and are resolved from the metadata.
 
 ### Tracking (ACTS)
 

@@ -71,6 +71,7 @@ struct EventVars {
   float e_over_nhit = NANF;
   float shower_onset = NANF;           // conversion layer: first of the dense run
   float n_layers_before_onset = NANF;  // hit layers ahead of it (the pre-shower track)
+  float fractal_dimension = NANF;      // shower fractal dimension (see fractalDimension())
   // per-layer profiles (length n_layers)
   std::vector<float> hits_per_layer;
   std::vector<float> energy_per_layer;
@@ -87,7 +88,9 @@ inline const std::vector<std::string>& scalarNames() {
       // Appended, not interleaved with the shower_* block above: the index of
       // every pre-existing scalar has to stay put, or a reader built against an
       // older layout would silently read the wrong column.
-      "shower_onset", "n_layers_before_onset"};
+      "shower_onset", "n_layers_before_onset",
+      // Appended after the onset pair for the same reason.
+      "fractal_dimension"};
   return names;
 }
 
@@ -211,6 +214,55 @@ inline int showerOnset(const std::vector<float>& profile, const ShowerThresholds
   return -1;
 }
 
+/// Pad index along one transverse axis from a pad-centre coordinate [mm]. The
+/// 32 pads of a row sit at +-(3.375 + k * 5.53) mm, k = 0..15: 5.53 mm pitch with
+/// a 6.75 mm gap between the two wafers at x = 0 (same grid in data and in the
+/// simulation's ecal tree). Removing the extra half-gap puts the pads on a
+/// regular 5.53 mm grid, pads 0..31.
+inline int padIndex(float x) {
+  constexpr float kPitch = 5.53f;
+  constexpr float kHalfGapExtra = 0.5f * (6.75f - kPitch);
+  const float u = x - std::copysign(kHalfGapExtra, x);
+  return static_cast<int>(std::floor(u / kPitch)) + 16;
+}
+
+/// Shower fractal dimension, CALICE definition (M. Ruan et al., PRL 112 (2014)
+/// 012001, eq. 1): FD = < log(N_1 / N_a) / log(a) >_a + 1, where N_a is the
+/// number of hits once the pads of EACH LAYER are regrouped into a x a
+/// super-cells (transverse only; the layers are never merged -- the "+1" in
+/// the paper is the longitudinal degree of freedom that this leaves
+/// untouched). a runs over {2, 3, 4, 6, 8} on the 32 x 32 pad grid. A MIP track
+/// (one pad per layer) gives N_a = N_1 at every scale and so FD = 1; EM
+/// showers, dense and self-similar, come out well above it. NaN without hits.
+inline float fractalDimension(const std::vector<int>& slab, const std::vector<float>& x,
+                              const std::vector<float>& y) {
+  static constexpr int kScales[] = {2, 3, 4, 6, 8};
+  const std::size_t n = slab.size();
+  if (n == 0) return NANF;
+  std::vector<long> key(n);
+  std::vector<int> ix(n), iy(n);
+  for (std::size_t i = 0; i < n; ++i) {
+    ix[i] = padIndex(x[i]);
+    iy[i] = padIndex(y[i]);
+  }
+  // Number of distinct (layer, super-cell) at scale a; a = 1 counts pads, so
+  // two hits in one pad (not expected, but harmless) are counted once.
+  auto count = [&](int a) {
+    for (std::size_t i = 0; i < n; ++i) {
+      const long cx = static_cast<long>(std::floor(static_cast<double>(ix[i]) / a));
+      const long cy = static_cast<long>(std::floor(static_cast<double>(iy[i]) / a));
+      key[i] = (static_cast<long>(slab[i]) * 1024 + (cx + 256)) * 1024 + (cy + 256);
+    }
+    std::vector<long> k = key;
+    std::sort(k.begin(), k.end());
+    return static_cast<double>(std::unique(k.begin(), k.end()) - k.begin());
+  };
+  const double n1 = count(1);
+  double acc = 0.;
+  for (int a : kScales) acc += std::log(n1 / count(a)) / std::log(static_cast<double>(a));
+  return static_cast<float>(acc / (sizeof(kScales) / sizeof(kScales[0])) + 1.0);
+}
+
 /// Compute every derived variable for one hit set (already energy-cut if needed).
 /// Mirrors siwecal_validation/event_data.py's per-event loop.
 inline EventVars computeEventVars(const std::vector<int>& slab,
@@ -297,6 +349,9 @@ inline EventVars computeEventVars(const std::vector<int>& slab,
   v.bar_x = static_cast<float>(bdx);
   v.bar_y = static_cast<float>(bdy);
   v.bar_r = static_cast<float>(std::hypot(bdx, bdy));
+
+  // Fractal dimension on the same positive-energy hits as the transverse moments.
+  v.fractal_dimension = fractalDimension(pslab, px, py);
 
   // Transverse RMS about the shower axis.
   if (ptot > 0.) {

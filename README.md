@@ -334,17 +334,31 @@ the `metadata` frame parameter `ECalPid_shapeParameterNames`):
 | e_over_nhit         | energy / nhit (hit energy density)                              |
 | shower_onset        | conversion layer: first of the dense run (NaN if not a shower)   |
 | n_layers_before_onset | hit layers ahead of the onset: the pre-shower track length     |
+| fractal_dimension   | shower fractal dimension, CALICE definition (see below)          |
 | hits_per_layer_0..14    | per-layer hit count (one float per layer)                   |
 | energy_per_layer_0..14  | per-layer Σ E (one float per layer)                         |
 | weighte_per_layer_0..14 | per-layer tungsten-weighted energy (one float per layer)    |
 
-In `--validation` mode the same 23 scalars are appended twice more, recomputed
+In `--validation` mode the same 24 scalars are appended twice more, recomputed
 after a per-hit cut, under the prefixes `mip05_` (`hit_energy ≥ 0.5`) and `mip1_`
 (`hit_energy ≥ 1.0`) — e.g. `mip05_moliere`, `mip1_is_shower`. These are the
 extra blocks knob **(B) `MipThresholds`** adds (see *"Two different 'MIP cut'
 knobs"* above); they feed the viewer's interactive threshold slider, and the
 default physics-mode pipeline omits them, so most files carry the base block
 only.
+
+#### `fractal_dimension`
+
+M. Ruan et al., PRL 112 (2014) 012001, eq. 1: the pads of each layer are
+regrouped into α × α super-cells (transverse only, layers never merged), N_α is
+the number of occupied (layer, super-cell) pairs, and
+`FD = ⟨log(N_1/N_α) / log α⟩ + 1` averaged over α ∈ {2, 3, 4, 6, 8} on the
+32 × 32 pad grid (5.53 mm pitch; the extra 6.75 − 5.53 mm wafer gap at 0 is
+removed before indexing). The "+1" is the paper's longitudinal degree of
+freedom: a MIP track (one pad per layer) gives exactly 1, electromagnetic
+showers well above. Same positive-energy hit set as the transverse moments.
+Python mirror: `siwecal_validation.metrics.fractal_dimension`. PID files
+written before it existed read back as NaN.
 
 #### How `is_shower` is decided
 
