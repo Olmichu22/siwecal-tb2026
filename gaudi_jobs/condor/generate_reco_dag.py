@@ -287,6 +287,10 @@ def main(argv=None):
     p.add_argument("--calib-dir", default=None,
                    help="Calibration folder with the MuonCalib_gaudi layout ({pedestals,mips}/th<N>/), e.g. "
                         "calibration/MuonCalib_gaudi_fixed. Default: calibration/MuonCalib_gaudi.")
+    p.add_argument("--anchor-own-th", action="store_true",
+                   help="With --calib-dir: take the LG->HG anchor line of the run's OWN threshold folder even when "
+                        "--ped-th puts the pedestals on another one. The line is a property of the data-taking "
+                        "period (th210 eudaq 166: k 0.0924; th220 run 72: 0.0964; th230 run 12: 0.0958).")
     p.add_argument("--out-dir", required=True, help="Directory to write the DAG, subs, wrappers and logs into.")
     p.add_argument("--chunks-per-job", type=int, default=20,
                    help="Raw chunks decoded by ONE Condor job, each in its own k4run (default 20). "
@@ -370,7 +374,7 @@ def main(argv=None):
             ped = mip = ped_lg = mip_lg = ""
             anchor = ("-", "-")
         else:
-            anchor = _read_anchor(args.calib_dir, args.ped_th or th)
+            anchor = _read_anchor(args.calib_dir, th if args.anchor_own_th else (args.ped_th or th))
             ped, mip, ped_lg, mip_lg = resolve_gaudi_calib_files(th, mip_th=args.mip_th, ped_th=args.ped_th,
                                                                 calib_dir=args.calib_dir and os.path.abspath(args.calib_dir))
 
