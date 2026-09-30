@@ -1,0 +1,110 @@
+==== th210, high gain: MIP ====
+  old: calibration/MuonCalib_gaudi/mips/th210/MIP_pedestalsubmode1_TB2026CERN_run_000th210_highgain.txt
+  new: calibration/MuonCalib_gaudi_fixed/mips/th210/MIP_pedestalsubmode1_TB2026CERN_run_000th210_highgain.txt
+  fitted channels: old 12290, new 13436, both 11598 of 15360
+  entries per channel (median): old 1284, new 1376
+                N  MPV old  MPV new  new/old   hw68  |r-1|>3%   w old   w new  w n/o
+  all       11598    18.39    18.69    1.015  0.025     31.4%    2.10    1.94  0.938
+  slab 0      644    18.36    18.58    1.012  0.021     21.3%    1.84    1.71  0.929
+  slab 1      784    17.98    18.16    1.013  0.026     28.6%    1.94    1.83  0.930
+  slab 2      807    18.17    18.39    1.011  0.024     27.5%    1.93    1.81  0.942
+  slab 3      832    18.00    18.28    1.015  0.028     32.0%    2.03    1.86  0.923
+  slab 4      759    17.93    18.17    1.016  0.028     36.1%    2.06    1.92  0.934
+  slab 5      794    18.16    18.46    1.017  0.024     29.7%    2.06    1.91  0.930
+  slab 6      713    18.08    18.35    1.018  0.029     38.6%    2.23    2.09  0.947
+  slab 7      818    18.48    18.81    1.016  0.027     32.8%    2.15    2.02  0.940
+  slab 8      813    18.54    18.92    1.017  0.025     33.1%    2.12    1.98  0.934
+  slab 9      825    18.30    18.60    1.014  0.023     28.6%    2.07    1.93  0.942
+  slab 10     781    18.12    18.50    1.020  0.026     37.9%    2.15    2.00  0.934
+  slab 11     841    18.10    18.45    1.016  0.025     33.4%    2.01    1.89  0.944
+  slab 12     569    34.96    35.35    1.006  0.030     33.2%    5.20    5.07  0.973
+  slab 13     721    18.59    18.98    1.018  0.025     34.5%    2.18    2.01  0.929
+  slab 14     897    23.24    23.51    1.014  0.021     23.9%    2.31    2.15  0.943
+
+==== th220, high gain: MIP ====
+  old: calibration/MuonCalib_gaudi/mips/th220/MIP_pedestalsubmode1_TB2026CERN_run_000th220_highgain.txt
+  new: calibration/MuonCalib_gaudi_fixed/mips/th220/MIP_pedestalsubmode1_TB2026CERN_run_000th220_highgain.txt
+  fitted channels: old 14611, new 14518, both 14331 of 15360
+  entries per channel (median): old 8565, new 10082
+                N  MPV old  MPV new  new/old   hw68  |r-1|>3%   w old   w new  w n/o
+  all       14331    21.68    22.69    1.042  0.031     67.3%    3.17    2.95  0.947
+  slab 0      730    20.81    21.29    1.028  0.022     47.1%    2.61    2.45  0.944
+  slab 1      949    21.14    21.92    1.037  0.023     62.6%    2.97    2.82  0.962
+  slab 2      984    19.93    20.50    1.030  0.025     50.8%    2.70    2.59  0.962
+  slab 3      992    21.56    22.54    1.047  0.028     75.5%    3.22    3.00  0.944
+  slab 4      969    21.97    23.07    1.043  0.029     68.1%    3.18    3.02  0.964
+  slab 5      990    21.12    22.18    1.050  0.032     75.7%    3.13    2.86  0.936
+  slab 6      926    22.62    23.49    1.037  0.036     59.4%    3.26    3.09  0.961
+  slab 7      992    20.95    21.80    1.042  0.033     65.7%    3.00    2.79  0.935
+  slab 8      994    21.94    23.13    1.054  0.030     79.7%    3.33    3.06  0.933
+  slab 9      994    21.41    22.56    1.051  0.030     77.7%    3.14    2.93  0.939
+  slab 10     979    21.45    22.58    1.059  0.036     80.0%    3.31    3.09  0.947
+  slab 11     987    20.71    21.66    1.046  0.028     71.5%    3.01    2.83  0.945
+  slab 12     927    35.40    36.43    1.032  0.020     55.2%    5.31    5.04  0.955
+  slab 13     935    22.75    24.08    1.061  0.032     84.1%    3.60    3.36  0.943
+  slab 14     983    24.97    25.66    1.030  0.025     50.6%    3.21    2.97  0.937
+
+==== th230, high gain: MIP ====
+  old: calibration/MuonCalib_gaudi/mips/th230/MIP_pedestalsubmode1_TB2026CERN_run_000004_highgain.txt
+  new: calibration/MuonCalib_gaudi_fixed/mips/th230/MIP_pedestalsubmode1_TB2026CERN_run_000004_highgain.txt
+  fitted channels: old 5871, new 3452, both 3224 of 15360
+  entries per channel (median): old 374, new 444
+                N  MPV old  MPV new  new/old   hw68  |r-1|>3%   w old   w new  w n/o
+  all        3224    32.17    32.98    1.029  0.060     64.8%    6.06    6.11  0.995
+  slab 0       32    31.25    30.68    0.991  0.040     50.0%    6.36    5.68  0.924
+  slab 1       96    29.80    30.85    1.033  0.051     61.5%    5.59    5.75  1.042
+  slab 2      124    29.92    30.46    1.029  0.070     66.1%    5.54    5.77  1.019
+  slab 3      153    31.88    32.78    1.024  0.049     62.1%    6.06    6.24  1.002
+  slab 4      171    32.04    32.59    1.033  0.065     67.3%    6.01    6.02  1.006
+  slab 5      230    31.15    32.65    1.039  0.060     69.6%    5.91    6.16  1.030
+  slab 6      245    31.95    32.75    1.037  0.059     69.4%    5.85    5.94  1.002
+  slab 7      245    31.60    32.17    1.031  0.066     68.2%    6.27    6.14  0.977
+  slab 8      266    32.26    33.03    1.024  0.058     62.8%    6.42    6.33  0.983
+  slab 9      258    31.61    32.46    1.037  0.058     67.4%    5.92    6.20  1.011
+  slab 10     261    31.67    32.46    1.030  0.069     66.7%    6.20    6.21  0.977
+  slab 11     293    29.82    30.88    1.037  0.062     66.9%    5.71    5.88  1.040
+  slab 12     324    37.84    38.83    1.019  0.051     59.3%    6.52    6.56  0.987
+  slab 13     239    32.79    33.51    1.024  0.054     60.7%    6.09    5.98  0.968
+  slab 14     287    34.11    34.69    1.021  0.057     61.7%    6.14    6.00  0.984
+
+==== th210, low gain: MIP ====
+  old: calibration/MuonCalib_gaudi/mips/th210/MIP_pedestalsubmode1_TB2026CERN_run_000th210_lowgain.txt
+  new: calibration/MuonCalib_gaudi_fixed/mips/th210/MIP_pedestalsubmode1_TB2026CERN_run_000th210_lowgain.txt
+  fitted channels: old 1098, new 345, both 73 of 15360
+  entries per channel (median): old 1037, new 789
+                N  MPV old  MPV new  new/old   hw68  |r-1|>3%   w old   w new  w n/o
+  all          73     5.73     5.51    0.953  0.137     64.4%    0.66    0.64  1.007
+  slab 12      69     5.73     5.55    0.971  0.139     62.3%    0.68    0.65  1.007
+
+==== th220, low gain: MIP ====
+  old: calibration/MuonCalib_gaudi/mips/th220/MIP_pedestalsubmode1_TB2026CERN_run_000th220_lowgain.txt
+  new: calibration/MuonCalib_gaudi_fixed/mips/th220/MIP_pedestalsubmode1_TB2026CERN_run_000th220_lowgain.txt
+  fitted channels: old 8167, new 871, both 531 of 15360
+  entries per channel (median): old 8350, new 5658
+                N  MPV old  MPV new  new/old   hw68  |r-1|>3%   w old   w new  w n/o
+  all         531     5.28     5.41    1.022  0.165     78.9%    0.84    0.68  0.835
+  slab 12     493     5.26     5.41    1.025  0.180     79.7%    0.83    0.68  0.818
+  slab 14      26     5.60     5.50    0.997  0.042     61.5%    1.71    2.06  1.137
+
+==== th230, low gain: MIP ====
+  old: calibration/MuonCalib_gaudi/mips/th230/MIP_pedestalsubmode1_TB2026CERN_run_000004_lowgain.txt
+  new: calibration/MuonCalib_gaudi_fixed/mips/th230/MIP_pedestalsubmode1_TB2026CERN_run_000004_lowgain.txt
+  fitted channels: old 5886, new 1462, both 1219 of 15360
+  entries per channel (median): old 347, new 402
+                N  MPV old  MPV new  new/old   hw68  |r-1|>3%   w old   w new  w n/o
+  all        1219     5.09     5.07    1.019  0.192     85.3%    0.85    0.81  0.950
+  slab 1       18     5.39     4.84    0.967  0.122     72.2%    0.71    0.79  1.117
+  slab 2       69     4.85     5.04    1.077  0.196     82.6%    0.84    0.77  0.942
+  slab 3       52     4.83     5.02    1.016  0.162     73.1%    1.00    0.85  0.922
+  slab 4       12     4.63     4.74    1.014  0.188     75.0%    0.82    0.98  1.133
+  slab 5       70     4.81     4.92    1.069  0.239     88.6%    1.03    0.83  0.844
+  slab 6      100     4.92     5.06    1.029  0.231     82.0%    0.81    0.77  0.959
+  slab 7       80     5.00     5.08    0.998  0.193     81.2%    0.92    0.84  0.893
+  slab 8      105     5.06     5.05    1.032  0.176     89.5%    0.81    0.82  1.024
+  slab 9      107     5.02     5.01    1.022  0.250     88.8%    0.90    0.80  0.984
+  slab 10      83     4.73     4.91    1.086  0.248     94.0%    0.91    0.81  0.879
+  slab 11     101     4.87     4.94    1.040  0.185     92.1%    0.85    0.78  0.919
+  slab 12     211     5.83     5.99    1.002  0.154     82.9%    0.91    0.84  0.950
+  slab 13     101     4.96     4.93    1.004  0.176     86.1%    0.80    0.80  1.005
+  slab 14     102     5.44     5.05    0.992  0.164     83.3%    0.76    0.79  0.998
+
