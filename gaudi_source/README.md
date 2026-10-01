@@ -80,8 +80,19 @@ final, cut-passing output(s), deleting the temporary file.
   chunk files of one run (`<run>_raw.bin`, `_raw.bin_0001`, ...) into the
   `siwecaldecoded` ROOT tree: Gray-code ADC/BCID decoding, per-(slab,chip,sca)
   cycle buffering with overflow-jump retry, and the bad-BCID
-  (retrigger/empty-event) tagging state machine — a faithful port of the
-  external reference tool `SLBraw2ROOT.cc`. Also reads `Run_Settings.txt`
+  (retrigger/empty-event) tagging state machine — a port of the external
+  reference tool `SLBraw2ROOT.cc` with one physics correction (2026-09-29):
+  the reference pairs a chip's SCA data blocks with its BCID list in opposite
+  orders, so the data of column *j* were attributed to `bcid[n-1-j]` — with
+  two or more triggers in a chip, every event built by BCID received another
+  particle's hits from that chip (the "acquisition sharing" damage: σ/μ 0.29
+  instead of 0.07, core fraction 0.13 instead of 0.52 on run 291). Property
+  `DataColumnsLatestFirst` (default true; env `RAW2ROOT_DATA_LATEST_FIRST`)
+  pairs them as the chip emits them; `false` reproduces the reference. The
+  proof and the measurements are in `SlbFrameDecoder.h` (deviation 2).
+  `EcalLcioDecoder` applies the same correction (`reverseDataColumns`,
+  `LCIO_DATA_LATEST_FIRST`), since the EUDAQ producer pairs like the
+  reference. Also reads `Run_Settings.txt`
   (via `include/k4SiWEcalReco/RunSettings.h`, property `RunSettingsFile`) and
   writes six extra run-constant branches, repeated on every entry (same
   convention as `threshold_dac`/`run` further down the chain):
@@ -221,6 +232,26 @@ The output tree also carries **`bcid_merge_end`**, the last BCID merged into the
 event (`bcid` is the window's start, so the difference is the window's span). It
 ports the reference's branch of the same name.
 
+**Run settings and acquisition sharing.** Four more branches (C++ builder only; the
+legacy Python writer does not have them):
+
+| Branch | Type | Meaning |
+|---|---|---|
+| `acq_window_ms` | F | `ACQWindow` of the run (`acqWindowMs` of `siwecaldecoded`, from `Run_Settings.txt`; −1 if absent) |
+| `delay_between_cycle_ms` | F | `DelayBetweenCycle` of the run (−1 if absent) |
+| `n_events_acq` | I | events written from this event's DAQ acquisition (= entries sharing its `spill`) |
+| `single_run` | I | 1 when `n_events_acq == 1`: the event is alone in its acquisition |
+| `hit_bit[nhit_chan]` | I | fast-shaper hit bit (`hitbit_high`) set in the SCA the hit is read from; always 1 with `HitSelection=hitbit` |
+| `hit_bit_window[nhit_chan]` | I | the same bit set in any SCA of the event window for that channel |
+
+Events that share an acquisition are distorted by the other triggers of the same
+chips (hits relocated to other channels, pedestals of earlier SCAs shifted), so
+`single_run == 1` is the clean sample for shower shapes. Counted after
+`MinSlabsHit`: a trigger burst that never becomes an event does not count.
+`SingleRunOnly` (`EVBLD_SINGLE_RUN_ONLY=1`, default off) writes only those events;
+`generate_reco_dag.py --single-run-only` sets it for a whole campaign, which
+belongs in its own `--reco-dir` (`TB2026-06/Reconstructed_singlerun`).
+
 **Configurable, with a caveat:** `MergeDelta`, `MinSlabsHit`, `DropRetriggerScas`
 and `DropRetriggerDelta` are plumbed through the pipeline steering
 [`options/run_event_builder.py`](options/run_event_builder.py) as
@@ -277,15 +308,18 @@ not reach farm jobs until it is added there too.
 
 ### shapeParameters layout (canonical, see `EcalShowerVars.h`)
 ```
-[ scalarNames() ]                                              21 base scalars
+[ scalarNames() ]                                              24 base scalars
 [ hits_per_layer[15] | energy_per_layer[15] | weighte_per_layer[15] ]
 [ mip05_<scalarNames()> ] [ mip1_<scalarNames()> ]            MIP-cut variants
 ```
 The `mip05_/mip1_` variant blocks are computed **only in `--validation` mode**
 (they feed the `event_viewer`'s interactive threshold slider). In the default
 physics mode the hits are already cleaned by the `0.5` MIP hit cut, so the blocks
-are omitted and the layout is just the 21 base scalars + the three per-layer
+are omitted and the layout is just the 24 base scalars + the three per-layer
 profiles. Readers (`PidFileReader`) auto-detect which layout a file uses.
+The last three scalars were appended later (`shower_onset`, `n_layers_before_onset`,
+then `fractal_dimension`, the CALICE shower fractal dimension -- definition in the
+top-level README); older files carry fewer and are resolved from the metadata.
 
 ### Tracking (ACTS)
 
@@ -514,7 +548,7 @@ application or output-file naming):
 
 | Stage | Steering file | Key env vars |
 |---|---|---|
-| raw2root (ONE chunk per process) | `run_raw2root.py` | `RAW_FILES`, `RAW2ROOT_OUT`, `RAW2ROOT_RUN_SETTINGS_FILE` |
+| raw2root (ONE chunk per process) | `run_raw2root.py` | `RAW_FILES`, `RAW2ROOT_OUT`, `RAW2ROOT_RUN_SETTINGS_FILE`, `RAW2ROOT_DATA_LATEST_FIRST` (default 1) |
 | pedestal/MIP calibration | `run_pedestal_mip.py` | `CALIB_INPUT_FILES`, `CALIB_MODE`, `CALIB_GAIN`, `CALIB_OUTPUT_PEDESTAL_FILE`/`CALIB_OUTPUT_MIP_FILE` |
 | event building | `run_event_builder.py` | `EVBLD_INPUT`, `EVBLD_OUTPUT`, `EVBLD_PEDESTAL_FILE`, `EVBLD_MIP_FILE`, `EVBLD_PADMAP_DEFAULT`, `EVBLD_SLAB_Z_FILE` |
 | PID/EDM4hep | `run_pid.py` | `ECAL_FILE`, `ECAL_PID_OUT`, `ECAL_HIT_MIP_CUT` (`<0` disables), `ECAL_MIP_THRESHOLDS` (`""` = no variant blocks) |

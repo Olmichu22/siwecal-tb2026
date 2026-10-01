@@ -72,6 +72,24 @@ from siwecal_eventbuilder.run_settings import read_threshold_dac
 _CLEANUP = os.path.join(_REPO, "gaudi_jobs", "calibration", "condor", "cleanup_job_logs.sh")
 
 
+def _read_anchor(calib_dir, th):
+    """(k, c) of <calib_dir>/anchor/th<th>/gain_anchor_th<th>.txt, or ("-", "-") if absent (the event-builder
+    steering then keeps its built-in GainRatio/GainIntercept). Before --calib-dir existed no campaign passed the
+    per-threshold line, so every one ran on the steering default (0.0962, 1.45)."""
+    if not calib_dir:
+        return ("-", "-")
+    path = os.path.join(calib_dir, "anchor", f"th{th}", f"gain_anchor_th{th}.txt")
+    if not os.path.exists(path):
+        print(f"[anchor] no {path}: steering default GainRatio/GainIntercept")
+        return ("-", "-")
+    vals = {}
+    for line in open(path):
+        parts = line.split()
+        if len(parts) >= 2 and not line.startswith("#"):
+            vals[parts[0]] = parts[1]
+    return (vals["k"], vals["c"])
+
+
 def _convert_sh(out_dir):
     # A job decodes a GROUP of chunks, each in its own k4run process.
     #
@@ -136,11 +154,15 @@ def _reco_sh(out_dir):
     # reads it from the ecal file itself, so no driver is needed in between.
     content = f"""#!/bin/bash
 set -eo pipefail
-# reco.sh <run> <chunks_glob> <ecal_out> <pid_out> <ped> <mip> <ped_lg> <mip_lg> <padmap> <padmap_ovr> <slab_z> <run_id> <hit_selection> <chip_noise_veto>
+# reco.sh <run> <chunks_glob> <ecal_out> <pid_out> <ped> <mip> <ped_lg> <mip_lg> <padmap> <padmap_ovr> <slab_z> <run_id> <hit_selection> <chip_noise_veto> <single_run_only> <hit_mip_cut> <gain_ratio> <gain_intercept>
 RUN="$1"; CHUNKS="$2"; ECAL_OUT="$3"; PID_OUT="$4"
 PED="$5"; MIP="$6"; PED_LG="$7"; MIP_LG="$8"
 PADMAP="$9"; PADMAP_OVR="${{10}}"; SLAB_Z="${{11}}"; RUN_ID="${{12}}"
-HIT_SELECTION="${{13:-hitbit}}"; CHIP_NOISE_VETO="${{14:-1}}"
+HIT_SELECTION="${{13:-hitbit}}"; CHIP_NOISE_VETO="${{14:-1}}"; SINGLE_RUN_ONLY="${{15:-0}}"; HIT_MIP_CUT="${{16:--1}}"
+# LG->HG anchor line; "-" = the steering default
+GAIN_RATIO="${{17:--}}"; GAIN_INTERCEPT="${{18:--}}"
+[ "$GAIN_RATIO" != "-" ] && export EVBLD_GAIN_RATIO="$GAIN_RATIO"
+[ "$GAIN_INTERCEPT" != "-" ] && export EVBLD_GAIN_INTERCEPT="$GAIN_INTERCEPT"
 
 """ + env_wrapper_preamble() + f"""
 """ + mkdirs_line('$(dirname "$ECAL_OUT")') + f"""
@@ -157,10 +179,11 @@ EVBLD_PADMAP_SLAB_OVERRIDES="$PADMAP_OVR" \\
 EVBLD_SLAB_Z_FILE="$SLAB_Z" \\
 EVBLD_HIT_SELECTION="$HIT_SELECTION" \\
 EVBLD_CHIP_NOISE_VETO="$CHIP_NOISE_VETO" \\
+EVBLD_SINGLE_RUN_ONLY="$SINGLE_RUN_ONLY" \\
   k4run "{OPTIONS_DIR}/run_event_builder.py"
 
 echo "[reco] $RUN: PID/EDM4hep -> $PID_OUT"
-ECAL_FILE="$ECAL_OUT" ECAL_PID_OUT="$PID_OUT" \\
+ECAL_FILE="$ECAL_OUT" ECAL_PID_OUT="$PID_OUT" ECAL_HIT_MIP_CUT="$HIT_MIP_CUT" \\
   k4run "{OPTIONS_DIR}/run_pid.py"
 
 echo "[reco] $RUN: done"
@@ -226,7 +249,7 @@ queue grouplist,run_settings from {out_dir}/grouplist_{run}.txt
 def _reco_sub(out_dir, log_dir, request_memory, job_flavour):
     content = f"""universe                = vanilla
 executable              = {out_dir}/reco.sh
-arguments               = "$(run) '$(chunks)' $(ecal_out) $(pid_out) $(ped) $(mip) $(ped_lg) $(mip_lg) $(padmap) $(padmap_ovr) $(slab_z) $(run_id) $(hit_selection) $(chip_noise_veto)"
+arguments               = "$(run) '$(chunks)' $(ecal_out) $(pid_out) $(ped) $(mip) $(ped_lg) $(mip_lg) $(padmap) $(padmap_ovr) $(slab_z) $(run_id) $(hit_selection) $(chip_noise_veto) $(single_run_only) $(hit_mip_cut) $(gain_ratio) $(gain_intercept)"
 log                     = {log_dir}/reco_$(run).log
 output                  = {log_dir}/reco_$(run).out
 error                   = {log_dir}/reco_$(run).err
@@ -257,6 +280,17 @@ def main(argv=None):
                         "threshold (same as its pedestals). MIPs and pedestals both shift with the trigger "
                         "threshold, so each run auto-calibrates from its own th. Pass --mip-th <th> only for "
                         "a deliberate cross-threshold study.")
+    p.add_argument("--ped-th", default=None,
+                   help="Threshold whose PEDESTAL tables (and so pedestal mask) every run uses. Default: the "
+                        "run's own threshold. With --mip-th, puts every run on one calibration "
+                        "(e.g. --ped-th 210 --mip-th 210).")
+    p.add_argument("--calib-dir", default=None,
+                   help="Calibration folder with the MuonCalib_gaudi layout ({pedestals,mips}/th<N>/), e.g. "
+                        "calibration/MuonCalib_gaudi_fixed. Default: calibration/MuonCalib_gaudi.")
+    p.add_argument("--anchor-own-th", action="store_true",
+                   help="With --calib-dir: take the LG->HG anchor line of the run's OWN threshold folder even when "
+                        "--ped-th puts the pedestals on another one. The line is a property of the data-taking "
+                        "period (th210 eudaq 166: k 0.0924; th220 run 72: 0.0964; th230 run 12: 0.0958).")
     p.add_argument("--out-dir", required=True, help="Directory to write the DAG, subs, wrappers and logs into.")
     p.add_argument("--chunks-per-job", type=int, default=20,
                    help="Raw chunks decoded by ONE Condor job, each in its own k4run (default 20). "
@@ -294,6 +328,14 @@ def main(argv=None):
                         "BuilderConfig::chipNoiseVeto). ON by default; --no-chip-noise-veto reproduces the "
                         "campaigns made before 2026-09-20.")
     p.add_argument("--no-chip-noise-veto", dest="chip_noise_veto", action="store_false")
+    p.add_argument("--single-run-only", action="store_true",
+                   help="EcalEventBuilder.SingleRunOnly for every RECO job: write only the events that are the "
+                        "single event built from their DAQ acquisition (single_run == 1). Belongs in its own "
+                        "--reco-dir (e.g. Reconstructed_singlerun).")
+    p.add_argument("--hit-mip-cut", type=float, default=-1.0,
+                   help="ECAL_HIT_MIP_CUT of the PID stage: drop hits below this energy [MIP] from the EDM4hep "
+                        "output (and every ECalPid variable). Default -1 = off, as before; 0.5 is what "
+                        "run_pid_batch.py applies in physics mode and what the simulation carries.")
     p.add_argument("--keep-job-logs", action="store_true",
                    help="Keep every job's .out/.err. By default they are deleted when the node succeeds, to "
                         "protect the AFS logs/ directory's entry limit (see calibration/condor/README.md).")
@@ -330,8 +372,11 @@ def main(argv=None):
         # the whole point of converting first and calibrating (e.g. th210) after.
         if args.convert_only:
             ped = mip = ped_lg = mip_lg = ""
+            anchor = ("-", "-")
         else:
-            ped, mip, ped_lg, mip_lg = resolve_gaudi_calib_files(th, mip_th=args.mip_th)
+            anchor = _read_anchor(args.calib_dir, th if args.anchor_own_th else (args.ped_th or th))
+            ped, mip, ped_lg, mip_lg = resolve_gaudi_calib_files(th, mip_th=args.mip_th, ped_th=args.ped_th,
+                                                                calib_dir=args.calib_dir and os.path.abspath(args.calib_dir))
 
         cdir = chunks_dir(args.converted_dir, run)
         os.makedirs(cdir, exist_ok=True)
@@ -369,7 +414,9 @@ def main(argv=None):
             f'ecal_out="{ecal_out}" pid_out="{pid_out}" ped="{ped}" mip="{mip}" '
             f'ped_lg="{ped_lg}" mip_lg="{mip_lg}" padmap="{padmap}" '
             f'padmap_ovr="{padmap_ovr}" slab_z="{slab_z}" run_id="{run_id}" '
-            f'hit_selection="{args.hit_selection}" chip_noise_veto="{1 if args.chip_noise_veto else 0}"')
+            f'hit_selection="{args.hit_selection}" chip_noise_veto="{1 if args.chip_noise_veto else 0}" '
+            f'single_run_only="{1 if args.single_run_only else 0}" hit_mip_cut="{args.hit_mip_cut}" '
+            f'gain_ratio="{anchor[0]}" gain_intercept="{anchor[1]}"')
         dag.append(f"RETRY reco_{run} 2")
         dag.append(f"PARENT convert_{run} CHILD reco_{run}")
         if not args.keep_job_logs:

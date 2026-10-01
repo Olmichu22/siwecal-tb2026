@@ -25,6 +25,12 @@
  *       [0] adc_low   [1] hitbit   [2] autogainbit   [3] adc_high   [4] hitbit(dup)   [5] autogainbit(dup)
  *   CycleNr -> acqNumber,  BunchXID -> bcid,  Layer -> slab,  SkirocID -> chip.
  *   nhits per (slab,chip,sca) = sum of the hit bits (== raw nhits, verified exactly).
+ *
+ * The producer pairs the data blocks with the BCID list the way the reference
+ * converter does (bit-identical output on run_000291, 30000 chips), i.e. with the
+ * data columns in the wrong order for chips with >= 2 SCAs: reverseDataColumns
+ * (SlbFrameDecoder.h, deviation 2) is applied to every acquisition before the
+ * overflow correction, like the raw decoder's own DataColumnsLatestFirst.
  */
 #include "k4SiWEcalReco/AcquisitionTreeIO.h"
 #include "k4SiWEcalReco/RunSettings.h"
@@ -105,6 +111,7 @@ struct EcalLcioDecoder final : Gaudi::Algorithm {
         }
       }
       acq->nSlboards = kSlbDepth;  // recordFrame sets this to kSlbDepth on every frame
+      if (m_dataColumnsLatestFirst.value()) k4siwecal::reverseDataColumns(*acq);
       k4siwecal::computeCorrectedBcid(*acq);
       k4siwecal::tagBadBcid(*acq);
       tree->Fill();
@@ -204,6 +211,11 @@ struct EcalLcioDecoder final : Gaudi::Algorithm {
       "Path to Run_Settings.txt (optional); supplies thresholdDac/holdDelay/fsPeakTime/... exactly as for "
       "a raw-decoded run. Empty leaves those branches at their -1 sentinel."};
   Gaudi::Property<int> m_maxAcq{this, "MaxAcq", -1, "Stop after this many acquisitions (<=0 = all); for testing"};
+  Gaudi::Property<bool> m_dataColumnsLatestFirst{
+      this, "DataColumnsLatestFirst", true,
+      "The EUDAQ producer pairs a chip's SCA data blocks with its BCID list like the reference converter "
+      "(data of column j belongs to bcid[n-1-j]); reverse the per-column data over the filled columns so "
+      "every SCA carries its own trigger (SlbFrameDecoder.h, deviation 2). False keeps the producer's pairing."};
 };
 
 DECLARE_COMPONENT(EcalLcioDecoder)

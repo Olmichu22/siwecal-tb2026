@@ -219,13 +219,28 @@ struct EcalEventBuilder final : Gaudi::Algorithm {
       thresholdDac = tdBuf;
       tree->ResetBranchAddress(tree->GetBranch("thresholdDac"));
     }
+    // ACQWindow / DelayBetweenCycle of the run, from the branches EcalRawDecoder copies out of
+    // Run_Settings.txt (-1 when the run has no settings file or the input predates the branches).
+    float acqWindowMs = -1.f, delayBetweenCycleMs = -1.f;
+    for (auto [name, dst] : {std::pair<const char*, float*>{"acqWindowMs", &acqWindowMs},
+                             std::pair<const char*, float*>{"delayBetweenCycleMs", &delayBetweenCycleMs}}) {
+      if (tree->GetBranch(name) == nullptr || tree->GetEntries() == 0) continue;
+      float v = -1.f;
+      tree->SetBranchAddress(name, &v);
+      tree->GetEntry(0);
+      *dst = v;
+      tree->ResetBranchAddress(tree->GetBranch(name));
+    }
 
     std::unique_ptr<TFile> fout(TFile::Open(m_outputFile.value().c_str(), "RECREATE"));
     if (!fout || fout->IsZombie()) {
       return error() << "Cannot create output file: " << m_outputFile.value() << endmsg, StatusCode::FAILURE;
     }
     fout->cd();
-    EcalTreeWriter writer(cfg.maxHitsPerEvent, runId, thresholdDac);
+    EcalTreeWriter writer(cfg.maxHitsPerEvent, runId, thresholdDac, acqWindowMs, delayBetweenCycleMs);
+    info() << "Run settings: ACQWindow " << acqWindowMs << " ms, DelayBetweenCycle " << delayBetweenCycleMs << " ms"
+           << (m_singleRunOnly.value() ? "; SingleRunOnly: only events alone in their acquisition are written" : "")
+           << endmsg;
 
     const Long64_t nEntries = tree->GetEntries();
 
@@ -270,7 +285,7 @@ struct EcalEventBuilder final : Gaudi::Algorithm {
     // per run): TreeBuffers is a couple of MB, far too big to copy per entry.
     auto splice = std::make_unique<TreeBuffers>();
 
-    long long totalEvents = 0;
+    long long totalEvents = 0, singleEvents = 0, writtenEvents = 0;
     for (Long64_t entry = 0; entry < nEntries; ++entry) {
       if (absorbed[static_cast<std::size_t>(entry)]) {
         continue;  // already folded into the previous entry
@@ -288,8 +303,15 @@ struct EcalEventBuilder final : Gaudi::Algorithm {
       const k4siwecal::AcquisitionView acq(src->nSlboards, src->slboardId, src->chipId, src->bcid, src->nhits,
                                             src->hitbitHigh, src->adcHigh, src->adcLow);
       auto events = builder.build(acq);
-      for (int eventIndex = 0; eventIndex < static_cast<int>(events.size()); ++eventIndex) {
-        writer.write(events[eventIndex], static_cast<int>(entry), eventIndex);
+      // Events of this acquisition that make it to the tree: n_events_acq counts what an analysis
+      // sees under the same `spill`, so single_run == 1 <=> the event is alone under its spill.
+      const int nWritten = static_cast<int>(
+          std::count_if(events.begin(), events.end(), [&](const auto& e) { return writer.accepts(e); }));
+      if (nWritten == 1) ++singleEvents;
+      if (!m_singleRunOnly.value() || nWritten == 1) {
+        for (int eventIndex = 0; eventIndex < static_cast<int>(events.size()); ++eventIndex) {
+          if (writer.write(events[eventIndex], static_cast<int>(entry), eventIndex, nWritten)) ++writtenEvents;
+        }
       }
       totalEvents += static_cast<long long>(events.size());
     }
@@ -297,8 +319,9 @@ struct EcalEventBuilder final : Gaudi::Algorithm {
     fout->cd();
     fout->Write(nullptr, TObject::kOverwrite);
     fout->Close();
-    info() << "EcalEventBuilder: wrote " << totalEvents << " event(s) from " << nEntries
-           << " acquisition(s) to " << m_outputFile.value() << endmsg;
+    info() << "EcalEventBuilder: built " << totalEvents << " event(s) from " << nEntries
+           << " acquisition(s), " << singleEvents << " of them alone in their acquisition; " << writtenEvents
+           << " written to " << m_outputFile.value() << endmsg;
     if (cfg.chipNoiseVeto)
       info() << "Chip noise veto dropped " << builder.noisyChipWindowsVetoed() << " chip-window(s)" << endmsg;
     return StatusCode::SUCCESS;
@@ -402,6 +425,10 @@ struct EcalEventBuilder final : Gaudi::Algorithm {
       this, "ChipNoiseMaxMedianAdc", 20.0,
       "ChipNoiseVeto: a candidate is vetoed when its median pedestal-subtracted ADC is below this"};
   Gaudi::Property<int> m_maxHitsPerEvent{this, "MaxHitsPerEvent", 15360, "15 slabs * 16 chips * 64 channels"};
+  Gaudi::Property<bool> m_singleRunOnly{
+      this, "SingleRunOnly", false,
+      "Write only the events that are the single event built from their DAQ acquisition (single_run == 1). "
+      "Events sharing an acquisition are distorted by the other triggers of the same chips."};
 
  private:
   // Bound branch buffers for the siwecaldecoded tree, matching the layout
@@ -470,13 +497,19 @@ struct EcalEventBuilder final : Gaudi::Algorithm {
   // identical schema (names, ROOT leaf-type strings, `[nhit_chan]` sizing),
   // since this feeds the EXISTING EcalToEDM4hep component unchanged.
   struct EcalTreeWriter {
-    EcalTreeWriter(int maxHitsPerEvent, int runId, int thresholdDac)
-        : m_maxHits(maxHitsPerEvent), m_run(runId), m_thresholdDac(thresholdDac) {
+    EcalTreeWriter(int maxHitsPerEvent, int runId, int thresholdDac, float acqWindowMs, float delayBetweenCycleMs)
+        : m_maxHits(maxHitsPerEvent),
+          m_run(runId),
+          m_thresholdDac(thresholdDac),
+          m_acqWindowMs(acqWindowMs),
+          m_delayBetweenCycleMs(delayBetweenCycleMs) {
       m_hitSlab.resize(maxHitsPerEvent);
       m_hitChip.resize(maxHitsPerEvent);
       m_hitChan.resize(maxHitsPerEvent);
       m_hitSca.resize(maxHitsPerEvent);
       m_hitIsMasked.resize(maxHitsPerEvent);
+      m_hitBit.resize(maxHitsPerEvent);
+      m_hitBitWindow.resize(maxHitsPerEvent);
       m_hitHg.resize(maxHitsPerEvent);
       m_hitLg.resize(maxHitsPerEvent);
       m_hitEnergy.resize(maxHitsPerEvent);
@@ -494,6 +527,12 @@ struct EcalEventBuilder final : Gaudi::Algorithm {
       m_tree->Branch("spill", &m_spill, "spill/I");
       m_tree->Branch("bcid", &m_bcid, "bcid/I");
       m_tree->Branch("bcid_merge_end", &m_bcidMergeEnd, "bcid_merge_end/I");
+      // Run settings and acquisition sharing: n_events_acq events were written from this event's
+      // acquisition (`spill`); single_run = 1 when it is the only one.
+      m_tree->Branch("acq_window_ms", &m_acqWindowMs, "acq_window_ms/F");
+      m_tree->Branch("delay_between_cycle_ms", &m_delayBetweenCycleMs, "delay_between_cycle_ms/F");
+      m_tree->Branch("n_events_acq", &m_nEventsAcq, "n_events_acq/I");
+      m_tree->Branch("single_run", &m_singleRun, "single_run/I");
       m_tree->Branch("nhit_slab", &m_nSlab, "nhit_slab/I");
       m_tree->Branch("nhit_chip", &m_nChip, "nhit_chip/I");
       m_tree->Branch("nhit_chan", &m_nChan, "nhit_chan/I");
@@ -518,14 +557,23 @@ struct EcalEventBuilder final : Gaudi::Algorithm {
       m_tree->Branch("hit_z", m_hitZ.data(), "hit_z[nhit_chan]/F");
       m_tree->Branch("hit_X0", m_hitX0.data(), "hit_X0[nhit_chan]/F");
       m_tree->Branch("hit_ismasked", m_hitIsMasked.data(), "hit_ismasked[nhit_chan]/I");
+      // Fast-shaper hit bit in the SCA read / in any SCA of the window (see Hit::hitBit).
+      m_tree->Branch("hit_bit", m_hitBit.data(), "hit_bit[nhit_chan]/I");
+      m_tree->Branch("hit_bit_window", m_hitBitWindow.data(), "hit_bit_window[nhit_chan]/I");
+    }
+
+    bool accepts(const k4siwecal::ReconstructedEvent& event) const {
+      return !event.hits.empty() && event.nChannels() <= m_maxHits;
     }
 
     // Port of EcalWriter.write. Returns false (skip) if the event is empty or
     // exceeds the fixed per-hit buffer capacity, matching root_io.py:235.
-    bool write(const k4siwecal::ReconstructedEvent& event, int spillIndex, int eventIndex) {
-      if (event.hits.empty() || event.nChannels() > m_maxHits) return false;
+    bool write(const k4siwecal::ReconstructedEvent& event, int spillIndex, int eventIndex, int nEventsAcq) {
+      if (!accepts(event)) return false;
 
       m_spill = spillIndex;
+      m_nEventsAcq = nEventsAcq;
+      m_singleRun = nEventsAcq == 1 ? 1 : 0;
       m_event = spillIndex * 1000 + eventIndex;
       m_bcid = static_cast<int>(event.bcid);
       m_bcidMergeEnd = static_cast<int>(event.bcidMergeEnd);
@@ -553,6 +601,8 @@ struct EcalEventBuilder final : Gaudi::Algorithm {
         m_hitZ[i] = hit.z;
         m_hitX0[i] = hit.x0;
         m_hitIsMasked[i] = hit.isMasked ? 1 : 0;
+        m_hitBit[i] = hit.hitBit ? 1 : 0;
+        m_hitBitWindow[i] = hit.hitBitWindow ? 1 : 0;
       }
       m_tree->Fill();
       return true;
@@ -561,9 +611,11 @@ struct EcalEventBuilder final : Gaudi::Algorithm {
     int m_maxHits;
     TTree* m_tree = nullptr;
     int m_run = -1, m_thresholdDac = -1, m_event = 0, m_spill = 0, m_bcid = 0, m_bcidMergeEnd = -1;
+    float m_acqWindowMs = -1.f, m_delayBetweenCycleMs = -1.f;
+    int m_nEventsAcq = 0, m_singleRun = 0;
     int m_nSlab = 0, m_nChip = 0, m_nChan = 0;
     float m_sumHg = 0.f, m_sumEnergy = 0.f, m_sumEnergyNoCalib = 0.f, m_sumWEnergy = 0.f;
-    std::vector<int> m_hitSlab, m_hitChip, m_hitChan, m_hitSca, m_hitIsMasked;
+    std::vector<int> m_hitSlab, m_hitChip, m_hitChan, m_hitSca, m_hitIsMasked, m_hitBit, m_hitBitWindow;
     std::vector<float> m_hitHg, m_hitLg, m_hitEnergy, m_hitEnergyNoCalib, m_hitWEnergy, m_hitX, m_hitY,
         m_hitZ, m_hitX0;
   };

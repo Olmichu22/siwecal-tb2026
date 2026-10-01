@@ -244,6 +244,11 @@ struct Hit {
   float z = std::numeric_limits<float>::quiet_NaN();   // -> hit_z
   float x0 = std::numeric_limits<float>::quiet_NaN();  // -> hit_X0
   bool isMasked = false;                                // -> hit_ismasked
+  // The fast-shaper hit bit (hitbit_high): in the SCA that is read, and in any SCA
+  // of the event's window for this channel. Always 1 with the "hitbit" selection;
+  // with "adc" the 0s are the hits that only the ADC cut let in.
+  bool hitBit = false;        // -> hit_bit
+  bool hitBitWindow = false;  // -> hit_bit_window
 };
 
 // Port of models.py::BcidWindow.
@@ -567,7 +572,11 @@ class HitCollector {
                               : bestScaPerChannel(acq, slab, chip, scas);
       for (const auto& [channel, sca] : chosen) {
         auto hit = buildHit(acq, slab, chip, sca, channel, slabId, chipId);
-        if (hit.has_value()) hits.push_back(*hit);
+        if (!hit.has_value()) continue;
+        hit->hitBit = acq.hitbitHigh(slab, chip, sca, channel) > 0;
+        hit->hitBitWindow = std::any_of(scas.begin(), scas.end(),
+                                        [&](int s) { return acq.hitbitHigh(slab, chip, s, channel) > 0; });
+        hits.push_back(*hit);
       }
     }
     return hits;

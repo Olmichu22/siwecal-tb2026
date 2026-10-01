@@ -156,6 +156,31 @@ def test_shower_onset_finds_a_late_cascade():
     assert m.shower_onset(core, profile, max_min=10.0) == 12
 
 
+def test_pad_index_grid():
+    # 32 pads per axis at +-(3.375 + k * 5.53) mm, 6.75 mm gap at 0.
+    centres = np.concatenate([-(3.375 + 5.53 * np.arange(16))[::-1], 3.375 + 5.53 * np.arange(16)])
+    assert list(m.pad_index(centres)) == list(range(32))
+
+
+def test_fractal_dimension_mip_track_is_one():
+    # One pad per layer: N_a = N_1 at every scale -> FD = 0 + 1.
+    slab = np.arange(15)
+    x = np.full(15, 3.375)
+    y = np.full(15, -3.375)
+    assert m.fractal_dimension(slab, x, y) == 1.0
+
+
+def test_fractal_dimension_filled_square():
+    # A fully filled 8 x 8 pad block in one layer: N_a = (8/a)^2 for a dividing
+    # 8 -> log(N_1/N_a)/log(a) = 2 exactly; a = 3, 6 do not tile it evenly.
+    pads = 3.375 + 5.53 * np.arange(8)
+    xx, yy = np.meshgrid(pads, pads)
+    slab = np.zeros(64, dtype=int)
+    fd = m.fractal_dimension(slab, xx.ravel(), yy.ravel(), scales=(2, 4, 8))
+    assert abs(fd - 3.0) < 1e-12
+    assert math.isnan(m.fractal_dimension(np.array([], int), np.array([]), np.array([])))
+
+
 def _run_standalone():
     fns = [v for k, v in sorted(globals().items()) if k.startswith("test_")]
     for fn in fns:

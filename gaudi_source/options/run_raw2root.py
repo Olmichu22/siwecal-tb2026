@@ -59,6 +59,9 @@ decoder = EcalRawDecoder(
     ComputeBadBcid=os.environ.get("RAW2ROOT_COMPUTE_BADBCID", "1") == "1",
     ResetStatePerInputFile=os.environ.get("RAW2ROOT_RESET_PER_FILE", "1") == "1",
     RunSettingsFile=os.environ.get("RAW2ROOT_RUN_SETTINGS_FILE", ""),
+    # SCA data blocks paired with the BCID list latest-first (SlbFrameDecoder.h,
+    # deviation 2); "0" reproduces the reference converter's pairing.
+    DataColumnsLatestFirst=os.environ.get("RAW2ROOT_DATA_LATEST_FIRST", "1") == "1",
 )
 
 ApplicationMgr(TopAlg=[decoder],

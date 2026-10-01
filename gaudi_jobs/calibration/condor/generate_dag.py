@@ -23,6 +23,7 @@ Usage::
     condor_submit_dag gaudi_jobs/calibration/condor/generated/th220/calibration_th220.dag
 """
 import argparse
+import glob
 import os
 import sys
 
@@ -86,6 +87,20 @@ def _check_decoded_chunks(run_folders, converted_dir):
     return expected
 
 
+def _decoded_as_found(run_folders, converted_dir):
+    """{run_name: [chunk_NNNN.root, ...]} as they exist on disk. For runs decoded
+    from EUDAQ LCIO (gaudi_jobs/decode_lcio_runs.py), which write ONE chunk_0000
+    for the whole run instead of one per raw chunk."""
+    found = {}
+    for run_name, _ in run_folders:
+        names = sorted(os.path.basename(f) for f in glob.glob(os.path.join(chunks_dir(converted_dir, run_name),
+                                                                            "chunk_*.root")))
+        if not names:
+            raise SystemExit(f"ERROR: no decoded chunks for {run_name} under {converted_dir}")
+        found[run_name] = names
+    return found
+
+
 def _fill_sh(out_dir):
     # A Fill job takes a GROUP of decoded chunks, all in ONE k4run.
     #
@@ -108,17 +123,25 @@ CHUNKLIST="$1"; OUT_HIST="$2"
 """ + env_wrapper_preamble() + f"""
 # Idempotent: if a VALID histogram already exists (from a previous submission of
 # this DAG), skip -- makes relaunching the whole DAG cheap without re-filling
-# everything. Validity is checked by actually opening the ROOT file (non-empty +
-# not a zombie + has keys), so a partial file left by a killed job is NOT trusted
-# and gets refilled.
-if [ -s "$OUT_HIST" ] && python3 -c "import ROOT,sys; f=ROOT.TFile.Open(sys.argv[1]); sys.exit(0 if f and not f.IsZombie() and f.GetListOfKeys().GetSize()>0 else 1)" "$OUT_HIST" >/dev/null 2>&1; then
+# everything. Valid = opens, not a zombie, has keys AND was closed properly (ROOT
+# did not have to Recover it). Keys alone are not enough: a job killed mid-write
+# leaves a file ROOT recovers with a fraction of its histograms (th220, 2026-09-29:
+# 76 of 290 groups at 384k of 540k keys), and the retry used to skip over it.
+VALID='import ROOT,sys; ROOT.gErrorIgnoreLevel=ROOT.kFatal; f=ROOT.TFile.Open(sys.argv[1]); sys.exit(0 if f and not f.IsZombie() and not f.TestBit(ROOT.TFile.kRecovered) and f.GetListOfKeys().GetSize()>0 else 1)'
+if [ -s "$OUT_HIST" ] && python3 -c "$VALID" "$OUT_HIST" >/dev/null 2>&1; then
   echo "[fill] $OUT_HIST already valid -- skipping"
   exit 0
 fi
 INPUTS=$(paste -sd, "$CHUNKLIST")
 echo "[fill] $(wc -l < "$CHUNKLIST") chunk(s) -> $OUT_HIST"
-""" + mkdirs_line('$(dirname "$OUT_HIST")') + f"""CALIB_INPUT_FILES="$INPUTS" CALIB_MODE=Fill CALIB_OUTPUT_HISTOGRAM_FILE="$OUT_HIST" \\
+""" + mkdirs_line('$(dirname "$OUT_HIST")') + f"""# Written locally, then copied: EOS only ever sees a complete file.
+TMP_HIST="$(mktemp --tmpdir="${{TMPDIR:-/tmp}}" fill_XXXXXX.root)"
+trap 'rm -f "$TMP_HIST"' EXIT
+CALIB_INPUT_FILES="$INPUTS" CALIB_MODE=Fill CALIB_OUTPUT_HISTOGRAM_FILE="$TMP_HIST" \\
   k4run "{OPTIONS_DIR}/run_pedestal_mip.py"
+python3 -c "$VALID" "$TMP_HIST" || {{ echo "[fill] local output invalid" >&2; exit 1; }}
+cp -f "$TMP_HIST" "$OUT_HIST"
+python3 -c "$VALID" "$OUT_HIST" || {{ echo "[fill] copy to $OUT_HIST invalid" >&2; exit 1; }}
 """
     write_executable(os.path.join(out_dir, "fill.sh"), content)
 
@@ -293,6 +316,9 @@ def main(argv=None):
     p.add_argument("--gain", choices=("high", "low", "both"), default="high")
     p.add_argument("--dag-dir", required=True,
                    help="Directory to write the .dag/.sub/.sh/file-lists/logs/ into.")
+    p.add_argument("--decoded-as-found", action="store_true",
+                   help="Fill from the decoded chunks that exist, instead of requiring one per raw chunk. "
+                        "Needed for runs decoded from EUDAQ LCIO (one chunk_0000 for the whole run).")
     p.add_argument("--diagnostics", action="store_true",
                     help="Also write a <output>.diagnostics.root cross-check file per Fit job.")
     p.add_argument("--keep-job-logs", action="store_true",
@@ -328,7 +354,8 @@ def main(argv=None):
     kwargs = {"default_base": args.raw_base} if args.raw_base else {}
     run_folders = parse_run_folder_list(args.runs, **kwargs)
 
-    expected_chunks = _check_decoded_chunks(run_folders, args.converted_dir)
+    expected_chunks = (_decoded_as_found(run_folders, args.converted_dir) if args.decoded_as_found
+                       else _check_decoded_chunks(run_folders, args.converted_dir))
 
     th = _check_threshold_consistency(run_folders, args.th)
     label = _combined_label(run_folders, th)

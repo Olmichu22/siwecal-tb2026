@@ -156,6 +156,46 @@ def moliere_radius(x: np.ndarray, y: np.ndarray, weights: np.ndarray,
     return float(r[order][reached])
 
 
+#: Scales of the fractal dimension (pads regrouped into a x a super-cells).
+FRACTAL_SCALES = (2, 3, 4, 6, 8)
+_PAD_PITCH = 5.53                          # mm
+_PAD_HALF_GAP_EXTRA = 0.5 * (6.75 - 5.53)  # extra half-gap between the wafers at 0
+
+
+def pad_index(v: np.ndarray) -> np.ndarray:
+    """Pad index 0..31 along one axis from a pad-centre coordinate [mm].
+
+    Pads sit at +-(3.375 + k * 5.53) mm, k = 0..15 (5.53 mm pitch, 6.75 mm gap
+    between the two wafers at 0); removing the extra half-gap makes the grid
+    regular. Mirror of ``padIndex`` in k4SiWEcalReco/EcalShowerVars.h.
+    """
+    u = v - np.copysign(_PAD_HALF_GAP_EXTRA, v)
+    return np.floor(u / _PAD_PITCH).astype(np.int64) + 16
+
+
+def fractal_dimension(slab: np.ndarray, x: np.ndarray, y: np.ndarray,
+                      scales=FRACTAL_SCALES) -> float:
+    """Shower fractal dimension (Ruan et al., PRL 112 (2014) 012001, eq. 1).
+
+    ``FD = < log(N_1 / N_a) / log(a) >_a + 1`` with ``N_a`` the number of
+    distinct (layer, a x a super-cell) holding at least one hit. Pads are
+    regrouped only transversely, within each layer; the ``+1`` is the paper's
+    longitudinal degree of freedom. A MIP track gives exactly 1. NaN for an
+    empty event. Mirror of ``fractalDimension`` in EcalShowerVars.h.
+    """
+    if slab.size == 0:
+        return NAN
+    s = np.asarray(slab, dtype=np.int64)
+    ix, iy = pad_index(np.asarray(x, float)), pad_index(np.asarray(y, float))
+
+    def count(a):
+        key = (s * 1024 + (ix // a + 256)) * 1024 + (iy // a + 256)
+        return np.unique(key).size
+
+    n1 = count(1)
+    return float(np.mean([np.log(n1 / count(a)) / np.log(a) for a in scales]) + 1.0)
+
+
 def core_hits_per_layer(slab: np.ndarray, x: np.ndarray, y: np.ndarray,
                         bar_x: float, bar_y: float, n_layers: int,
                         radius_mm: float = 30.0) -> np.ndarray:

@@ -1,0 +1,120 @@
+==== th210, high gain ====
+  old: calibration/MuonCalib_gaudi/pedestals/th210/Pedestal_TB2026CERN_run_000th210_highgain.txt
+  new: calibration/MuonCalib_gaudi_fixed/pedestals/th210/Pedestal_TB2026CERN_run_000th210_highgain.txt
+  valid (channel, SCA) cells: old 104952, new 108522, both 103213 of 230400
+
+  Pedestal MEAN difference new - old [ADC]
+                   N   median    hw68     RMS  |d|>0.5
+  all         103213    -0.06    3.55    4.02    85.4%
+  slab 0        6116    -0.04    3.48    4.09    86.0%
+  slab 1        7205    -0.23    3.56    4.12    86.7%
+  slab 2        7516    -0.23    3.58    4.36    86.2%
+  slab 3        7214    -0.03    3.65    4.05    86.3%
+  slab 4        7054    -0.01    3.55    3.90    85.1%
+  slab 5        7221    -0.01    3.46    3.75    85.3%
+  slab 6        6237     0.01    3.51    3.78    84.6%
+  slab 7        7247    -0.01    3.48    4.14    86.1%
+  slab 8        7398    -0.11    3.54    3.91    85.4%
+  slab 9        7242    -0.05    3.41    3.82    85.9%
+  slab 10       7214     0.00    3.57    3.97    86.1%
+  slab 11       7284    -0.08    3.55    3.88    85.7%
+  slab 12       3830    -0.03    3.50    4.00    75.2%
+  slab 13       7029    -0.13    3.52    4.30    85.6%
+  slab 14       7406    -0.02    3.72    4.10    86.3%
+
+  Pedestal WIDTH (RMS) [ADC]: median old, median new, median ratio new/old
+                   N      old      new  new/old
+  all         103213    1.733    1.366    0.801
+  slab 0        6116    1.781    1.348    0.772
+  slab 1        7205    1.911    1.481    0.778
+  slab 2        7516    1.797    1.384    0.772
+  slab 3        7214    1.710    1.372    0.811
+  slab 4        7054    1.703    1.340    0.796
+  slab 5        7221    1.652    1.335    0.817
+  slab 6        6237    1.674    1.351    0.819
+  slab 7        7247    1.708    1.348    0.797
+  slab 8        7398    1.713    1.347    0.793
+  slab 9        7242    1.687    1.331    0.800
+  slab 10       7214    1.695    1.364    0.815
+  slab 11       7284    1.691    1.334    0.794
+  slab 12       3830    1.697    1.564    0.927
+  slab 13       7029    1.743    1.382    0.800
+  slab 14       7406    1.848    1.377    0.767
+
+  Per SCA: spread of the SCA offsets (pedestal - channel's mean over SCAs), and widths
+  SCA         N  offset old  offset new  |dmean|   w old   w new
+  0       14476       -0.16        0.13     0.78   2.000   1.352
+  1       14412       -0.02       -0.54     1.97   1.736   1.350
+  2       14372        0.00       -0.05     2.33   1.711   1.370
+  3       13852        0.03        0.17     2.65   1.623   1.395
+  4       11901        0.05       -0.08     2.75   1.626   1.342
+  5        7856        0.05        0.17     2.76   1.718   1.403
+  6        6824        0.07        0.29     2.76   1.716   1.411
+  7        6423        0.09       -0.22     2.56   1.737   1.337
+  8        4189        0.10       -0.30     2.79   1.790   1.346
+  9        3353        0.10        0.51     2.78   1.780   1.471
+  10       2953        0.14        0.55     2.88   1.738   1.454
+  11       1748        0.19       -0.06     2.84   1.764   1.361
+  12        854        0.19        1.24     2.80   1.722   1.586
+  RMS of the SCA offsets over all cells: old 1.25 ADC, new 2.95 ADC
+
+==== th210, low gain ====
+  old: calibration/MuonCalib_gaudi/pedestals/th210/Pedestal_TB2026CERN_run_000th210_lowgain.txt
+  new: calibration/MuonCalib_gaudi_fixed/pedestals/th210/Pedestal_TB2026CERN_run_000th210_lowgain.txt
+  valid (channel, SCA) cells: old 96347, new 107500, both 93430 of 230400
+
+  Pedestal MEAN difference new - old [ADC]
+                   N   median    hw68     RMS  |d|>0.5
+  all          93430    -0.02    3.76    6.11    83.3%
+  slab 0        5424     0.03    3.68    6.86    84.9%
+  slab 1        6633    -0.02    3.88    5.51    84.9%
+  slab 2        7034    -0.11    3.85    6.81    84.6%
+  slab 3        6466    -0.04    3.77    5.85    83.9%
+  slab 4        6402    -0.02    3.82    7.15    83.9%
+  slab 5        6395    -0.05    3.68    5.97    83.2%
+  slab 6        5579    -0.02    3.64    5.75    80.9%
+  slab 7        6592    -0.00    3.72    5.98    83.6%
+  slab 8        6652    -0.13    3.70    5.85    83.9%
+  slab 9        6432    -0.09    3.69    6.61    83.6%
+  slab 10       6377    -0.02    3.75    5.66    83.1%
+  slab 11       6507    -0.02    3.65    5.46    83.2%
+  slab 12       3801     0.01    3.72    4.13    71.6%
+  slab 13       6362    -0.02    3.91    5.85    84.7%
+  slab 14       6774     0.03    3.93    6.87    84.9%
+
+  Pedestal WIDTH (RMS) [ADC]: median old, median new, median ratio new/old
+                   N      old      new  new/old
+  all          93430    0.907    0.746    0.835
+  slab 0        5424    0.936    0.725    0.787
+  slab 1        6633    0.970    0.782    0.817
+  slab 2        7034    0.947    0.757    0.804
+  slab 3        6466    0.900    0.744    0.841
+  slab 4        6402    0.902    0.732    0.828
+  slab 5        6395    0.874    0.728    0.852
+  slab 6        5579    0.864    0.730    0.866
+  slab 7        6592    0.888    0.734    0.836
+  slab 8        6652    0.908    0.734    0.831
+  slab 9        6432    0.901    0.726    0.825
+  slab 10       6377    0.884    0.735    0.846
+  slab 11       6507    0.893    0.728    0.826
+  slab 12       3801    0.853    0.815    0.969
+  slab 13       6362    0.940    0.763    0.813
+  slab 14       6774    0.995    0.751    0.778
+
+  Per SCA: spread of the SCA offsets (pedestal - channel's mean over SCAs), and widths
+  SCA         N  offset old  offset new  |dmean|   w old   w new
+  0       12285       -0.11        0.13     0.52   1.125   0.734
+  1       12885       -0.03       -0.60     1.99   0.891   0.731
+  2       12935        0.01        0.05     2.33   0.890   0.750
+  3       12236        0.03        0.19     2.60   0.850   0.765
+  4       11468        0.05       -0.22     2.79   0.848   0.733
+  5        7066        0.03        0.35     2.72   0.911   0.764
+  6        5803        0.05        0.36     2.88   0.908   0.770
+  7        6313        0.06       -0.27     2.69   0.917   0.728
+  8        4046        0.06       -0.24     2.86   0.948   0.738
+  9        2906        0.09        0.35     2.82   0.957   0.879
+  10       2733        0.08        0.50     3.01   0.928   0.879
+  11       1856        0.09       -0.14     3.02   0.954   0.763
+  12        898        0.10        1.38     3.16   1.018   1.009
+  RMS of the SCA offsets over all cells: old 4.34 ADC, new 3.00 ADC
+

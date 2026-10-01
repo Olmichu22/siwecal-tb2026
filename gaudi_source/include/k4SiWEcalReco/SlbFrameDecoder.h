@@ -14,14 +14,44 @@
  * bit-level protocol decoder. Do not "clean up" the arithmetic without
  * re-verifying against the reference tool's output on a real raw run.
  *
- * One deliberate deviation: the reference's startAcqTimeStamp decode loop
- * (SLBraw2ROOT.cc:291-297) shifts by `(30-2*n)` with `n` running 16..31,
- * i.e. by negative amounts -2..-32 -- undefined behaviour in C++, and not
- * reproducible deterministically across compilers. Since it's a slow-control
- * diagnostic (not read by AcquisitionReader or any calibration/physics code),
- * this port resets the shift counter for that field the same way the
+ * Two deliberate deviations.
+ *
+ * 1. The reference's startAcqTimeStamp decode loop (SLBraw2ROOT.cc:291-297)
+ * shifts by `(30-2*n)` with `n` running 16..31, i.e. by negative amounts
+ * -2..-32 -- undefined behaviour in C++, and not reproducible
+ * deterministically across compilers. Since it's a slow-control diagnostic
+ * (not read by AcquisitionReader or any calibration/physics code), this port
+ * resets the shift counter for that field the same way the
  * TSD/AVDD0/AVDD1/transmitID loops already do in the reference, instead of
  * replicating undefined behaviour.
+ *
+ * 2. THE PAIRING OF THE SCA DATA BLOCKS WITH THE BCID LIST (2026-09-29). A frame
+ * carries n SCA columns as n data blocks (64 HG + 64 LG words each) followed by
+ * n BCID words. The reference reads the BCID words BACKWARDS from the end of
+ * the frame (so that bcid[0] is the earliest trigger, bcid[n-1] the latest --
+ * the BCID list is emitted latest-first) but the data blocks FORWARDS from the
+ * start, and pairs block j with bcid[j]. The chip emits the data blocks in the
+ * same latest-first order as the BCIDs, so the reference pairs the data of the
+ * latest trigger with the BCID of the earliest one, and so on: column j of the
+ * data belongs to bcid[n-1-j]. With one column per chip (a beam of ~1 particle
+ * per acquisition) nothing is affected; with two, a trigger and its retrigger
+ * swap places, which is nearly harmless; with two or more real triggers in a
+ * chip, every event built by BCID receives the hits of ANOTHER particle from
+ * that chip.
+ *
+ * Measured on run_000291 (th210, 20 GeV electrons, 1500 shared acquisitions,
+ * chips with >= 3 columns): a SKIROC retrigger leaves an unmistakable signature
+ * in the two columns it spans (the later column holds ~0.66 of the channels the
+ * trigger flagged; the channels it flags itself were already at ~0.985 in the
+ * earlier column). Pairing the data latest-first makes 99.2-99.5 % of those
+ * physical pairs BCID-consecutive (gap 1-3) for n = 3, 4, 5 and >= 6, and pairs
+ * only 0.4-1.7 % of the pairs without the signature that way; the reference
+ * pairing gets 1.4 % (n = 3), 56 % (n = 4, the middle pair coincides), 17 %,
+ * 35 %, and no cyclic rotation does better than 76 %. The EUDAQ LCIO producer
+ * uses the same pairing as the reference (its output is bit-identical), so
+ * EcalLcioDecoder applies the same correction (reverseDataColumns) after
+ * collecting a chip's records. `dataColumnsLatestFirst = false` restores the
+ * reference pairing for comparisons.
  */
 #pragma once
 
@@ -110,7 +140,13 @@ inline int decodeCycleId(const std::vector<unsigned char>& frameBytes) {
 // is the full frame including its 2-byte core/slab prefix (same buffer given
 // to decodeCycleId); this function makes its own copy to erase the prefix,
 // exactly as the reference does internally.
-inline bool decodeFrame(std::vector<unsigned char> frameBytes, DecodedFrame& out) {
+//
+// `dataColumnsLatestFirst`: pair the data blocks with the BCID list in the
+// order the chip emits them, latest trigger first (data block j -> sca
+// nSca-1-j); false reproduces the reference's forward pairing. See deviation
+// 2 in the file header.
+inline bool decodeFrame(std::vector<unsigned char> frameBytes, DecodedFrame& out,
+                        bool dataColumnsLatestFirst = true) {
   out = DecodedFrame{};
   out.coreDaughterIndex = frameBytes.at(0);
   out.slabAdd = frameBytes.at(1);
@@ -192,9 +228,11 @@ inline bool decodeFrame(std::vector<unsigned char> frameBytes, DecodedFrame& out
   out.transmitId = transmitId;
 
   // Per-SCA decode (DecodeRawFrame:347-421): BCID is read BACKWARDS from the
-  // end of the payload (one 12-bit Gray value per SCA), while per-channel
-  // ADC/hit/gain data is read FORWARDS from `index=0`, accumulating 2*64
-  // bytes (high-gain then low-gain) per SCA.
+  // end of the payload (one 12-bit Gray value per SCA), so sca 0 is the
+  // earliest trigger. The per-channel ADC/hit/gain data blocks (2*64 words,
+  // high-gain then low-gain, per SCA) are emitted in the same latest-first
+  // order, so sca n takes the block nSca-1-n from the start of the payload
+  // (the reference took block n: deviation 2 in the file header).
   int index = 0;
   for (int n = 0; n < out.nSca; ++n) {
     const int rawValueBcid = static_cast<int>(frameBytes.at(actualDataSize - 2 * (n + 1) - 2 - 2)) +
@@ -206,6 +244,11 @@ inline bool decodeFrame(std::vector<unsigned char> frameBytes, DecodedFrame& out
     }
 
     out.bcid[sca] = convertGrayToBinary(rawValueBcid, 12);
+    if (dataColumnsLatestFirst) {
+      // data blocks are 2*64 words = 256 bytes each and contiguous from byte 0
+      // (kSingleSkirocEventSize also counts the SCA's BCID word at the end)
+      index = (out.nSca - 1 - sca) * (2 * kChannelsInSkiroc * 2);
+    }
 
     for (int channel = 0; channel < kChannelsInSkiroc; ++channel) {
       const unsigned short rawData = static_cast<unsigned short>(frameBytes.at(index + 2 * channel)) +
@@ -351,6 +394,33 @@ inline void recordFrame(Acquisition& acq, const DecodedFrame& frame, bool zeroSu
       acq.adcHigh[slab][chip][isca][ichn] = frame.adcHigh[isca][src];
       acq.hitbitHigh[slab][chip][isca][ichn] = frame.hitHigh[isca][src];
       acq.autogainbitHigh[slab][chip][isca][ichn] = frame.gainHigh[isca][src];
+    }
+  }
+}
+
+// The same correction as decodeFrame's `dataColumnsLatestFirst`, for an
+// Acquisition filled from an already-decoded source that used the reference
+// pairing (EcalLcioDecoder reading the EUDAQ LCIO, whose producer pairs the
+// blocks like the reference: bit-identical output on run_000291): per chip,
+// the data of column j belongs to bcid[n-1-j], so the per-column data arrays
+// are reversed over the n filled columns while the BCID list stays. Call it
+// BEFORE computeCorrectedBcid/tagBadBcid (nhits moves with the data).
+inline void reverseDataColumns(Acquisition& acq) {
+  for (int slab = 0; slab < kSlbDepth; ++slab) {
+    for (int chip = 0; chip < kSkirocsPerAsu; ++chip) {
+      const int n = acq.numCol[slab][chip];
+      if (acq.chipId[slab][chip] < 0 || n < 2) continue;
+      for (int a = 0, b = n - 1; a < b; ++a, --b) {
+        std::swap(acq.nhits[slab][chip][a], acq.nhits[slab][chip][b]);
+        for (int ch = 0; ch < kChannelsInSkiroc; ++ch) {
+          std::swap(acq.adcLow[slab][chip][a][ch], acq.adcLow[slab][chip][b][ch]);
+          std::swap(acq.adcHigh[slab][chip][a][ch], acq.adcHigh[slab][chip][b][ch]);
+          std::swap(acq.autogainbitLow[slab][chip][a][ch], acq.autogainbitLow[slab][chip][b][ch]);
+          std::swap(acq.autogainbitHigh[slab][chip][a][ch], acq.autogainbitHigh[slab][chip][b][ch]);
+          std::swap(acq.hitbitLow[slab][chip][a][ch], acq.hitbitLow[slab][chip][b][ch]);
+          std::swap(acq.hitbitHigh[slab][chip][a][ch], acq.hitbitHigh[slab][chip][b][ch]);
+        }
+      }
     }
   }
 }
@@ -604,8 +674,10 @@ class RawFrameReader {
 // (ConvertDirectorySL_Raw.cc:66-71).
 class CycleAssembler {
  public:
-  explicit CycleAssembler(int maxReadoutCycleJump = 10, int bcidThres = kBcidThresDefault)
-      : m_maxReadoutCycleJump(maxReadoutCycleJump), m_bcidThres(bcidThres) {}
+  explicit CycleAssembler(int maxReadoutCycleJump = 10, int bcidThres = kBcidThresDefault,
+                          bool dataColumnsLatestFirst = true)
+      : m_maxReadoutCycleJump(maxReadoutCycleJump), m_bcidThres(bcidThres),
+        m_dataColumnsLatestFirst(dataColumnsLatestFirst) {}
 
   // Feed one raw frame (as yielded by RawFrameReader::nextFrame). Appends any
   // acquisitions that became ready to flush into `flushed`.
@@ -656,7 +728,7 @@ class CycleAssembler {
         initAcquisition(*acq);
       }
       DecodedFrame frame;
-      if (decodeFrame(it->second[jframes], frame)) {
+      if (decodeFrame(it->second[jframes], frame, m_dataColumnsLatestFirst)) {
         recordFrame(*acq, frame, m_zeroSuppression);
         any = true;
       }
@@ -672,6 +744,7 @@ class CycleAssembler {
   std::vector<int> m_seenKeys;
   int m_maxReadoutCycleJump;
   int m_bcidThres;
+  bool m_dataColumnsLatestFirst;
   bool m_zeroSuppression = false;
 };
 

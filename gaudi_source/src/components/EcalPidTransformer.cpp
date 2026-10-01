@@ -47,7 +47,8 @@ void appendScalars(std::vector<float>& flat, const EventVars& v) {
               {v.nhit, v.zbary, v.energy, v.mip_likeness, v.weighte, v.bar_x, v.bar_y, v.bar_r,
                v.moliere, v.transverse_rms, v.is_shower, v.shower_start, v.shower_max, v.shower_end,
                v.shower_start_10, v.shower_end_10, v.shower_length, v.first_layer, v.last_layer,
-               v.n_layers_hit, v.e_over_nhit, v.shower_onset, v.n_layers_before_onset});
+               v.n_layers_hit, v.e_over_nhit, v.shower_onset, v.n_layers_before_onset,
+               v.fractal_dimension});
 }
 }  // namespace
 

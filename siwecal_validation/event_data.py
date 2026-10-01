@@ -59,6 +59,7 @@ def _append_scalar_metrics(ecols, slab, energy, x, y,
         ecols["e_over_nhit"].append(NAN)
         ecols["shower_onset"].append(NAN)
         ecols["n_layers_before_onset"].append(NAN)
+        ecols["fractal_dimension"].append(NAN)
         return
 
     hits_layer = metrics.hits_per_layer(s, n_layers)
@@ -106,6 +107,7 @@ def _append_scalar_metrics(ecols, slab, energy, x, y,
     ecols["e_over_nhit"].append(float(e.sum()) / s.size)
     ecols["shower_onset"].append(sh.onset)
     ecols["n_layers_before_onset"].append(sh.n_layers_before_onset)
+    ecols["fractal_dimension"].append(metrics.fractal_dimension(s[pos], fx[pos], fy[pos]))
 
 
 @dataclass
@@ -145,6 +147,7 @@ class EventData:
     n_layers_before_onset: np.ndarray  # hit layers ahead of it: the pre-shower
                                        # track. ~0-1 for an electron, several for
                                        # a pion that traverses before interacting
+    fractal_dimension: np.ndarray   # shower fractal dimension (CALICE, Ruan et al.)
 
     # --- provenance (EDM4hep path only) ------------------------------------
     #: Original podio frame index of each event (set by :meth:`from_edm4hep`;
@@ -296,6 +299,8 @@ class EventData:
             cols["e_over_nhit"].append(energy_sum / n_channels)
             cols["shower_onset"].append(sh.onset)
             cols["n_layers_before_onset"].append(sh.n_layers_before_onset)
+            cols["fractal_dimension"].append(
+                metrics.fractal_dimension(slab[pos], px, py))
 
             # --- extra MIP-threshold metrics (same pass, filtered hits) ---
             for mip_thr, ecols in extra_cols.items():
@@ -364,6 +369,10 @@ class EventData:
                          and f.name not in cls._PER_LAYER_FIELDS]
         arrays = {}
         for name in scalar_fields:
+            if name == "fractal_dimension" and name not in cols:
+                # PID files written before the variable existed.
+                arrays[name] = np.full(int(valid.sum()), np.nan)
+                continue
             if name not in cols:
                 raise RuntimeError(
                     f"Variable '{name}' not found in {path}. Available shape "

@@ -106,6 +106,8 @@ builder = EcalEventBuilder(
     ChipNoiseMinScas=int(os.environ.get("EVBLD_CHIP_NOISE_MIN_SCAS", "3")),
     ChipNoiseMinBits=int(os.environ.get("EVBLD_CHIP_NOISE_MIN_BITS", "40")),
     ChipNoiseMaxMedianAdc=float(os.environ.get("EVBLD_CHIP_NOISE_MAX_MEDIAN_ADC", "20")),
+    # EVBLD_SINGLE_RUN_ONLY=1: write only the events alone in their DAQ acquisition (single_run == 1).
+    SingleRunOnly=os.environ.get("EVBLD_SINGLE_RUN_ONLY", "0") == "1",
 )
 
 ApplicationMgr(TopAlg=[builder],

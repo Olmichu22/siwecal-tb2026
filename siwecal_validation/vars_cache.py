@@ -38,7 +38,7 @@ import ROOT
 import uproot
 
 # Bump to invalidate every existing cache (e.g. when the schema changes).
-CACHE_FORMAT_VERSION = 4
+CACHE_FORMAT_VERSION = 5
 FINGERPRINT_KEY = "valcache_fingerprint"
 
 # Per-hit branches the cache rebuilds (filtered: masked channels removed) and
