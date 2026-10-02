@@ -12,7 +12,7 @@
  *   ApplicationMgr(TopAlg=[source, pid, cut1, cut2], ...)
  *
  * Variable is looked up in EcalShowerVars.h's scalarNames() -- the SAME list
- * EcalPidTransformer flattens into Cluster::shapeParameters, so the index is
+ * EcalShowerVariables flattens into Cluster::shapeParameters, so the index is
  * derived from the one canonical order rather than from a second copy of it
  * living here. Only the base scalars (the first block) are addressable by name;
  * for anything further into the layout (per-layer profiles, MIP-variant
@@ -69,7 +69,7 @@ struct EcalEventCut final : k4FWCore::FilterPredicate<bool(const edm4hep::Cluste
 
   bool operator()(const edm4hep::ClusterCollection& clusters) const override {
     ++m_seen;
-    // One Cluster per event by construction (EcalPidTransformer is 1->1). No
+    // One Cluster per event by construction (EcalShowerVariables is 1->1). No
     // cluster means no variables to cut on, so nothing to keep.
     if (clusters.size() != 1) return false;
 

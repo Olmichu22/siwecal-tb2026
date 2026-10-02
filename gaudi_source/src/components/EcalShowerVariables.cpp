@@ -1,5 +1,5 @@
 /*
- * EcalPidTransformer: per-event particle-discrimination variables for the
+ * EcalShowerVariables: per-event particle-discrimination variables for the
  * SiW-ECAL. Strict 1->1 functional Transformer: one input CalorimeterHit
  * collection (one event) -> one Cluster carrying the shower variables.
  *
@@ -52,9 +52,9 @@ void appendScalars(std::vector<float>& flat, const EventVars& v) {
 }
 }  // namespace
 
-struct EcalPidTransformer final
+struct EcalShowerVariables final
     : k4FWCore::Transformer<edm4hep::ClusterCollection(const edm4hep::CalorimeterHitCollection&)> {
-  EcalPidTransformer(const std::string& name, ISvcLocator* svcLoc)
+  EcalShowerVariables(const std::string& name, ISvcLocator* svcLoc)
       : Transformer(name, svcLoc, KeyValues("InputCaloHits", {"ECalHits"}),
                     KeyValues("OutputClusters", {"ECalPid"})) {}
 
@@ -209,4 +209,4 @@ private:
       "ECalPid_shapeParameterNames", Gaudi::DataHandle::Writer};
 };
 
-DECLARE_COMPONENT(EcalPidTransformer)
+DECLARE_COMPONENT(EcalShowerVariables)

@@ -19,7 +19,7 @@ import os
 import ROOT
 from Gaudi.Configuration import INFO
 from Configurables import EventDataSvc
-from Configurables import EcalToEDM4hep, EcalPidTransformer
+from Configurables import EcalToEDM4hep, EcalShowerVariables
 from k4FWCore import ApplicationMgr, IOSvc
 
 _RUN = "TB2026CERN_eudaq_run_000186"
@@ -45,7 +45,7 @@ source = EcalToEDM4hep("EcalToEDM4hep",
                         TreeName="ecal",
                         HitMipCut=0.5)            # <0 to disable the per-hit MIP cut
 
-pid = EcalPidTransformer("EcalPidTransformer",
+pid = EcalShowerVariables("EcalShowerVariables",
                           InputCaloHits=["ECalHits"],
                           OutputClusters=["ECalPid"],
                           MipThresholds=[0.5, 1.0])  # validation mode: mip05_/mip1_ shape blocks

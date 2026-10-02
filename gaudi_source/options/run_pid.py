@@ -10,7 +10,7 @@ import os
 import ROOT
 from Gaudi.Configuration import INFO
 from Configurables import EventDataSvc
-from Configurables import EcalToEDM4hep, EcalPidTransformer
+from Configurables import EcalToEDM4hep, EcalShowerVariables
 from k4FWCore import ApplicationMgr, IOSvc
 
 ecal_file = os.environ.get("ECAL_FILE", "")
@@ -54,7 +54,7 @@ mip_thresholds = [float(t) for t in _raw_mip.split(",") if t.strip()]
 
 source = EcalToEDM4hep("EcalToEDM4hep", InputFile=ecal_file, TreeName=tree_name,
                        HitMipCut=hit_mip_cut)
-pid = EcalPidTransformer("EcalPidTransformer",
+pid = EcalShowerVariables("EcalShowerVariables",
                          InputCaloHits=["ECalHits"], OutputClusters=["ECalPid"],
                          MipThresholds=mip_thresholds)
 # is_shower onset-criterion overrides (optional; the component defaults --

@@ -20,7 +20,7 @@ ecal_<run>.root  { TTree "ecal" }, 1 row/physics event
         ▼  EcalToEDM4hep             (hit-MIP cut)
 CalorimeterHitCollection (+ EventHeader)
         │
-        ▼  EcalPidTransformer        (shower variables)
+        ▼  EcalShowerVariables       (shower variables)
 ClusterCollection (1 Cluster/event)
         │
         ▼  run_pid_batch.py: event cuts (CutSet) + format select
@@ -55,7 +55,7 @@ tree; it only reads these outputs and makes plots.
 
 Two MIP knobs drive this stage, and they are **different things**:
 `EcalToEDM4hep.HitMipCut` (env `ECAL_HIT_MIP_CUT`) is the **per-hit energy
-cut** that decides which hits survive; `EcalPidTransformer.MipThresholds`
+cut** that decides which hits survive; `EcalShowerVariables.MipThresholds`
 (env `ECAL_MIP_THRESHOLDS`) is a **list of extra thresholds** at which the
 whole shower-variable block is recomputed and stored again as
 `mip05_`/`mip1_`. **Physics mode** = a single `HitMipCut=0.5` and
@@ -65,7 +65,7 @@ slider reads. The batch drivers default to physics mode; a bare
 `k4run … run_pid.py` defaults to the validation thresholds. See the main
 README's "Two different MIP cut knobs" note for the per-driver default table.
 
-The `EcalToEDM4hep`/`EcalPidTransformer` chain itself is a strict **1→1**
+The `EcalToEDM4hep`/`EcalShowerVariables` chain itself is a strict **1→1**
 transform (the `ecal` tree is already one row per physics event — no BCID
 fan-out): it writes a *full* EDM4hep file to a temporary path.
 `run_pid_batch.py` then applies the event cuts and writes the requested
@@ -290,7 +290,7 @@ not reach farm jobs until it is added there too.
 
   Channels flagged `hit_ismasked` in the `ecal` tree (no MIP calibration) are
   dropped from `ECalHits` and every parallel collection at once, so the output
-  carries only calibrated hits and `EcalPidTransformer` recomputes the shower
+  carries only calibrated hits and `EcalShowerVariables` recomputes the shower
   variables on the filtered set. The branch is optional: pre-mask `ecal` files
   keep all hits.
 
@@ -299,7 +299,7 @@ not reach farm jobs until it is added there too.
   on the cleaned hit set. Disabled by a negative value (the default when run
   directly); `run_pid_batch.py` sets it to `0.5` in physics mode and disables it
   in `--validation` mode.
-- **`EcalPidTransformer`** (`src/components/EcalPidTransformer.cpp`) — one input
+- **`EcalShowerVariables`** (`src/components/EcalShowerVariables.cpp`) — one input
   `CalorimeterHitCollection` → one `Cluster`. The physics lives in
   `include/k4SiWEcalReco/EcalShowerVars.h` (a C++ port of
   `siwecal_validation/metrics.py`, the parity oracle). All derived variables go
@@ -474,7 +474,7 @@ binary to EDM4hep. Both are plain Python scripts (run with `python`, not
    file is gone and `run_raw2root.py` warns if handed more than one chunk.
 2. `options/run_event_builder.py` (`EcalEventBuilder`), chaining those chunks via
    `EVBLD_INPUT_FILES`.
-3. `options/run_pid.py` (`TopAlg=[EcalToEDM4hep, EcalPidTransformer]`) — a
+3. `options/run_pid.py` (`TopAlg=[EcalToEDM4hep, EcalShowerVariables]`) — a
    **separate** process, because these are `k4FWCore::Producer`/
    `Transformer` components that need `EvtMax` (the `ecal` tree's entry
    count) fixed *before* the process starts, and that count is only known

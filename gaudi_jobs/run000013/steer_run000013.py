@@ -11,7 +11,7 @@
 import ROOT
 from Gaudi.Configuration import INFO
 from Configurables import EventDataSvc
-from Configurables import EcalToEDM4hep, EcalPidTransformer
+from Configurables import EcalToEDM4hep, EcalShowerVariables
 from k4FWCore import ApplicationMgr, IOSvc
 
 _RUN   = "TB2026CERN_run_000013"
@@ -38,7 +38,7 @@ source = EcalToEDM4hep("EcalToEDM4hep",
                         TreeName="ecal",
                         HitMipCut=0.5)      # <0 para deshabilitar el corte de hit
 
-pid = EcalPidTransformer("EcalPidTransformer",
+pid = EcalShowerVariables("EcalShowerVariables",
                           InputCaloHits=["ECalHits"],
                           OutputClusters=["ECalPid"],
                           MipThresholds=[])  # [0.5, 1.0] para modo validación (slider)

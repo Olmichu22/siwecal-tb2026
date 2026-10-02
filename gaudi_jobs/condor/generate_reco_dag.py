@@ -148,7 +148,7 @@ echo "decoded $N chunk(s), skipped $SKIPPED already done"
 
 def _reco_sh(out_dir):
     # One job per run: event building (chaining that run's chunks) then PID.
-    # Two k4run processes, not one: EcalToEDM4hep/EcalPidTransformer are
+    # Two k4run processes, not one: EcalToEDM4hep/EcalShowerVariables are
     # k4FWCore components whose EvtMax must be fixed before the process starts,
     # and that count is only known once the event builder has run. run_pid.py
     # reads it from the ecal file itself, so no driver is needed in between.
