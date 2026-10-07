@@ -33,6 +33,7 @@ gaudi_add_module(k4SiWEcalRecoPlugins
     src/components/EcalRawDecoder.cpp
     src/components/EcalLcioDecoder.cpp
     src/components/PedestalMipCalibrator.cpp
+    src/components/GainAnchorCalibrator.cpp
     src/components/EcalEventBuilder.cpp
     src/components/ACTSGeoSvc.cpp
     src/components/ShowerTagger.cpp
@@ -64,6 +65,12 @@ get_target_property(_acts_include_dirs Acts::Core INTERFACE_INCLUDE_DIRECTORIES)
 if(_acts_include_dirs)
     target_include_directories(k4SiWEcalRecoPlugins PRIVATE ${_acts_include_dirs})
 endif()
+
+# -- Unit tests of the ROOT/Gaudi-free headers (ctest --test-dir build)
+enable_testing()
+add_executable(test_gain_anchor_fit tests/test_gain_anchor_fit.cpp)
+target_include_directories(test_gain_anchor_fit PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/include)
+add_test(NAME gain_anchor_fit COMMAND test_gain_anchor_fit)
 
 install(TARGETS k4SiWEcalRecoPlugins
   EXPORT k4SiWEcalRecoTargets

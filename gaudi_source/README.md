@@ -11,8 +11,9 @@ run/*_raw.bin_NNNN  (READ-ONLY DAQ data)
 siwecaldecoded.root  { TTree "siwecaldecoded" }, 1 row/acquisition cycle
         │
         ├──▼  PedestalMipCalibrator, Mode=Pedestal  ──►  Pedestal_<label>_<gain>gain.txt
-        └──▼  PedestalMipCalibrator, Mode=Mip        ──►  MIP_pedestalsubmode1_<label>_<gain>gain.txt
-               (both modes read the SAME data-taking run(s) -- see below)
+        ├──▼  PedestalMipCalibrator, Mode=Mip        ──►  MIP_pedestalsubmode1_<label>_<gain>gain.txt
+        │      (both modes read the SAME muon run(s) -- see below)
+        └──▼  GainAnchorCalibrator (electron run)   ──►  anchor/th<N>/gain_anchor_th<N>.txt  (LG->HG k, c)
         │
         ▼  EcalEventBuilder          (BCID clustering + calibration + geometry)
 ecal_<run>.root  { TTree "ecal" }, 1 row/physics event
@@ -103,6 +104,28 @@ final, cut-passing output(s), deleting the temporary file.
   `acqWindowMs`/`delayBetweenCycleMs` are read once (they appear once per
   file). Verified on real TB2026CERN data (see git history for the
   parity/segfault-fix notes).
+
+- **`GainAnchorCalibrator`** (`src/components/GainAnchorCalibrator.cpp`,
+  `include/k4SiWEcalReco/GainAnchorFit.h`) — measures the LG→HG anchor line
+  `adc_low - ped_lg = k * (adc_high - ped_hg) + c` that `EcalEventBuilder`
+  inverts for every hit past the high-gain switch (`GainRatio`,
+  `GainIntercept`), and writes `gain_anchor_th<N>.txt` (`k`, `c`, `switch`,
+  `source_run`, plus the statistics), the file
+  `generate_reco_dag.py --calib-dir` reads. Input: the `siwecaldecoded` chunks
+  of an **electron** run (the fiducial band, 150–1200 pedestal-subtracted
+  high-gain ADC, needs showers) and the high- and low-gain pedestal tables the
+  reconstruction subtracts. Every fired channel of a live SCA fills a 2D
+  histogram; the line goes through the median `adc_low` of each 12.5-ADC
+  `adc_high` slice in the band (≥ 50 entries). Port of
+  `diagnostics/plot_gain_anchor_fit.py`, with which the anchors were fitted by
+  hand before. Optional occupancy window (`MinHitBits`/`MaxHitBits`, hit bits
+  per chip-SCA): the anchor slope falls with the chip's occupancy, so an anchor
+  for the saturated hits can be traced on their own occupancy. Plain
+  `Gaudi::Algorithm` doing its work in `initialize()`, like
+  `PedestalMipCalibrator`: the input is not an EDM4hep collection, so a
+  k4FWCore Consumer does not apply. Unit test of the fit core:
+  `tests/test_gain_anchor_fit.cpp` (`ctest --test-dir build`). Driver:
+  `gaudi_jobs/calibration/run_anchor_calibration.py` (below).
 
 - **`PedestalMipCalibrator`** (`src/components/PedestalMipCalibrator.cpp`,
   `include/k4SiWEcalReco/PedestalMipCalib.h`) — computes pedestal (Gaussian
@@ -458,6 +481,25 @@ an `_assert_not_under()` guard that refuses to write inside a run's raw
 folder. `list_run_thresholds.py` is read-only (only opens `Run_Settings.txt`
 files, never touches raw binaries or calls `k4run`).
 
+### Anchor calibration driver: `gaudi_jobs/calibration/run_anchor_calibration.py`
+
+One `k4run` of `options/run_gain_anchor.py` per data-taking period, on the
+electron run the deployed anchors were fitted on (th210 eudaq 166, th220
+run 72, th230 run 12), with the th210 pedestals every run is reconstructed with
+(`--ped-th`). Writes `<calib-dir>/anchor/th<N>/gain_anchor_th<N>.txt` and, by
+default, `gain_anchor_fit_<run>_th<N>.root/.png` next to it. Never overwrites
+an existing anchor file without `--force`.
+
+```bash
+# the three periods, into a scratch folder to compare with the deployed ones
+python gaudi_jobs/calibration/run_anchor_calibration.py --all-periods \
+    --calib-dir /tmp/anchor_check --ped-dir calibration/MuonCalib_gaudi_fixed
+
+# one period, traced on the occupancy of the saturated hits, into the folder the reco DAG reads
+python gaudi_jobs/calibration/run_anchor_calibration.py --th 210 --min-hitbits 12 --max-hitbits 24 \
+    --calib-dir calibration/MuonCalib_gaudi_fixed --force
+```
+
 ### Full pipeline: raw2root → event building → PID
 
 `gaudi_jobs/run_full_pipeline_batch.py` (generic) and
@@ -550,6 +592,7 @@ application or output-file naming):
 |---|---|---|
 | raw2root (ONE chunk per process) | `run_raw2root.py` | `RAW_FILES`, `RAW2ROOT_OUT`, `RAW2ROOT_RUN_SETTINGS_FILE`, `RAW2ROOT_DATA_LATEST_FIRST` (default 1) |
 | pedestal/MIP calibration | `run_pedestal_mip.py` | `CALIB_INPUT_FILES`, `CALIB_MODE`, `CALIB_GAIN`, `CALIB_OUTPUT_PEDESTAL_FILE`/`CALIB_OUTPUT_MIP_FILE` |
+| LG→HG anchor calibration | `run_gain_anchor.py` | `ANCHOR_INPUT_FILES`, `ANCHOR_PEDESTAL_FILE`, `ANCHOR_PEDESTAL_FILE_LOWGAIN`, `ANCHOR_OUTPUT_FILE`, `ANCHOR_DIAGNOSTICS_FILE`, `ANCHOR_MIN_HITBITS`/`ANCHOR_MAX_HITBITS` |
 | event building | `run_event_builder.py` | `EVBLD_INPUT`, `EVBLD_OUTPUT`, `EVBLD_PEDESTAL_FILE`, `EVBLD_MIP_FILE`, `EVBLD_PADMAP_DEFAULT`, `EVBLD_SLAB_Z_FILE` |
 | PID/EDM4hep | `run_pid.py` | `ECAL_FILE`, `ECAL_PID_OUT`, `ECAL_HIT_MIP_CUT` (`<0` disables), `ECAL_MIP_THRESHOLDS` (`""` = no variant blocks) |
 

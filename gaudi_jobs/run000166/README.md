@@ -32,3 +32,19 @@ python gaudi_jobs/decode_lcio_runs.py --runs 166      # EUDAQ/LCIO run
 - **A different run / threshold:** copy this steer, and change `_RUN` and `_TH`
   at the top (one copy per run, on purpose — see run000091 for the th220 twin).
   Everything else (calibration, anchor, switch) is resolved from `_TH`.
+
+## Measure the th210 LG→HG anchor on this run
+
+Run 166 is also the electron run the th210 anchor line (`k`, `c`) is measured on.
+`steer_anchor_run000166.py` runs `GainAnchorCalibrator` on its chunks with the
+`MuonCalib_gaudi_fixed` th210 pedestals:
+
+```bash
+k4run gaudi_jobs/run000166/steer_anchor_run000166.py
+```
+
+Output in this folder: `gain_anchor_th210.txt` (expected `k 0.09243`,
+`c 2.345`, 6,489,694 fired channels) and `gain_anchor_fit_000166_th210.root`.
+`ANCHOR_MIN_HITBITS`/`ANCHOR_MAX_HITBITS` restrict it to an occupancy window.
+To write all three periods where the reco DAG reads them, use
+`gaudi_jobs/calibration/run_anchor_calibration.py --all-periods`.

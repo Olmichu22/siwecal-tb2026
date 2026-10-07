@@ -35,6 +35,8 @@ _logs/
 gaudi_jobs/calibration/run_thresholds*.txt
 gaudi_jobs/run000166/logs
 gaudi_jobs/run000167/logs
+# Anchor files written by the per-run examples (steer_anchor_run*.py); the deployed ones live under calibration/
+gaudi_jobs/run*/gain_anchor_th*.txt
 
 # --- Job stdout/stderr. The per-run "logs" rules above are path-specific: a
 #     pipeline.out was committed once from a directory they did not cover, so
