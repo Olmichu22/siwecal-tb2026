@@ -21,7 +21,7 @@ _SHOWER_PEAK  = 10.0  # minimum peak nhit for shower classification
 _START_FRAC   = 0.1   # fraction of peak for start/end_layer_10
 _MOLIERE_CONT = 0.90  # 90% transverse containment
 _W_X0_MM      = 3.5   # tungsten radiation length [mm]
-# is_shower onset criterion. These MUST match the EcalPidTransformer defaults
+# is_shower onset criterion. These MUST match the EcalShowerVariables defaults
 # (ShowerCoreRadiusMm / ShowerOnsetMinNhit / ShowerOnsetMinConsecutive), because
 # the whole point of the recompute path is that threshold 0 reproduces the flag
 # stored in the file.

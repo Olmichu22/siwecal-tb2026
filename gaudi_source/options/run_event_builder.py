@@ -89,7 +89,7 @@ builder = EcalEventBuilder(
     MinSlabsHit=int(os.environ.get("EVBLD_MIN_SLABS_HIT", "10")),
     DropRetriggerScas=os.environ.get("EVBLD_DROP_RETRIGGER", "0") == "1",
     DropRetriggerDelta=int(os.environ.get("EVBLD_RETRIGGER_DELTA", "2")),
-    # LG->HG anchor line (per threshold, from calibration/MuonCalib_gaudi/anchor/thN/).
+    # LG->HG anchor line (per threshold, from <calib_dir>/MuonCalib/anchor/thN/ on EOS).
     # Defaults keep the previous global values if unset.
     GainRatio=float(os.environ.get("EVBLD_GAIN_RATIO", "0.0962")),
     GainIntercept=float(os.environ.get("EVBLD_GAIN_INTERCEPT", "1.45")),

@@ -65,29 +65,12 @@ from calib_run_utils import parse_run_folder_list, raw_chunk_files
 from condor_common import DEFAULT_CONVERTED_DIR, OPTIONS_DIR, chunks_dir, condor_log_dir, env_wrapper_preamble, \
     mkdirs_line, write_executable, write_text
 from siwecal_common import paths
-from siwecal_eventbuilder.cli import MIP_CALIB_TH, resolve_gaudi_calib_files
+from siwecal_eventbuilder.cli import (GAUDI_CALIB_DIR, MIP_CALIB_TH, PED_CALIB_TH, calib_th_arg, read_gain_anchor,
+                                     resolve_gaudi_calib_files)
 from siwecal_eventbuilder.geometry import load_slab_technology
 from siwecal_eventbuilder.run_settings import read_threshold_dac
 
 _CLEANUP = os.path.join(_REPO, "gaudi_jobs", "calibration", "condor", "cleanup_job_logs.sh")
-
-
-def _read_anchor(calib_dir, th):
-    """(k, c) of <calib_dir>/anchor/th<th>/gain_anchor_th<th>.txt, or ("-", "-") if absent (the event-builder
-    steering then keeps its built-in GainRatio/GainIntercept). Before --calib-dir existed no campaign passed the
-    per-threshold line, so every one ran on the steering default (0.0962, 1.45)."""
-    if not calib_dir:
-        return ("-", "-")
-    path = os.path.join(calib_dir, "anchor", f"th{th}", f"gain_anchor_th{th}.txt")
-    if not os.path.exists(path):
-        print(f"[anchor] no {path}: steering default GainRatio/GainIntercept")
-        return ("-", "-")
-    vals = {}
-    for line in open(path):
-        parts = line.split()
-        if len(parts) >= 2 and not line.startswith("#"):
-            vals[parts[0]] = parts[1]
-    return (vals["k"], vals["c"])
 
 
 def _convert_sh(out_dir):
@@ -148,7 +131,7 @@ echo "decoded $N chunk(s), skipped $SKIPPED already done"
 
 def _reco_sh(out_dir):
     # One job per run: event building (chaining that run's chunks) then PID.
-    # Two k4run processes, not one: EcalToEDM4hep/EcalPidTransformer are
+    # Two k4run processes, not one: EcalToEDM4hep/EcalShowerVariables are
     # k4FWCore components whose EvtMax must be fixed before the process starts,
     # and that count is only known once the event builder has run. run_pid.py
     # reads it from the ecal file itself, so no driver is needed in between.
@@ -275,22 +258,21 @@ def main(argv=None):
     p.add_argument("--reco-dir", default=paths.reconstruction_dir(),
                    help=f"Where <RUN>/ecal_*.root go (outside Data/). "
                         f"Default: {paths.reconstruction_dir()}")
-    p.add_argument("--mip-th", default=MIP_CALIB_TH,
-                   help="Threshold whose MIP tables every run is calibrated against. Default: the run's OWN "
-                        "threshold (same as its pedestals). MIPs and pedestals both shift with the trigger "
-                        "threshold, so each run auto-calibrates from its own th. Pass --mip-th <th> only for "
-                        "a deliberate cross-threshold study.")
-    p.add_argument("--ped-th", default=None,
-                   help="Threshold whose PEDESTAL tables (and so pedestal mask) every run uses. Default: the "
-                        "run's own threshold. With --mip-th, puts every run on one calibration "
-                        "(e.g. --ped-th 210 --mip-th 210).")
-    p.add_argument("--calib-dir", default=None,
-                   help="Calibration folder with the MuonCalib_gaudi layout ({pedestals,mips}/th<N>/), e.g. "
-                        "calibration/MuonCalib_gaudi_fixed. Default: calibration/MuonCalib_gaudi.")
-    p.add_argument("--anchor-own-th", action="store_true",
-                   help="With --calib-dir: take the LG->HG anchor line of the run's OWN threshold folder even when "
-                        "--ped-th puts the pedestals on another one. The line is a property of the data-taking "
-                        "period (th210 eudaq 166: k 0.0924; th220 run 72: 0.0964; th230 run 12: 0.0958).")
+    p.add_argument("--mip-th", type=calib_th_arg, default=MIP_CALIB_TH,
+                   help=f"Threshold whose MIP tables every run is calibrated against. Default: {MIP_CALIB_TH}, as "
+                        "the final campaign; 'own' = the run's own threshold.")
+    p.add_argument("--ped-th", type=calib_th_arg, default=PED_CALIB_TH,
+                   help=f"Threshold whose PEDESTAL tables (and so pedestal mask) every run uses. Default: "
+                        f"{PED_CALIB_TH}, as the final campaign; 'own' = the run's own threshold.")
+    p.add_argument("--calib-dir", default=GAUDI_CALIB_DIR,
+                   help="Calibration folder with the MuonCalib layout ({pedestals,mips,anchor}/th<N>/). "
+                        f"Default: the official tables on EOS, {GAUDI_CALIB_DIR}.")
+    p.add_argument("--anchor-own-th", action="store_true", default=True,
+                   help="Take the LG->HG anchor line of the run's OWN threshold folder (default). The line is a "
+                        "property of the data-taking period (th210 eudaq 166: k 0.0924; th220 run 72: 0.0964; "
+                        "th230 run 12: 0.0958). Kept for old command lines.")
+    p.add_argument("--anchor-from-ped-th", dest="anchor_own_th", action="store_false",
+                   help="Take the anchor line of the --ped-th folder instead (before 2026-09-30).")
     p.add_argument("--out-dir", required=True, help="Directory to write the DAG, subs, wrappers and logs into.")
     p.add_argument("--chunks-per-job", type=int, default=20,
                    help="Raw chunks decoded by ONE Condor job, each in its own k4run (default 20). "
@@ -332,10 +314,10 @@ def main(argv=None):
                    help="EcalEventBuilder.SingleRunOnly for every RECO job: write only the events that are the "
                         "single event built from their DAQ acquisition (single_run == 1). Belongs in its own "
                         "--reco-dir (e.g. Reconstructed_singlerun).")
-    p.add_argument("--hit-mip-cut", type=float, default=-1.0,
+    p.add_argument("--hit-mip-cut", type=float, default=0.5,
                    help="ECAL_HIT_MIP_CUT of the PID stage: drop hits below this energy [MIP] from the EDM4hep "
-                        "output (and every ECalPid variable). Default -1 = off, as before; 0.5 is what "
-                        "run_pid_batch.py applies in physics mode and what the simulation carries.")
+                        "output (and every ECalPid variable). Default 0.5, as the final campaign, run_pid_batch.py "
+                        "in physics mode and the simulation; -1 = off.")
     p.add_argument("--keep-job-logs", action="store_true",
                    help="Keep every job's .out/.err. By default they are deleted when the node succeeds, to "
                         "protect the AFS logs/ directory's entry limit (see calibration/condor/README.md).")
@@ -374,7 +356,7 @@ def main(argv=None):
             ped = mip = ped_lg = mip_lg = ""
             anchor = ("-", "-")
         else:
-            anchor = _read_anchor(args.calib_dir, th if args.anchor_own_th else (args.ped_th or th))
+            anchor = read_gain_anchor(args.calib_dir, th if args.anchor_own_th else (args.ped_th or th))
             ped, mip, ped_lg, mip_lg = resolve_gaudi_calib_files(th, mip_th=args.mip_th, ped_th=args.ped_th,
                                                                 calib_dir=args.calib_dir and os.path.abspath(args.calib_dir))
 

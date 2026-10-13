@@ -5,7 +5,7 @@ PID stage: every event of ``ecal_<label>.edm4hep.root`` -> ``ecal_<label>.valtre
 --outdir). Same writer as run_pid_batch.py --format valtree (siwecal_common.edm4hep_pid.write_valtree).
 
     python gaudi_jobs/pid_to_valtree.py <file.edm4hep.root> [...] [--outdir DIR] [--force]
-    python gaudi_jobs/pid_to_valtree.py --campaign /eos/.../Reconstructed_final      # every run in it
+    python gaudi_jobs/pid_to_valtree.py --campaign /eos/.../Reconstruction      # every run in it
 
 The MIP-variant blocks (mip05_/mip1_) are written only if the file carries them (validation mode).
 """

@@ -312,7 +312,9 @@ def main(argv=None):
                         "Fill skip-if-done check, and hadd -v 0; and each node's .out/.err are deleted once the "
                         "node succeeds (see --keep-job-logs) so the dir doesn't hit AFS's entry limit.")
     p.add_argument("--outdir", default=None,
-                   help="Calibration table output base directory. Default: settings.yml calib_dir()/MuonCalib_gaudi")
+                   help="Calibration table output base directory. "
+                        "Default: calibration/MuonCalib_new in the repo -- never the official EOS MuonCalib, which is "
+                        "replaced only by a deliberate copy once the new tables are validated.")
     p.add_argument("--gain", choices=("high", "low", "both"), default="high")
     p.add_argument("--dag-dir", required=True,
                    help="Directory to write the .dag/.sub/.sh/file-lists/logs/ into.")
@@ -361,7 +363,7 @@ def main(argv=None):
     label = _combined_label(run_folders, th)
 
     hist_base = hist_dir(args.fill_scratch_dir)
-    out_base = args.outdir or os.path.join(paths.calib_dir(), "MuonCalib_gaudi")
+    out_base = args.outdir or os.path.join(paths.REPO_ROOT, "calibration", "MuonCalib_new")
     gains = ["high", "low"] if args.gain == "both" else [args.gain]
 
     log_dir = args.log_dir or condor_log_dir(args.dag_dir)

@@ -17,9 +17,10 @@ data_dir:
   - /path/to/your/TB2026CERN/data
   # - /eos/another/place/with/events
 
-# Calibration (pedestal + MIP) files. Defaults to the copies vendored in the
-# repo so the event builder runs out-of-the-box; point elsewhere to use your own.
-calib_dir: ./calibration
+# Calibration (pedestal + MIP) files. Default: the project EOS area, whose
+# MuonCalib/ holds the official tables (fixed SCA pairing, {pedestals,mips,anchor,trigger}/th<N>/)
+# and the dummy_*.txt maps. The repo's ./calibration keeps only the legacy tables.
+calib_dir: /eos/experiment/drdcalo/siw-ecal/TB2026-06/Calib
 
 # Geometry inputs: pad (chip,channel)->(x,y) maps + slab z + tungsten map.
 geometry_dir: ./mappings

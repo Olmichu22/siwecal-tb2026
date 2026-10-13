@@ -1,6 +1,6 @@
 #
 # ACTS tracking para TB2026CERN_run_000013, sobre el EDM4hep PID ya producido
-# por EcalToEDM4hep/EcalPidTransformer (mismo INPUT que usa steer_run000013.py,
+# por EcalToEDM4hep/EcalShowerVariables (mismo INPUT que usa steer_run000013.py,
 # variante "_realvalues": event builder con calibración real).
 #
 # El resultado se funde EN EL MISMO ARCHIVO de entrada (temp oculto + swap),

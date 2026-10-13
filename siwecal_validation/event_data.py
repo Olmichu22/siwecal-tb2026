@@ -347,7 +347,7 @@ class EventData:
 
         The per-event discrimination variables are read straight from each
         ``Cluster``'s ``shapeParameters`` (computed in C++ by
-        ``EcalPidTransformer``); nothing is recomputed here. Events with no hits
+        ``EcalShowerVariables``); nothing is recomputed here. Events with no hits
         or non-positive energy are dropped, matching :meth:`from_root`.
 
         ``mip_thresholds`` must match the file's ``shapeParameters`` layout

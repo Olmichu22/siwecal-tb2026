@@ -17,7 +17,7 @@
  * Everything works on plain std::vector for one event, with no ROOT/Gaudi
  * dependency, so it is reusable and unit-testable. The canonical ordering of
  * the variables (scalarNames / perLayerNames) is the single source of truth for
- * the Cluster::shapeParameters layout written by EcalPidTransformer and read
+ * the Cluster::shapeParameters layout written by EcalShowerVariables and read
  * back downstream.
  */
 #ifndef K4SIWECALRECO_ECALSHOWERVARS_H

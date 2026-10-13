@@ -15,7 +15,7 @@ The PID job writes one podio event (Frame) per physics event with:
 
 This is the single source of truth both ``siwecal_validation`` and
 ``event_viewer`` use to read EDM4hep, so neither recomputes the metrics: they are
-read straight from the Cluster (computed in C++ by ``EcalPidTransformer``).
+read straight from the Cluster (computed in C++ by ``EcalShowerVariables``).
 """
 
 from __future__ import annotations
@@ -35,7 +35,7 @@ IDENTIFIER_COLUMNS = ("run", "event", "spill", "bcid", "nhit_chan")
 _MERGE_COLLECTIONS = ("ACTSTracks", "EMShowers", "SiPadMeasurements", "SiPadShowerFlags")
 
 # Canonical shapeParameters layout -- mirror of k4SiWEcalReco/EcalShowerVars.h
-# (scalarNames / perLayerNames) and EcalPidTransformer's MIP-cut prefixes. Kept
+# (scalarNames / perLayerNames) and EcalShowerVariables's MIP-cut prefixes. Kept
 # in Python so opening a file needs no podio call (the slow part); the actual
 # width is asserted against the file in PidFileReader._build_scalars.
 SCALAR_NAMES = (
@@ -53,7 +53,7 @@ _MIP_PREFIX = {0.5: "mip05", 1.0: "mip1"}
 
 
 def canonical_shape_names(n_layers: int = 15, mip_thresholds=(0.5, 1.0)) -> List[str]:
-    """The ordered shapeParameter names written by ``EcalPidTransformer``."""
+    """The ordered shapeParameter names written by ``EcalShowerVariables``."""
     names = list(SCALAR_NAMES)
     for block in PER_LAYER_NAMES:
         names += [f"{block}_{i}" for i in range(n_layers)]
@@ -150,7 +150,7 @@ class PidFileReader:
         if mat.shape[1] != len(self.shape_names):
             # The width can differ from the compiled-in canonical layout for
             # more than one reason: physics-mode files (no mip05_/mip1_
-            # variant blocks), or an older EcalPidTransformer that predates a
+            # variant blocks), or an older EcalShowerVariables that predates a
             # later addition to SCALAR_NAMES (e.g. shower_onset/
             # n_layers_before_onset, added after some real-data PID files were
             # already written). The file's own metadata frame parameter

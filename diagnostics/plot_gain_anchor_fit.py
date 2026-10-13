@@ -1,5 +1,9 @@
 """The fit that anchors the low gain to the high gain -- the one the event builder uses.
 
+PRODUCTION NOW RUNS IN GAUDI: GainAnchorCalibrator (gaudi_source/src/components/GainAnchorCalibrator.cpp), driven
+by gaudi_jobs/calibration/run_anchor_calibration.py, measures this same line with this same method and writes
+the anchor file the reconstruction reads. This script is kept as the reference the Gaudi port is checked against.
+
 Above the switch (raw adc_high >= 1500) the high-gain preamp has gone non-linear -- it
 is already 1.2% low there and 3.9% low by 1900 -- so the energy has to come from the
 low gain. The old way divided the low-gain ADC by MIP_lg, and MIP_lg is unmeasurable: a

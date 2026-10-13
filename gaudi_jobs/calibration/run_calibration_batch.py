@@ -240,7 +240,8 @@ def main(argv=None):
                         f"(separate from the raw run folders). Default: {_DEFAULT_CONVERTED_DIR}")
     p.add_argument("--outdir", default=None,
                    help="Calibration output base directory. "
-                        "Default: settings.yml calib_dir()/MuonCalib_gaudi")
+                        "Default: calibration/MuonCalib_new in the repo -- never the official EOS MuonCalib, which is "
+                        "replaced only by a deliberate copy once the new tables are validated.")
     p.add_argument("--gain", choices=("high", "low", "both"), default="high")
     p.add_argument("--no-raw2root", action="store_true",
                    help="Never decode raw binaries; the decoded chunks must already exist")
@@ -263,7 +264,7 @@ def main(argv=None):
     th = _check_threshold_consistency(run_folders, args.th)
     label = _combined_label(run_folders, th)
 
-    out_base = args.outdir or os.path.join(paths.calib_dir(), "MuonCalib_gaudi")
+    out_base = args.outdir or os.path.join(paths.REPO_ROOT, "calibration", "MuonCalib_new")
     gains = ["high", "low"] if args.gain == "both" else [args.gain]
 
     siwecaldecoded_files = _resolve_siwecaldecoded_files(

@@ -28,7 +28,7 @@ For a whole campaign, do not use this: gaudi_jobs/condor/generate_reco_dag.py
 runs the same three stages with the chunks decoded in parallel on the farm. This
 script is the interactive path for one run.
 
-Calibration files come from ``MuonCalib_gaudi/{pedestals,mips}/th<N>/`` via
+Calibration files come from ``<calib_dir>/MuonCalib/{pedestals,mips}/th<N>/`` (EOS) via
 siwecal_eventbuilder.cli.resolve_gaudi_calib_files(th). The threshold itself is
 read from the run's own ``Run_Settings.txt`` (read_threshold_dac) unless --th
 overrides it, so a run can no longer be reconstructed against another
@@ -51,7 +51,8 @@ import sys
 import ROOT
 
 from siwecal_common import paths
-from siwecal_eventbuilder.cli import MIP_CALIB_TH, resolve_gaudi_calib_files
+from siwecal_eventbuilder.cli import (GAUDI_CALIB_DIR, MIP_CALIB_TH, PED_CALIB_TH, calib_th_arg, read_gain_anchor,
+                                     resolve_gaudi_calib_files)
 from siwecal_eventbuilder.geometry import load_slab_technology
 from siwecal_eventbuilder.run_settings import read_threshold_dac
 
@@ -72,13 +73,15 @@ def main(argv=None):
     p = argparse.ArgumentParser(description="Full raw2root -> event building -> PID/EDM4hep pipeline for one run.")
     p.add_argument("--run", required=True, help="Run name (e.g. TB2026CERN_run_000013)")
     p.add_argument("--th", default=None,
-                   help="Threshold label used to resolve the MuonCalib_gaudi calibration folder (e.g. 230). "
+                   help="Threshold label used to resolve the MuonCalib calibration folder (e.g. 230). "
                         "Default: read the run's ThresholdDAC from its Run_Settings.txt")
-    p.add_argument("--mip-th", default=MIP_CALIB_TH,
-                   help="Threshold whose MIP tables to calibrate against. Default: the run's OWN threshold "
-                        "(same as the pedestals). MIPs and pedestals both shift with the trigger threshold, so "
-                        "each run auto-calibrates from its own th. Pass --mip-th <th> only for a deliberate "
-                        "cross-threshold study.")
+    p.add_argument("--mip-th", type=calib_th_arg, default=MIP_CALIB_TH,
+                   help=f"Threshold whose MIP tables to calibrate against. Default: {MIP_CALIB_TH}, as the final "
+                        "campaign; 'own' = the run's own threshold.")
+    p.add_argument("--ped-th", type=calib_th_arg, default=PED_CALIB_TH,
+                   help=f"Threshold whose pedestal tables (and mask) to use. Default: {PED_CALIB_TH}, as the final "
+                        "campaign; 'own' = the run's own threshold. The LG->HG anchor is always the run's own "
+                        "period's.")
     p.add_argument("--run-id", type=int, default=None, help="Numeric run id for the ecal tree's `run` branch "
                                                               "(default: parsed from the run name)")
     p.add_argument("--raw-dir", default=None,
@@ -124,6 +127,7 @@ def main(argv=None):
     run_settings_file = os.path.join(raw_dir, "Run_Settings.txt")
 
     pedestal_file_lg, mip_file_lg = "", ""
+    anchor = ("-", "-")
     if args.no_calibration:
         pedestal_file, mip_file = "", ""
     else:
@@ -140,7 +144,8 @@ def main(argv=None):
             else:
                 print(f"[calib] {run}: ThresholdDAC={th} (forced via --th)")
             auto_pedestal, auto_mip, auto_pedestal_lg, auto_mip_lg = resolve_gaudi_calib_files(
-                th, mip_th=args.mip_th)
+                th, mip_th=args.mip_th, ped_th=args.ped_th)
+            anchor = read_gain_anchor(GAUDI_CALIB_DIR, th)
             pedestal_file = pedestal_file or auto_pedestal
             mip_file = mip_file or auto_mip
             pedestal_file_lg = pedestal_file_lg or auto_pedestal_lg
@@ -176,6 +181,9 @@ def main(argv=None):
         "EVBLD_PADMAP_SLAB_OVERRIDES": padmap_overrides,
         "EVBLD_SLAB_Z_FILE": slab_z_file,
     }
+    # LG->HG anchor of the run's own period ("-" = the steering default)
+    if anchor[0] != "-":
+        env["EVBLD_GAIN_RATIO"], env["EVBLD_GAIN_INTERCEPT"] = anchor
     result = subprocess.run(["k4run", _EVBLD_STEERING], env=env)
     if result.returncode != 0:
         raise SystemExit(f"ERROR: stage2 (event building) k4run failed for {run}")

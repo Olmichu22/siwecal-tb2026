@@ -53,7 +53,7 @@ def test_slab8_sits_behind_4_2_mm():
 def test_cpp_geometry_defaults_agree():
     """gaudi_source's compiled-in geometry -- what the event builder uses for
     hit_w_energy and hit_X0, and (since the tungsten geometry was unified) what
-    EcalPidTransformer derives `weighte` from."""
+    EcalShowerVariables derives `weighte` from."""
     cpp = _read_thicknesses_from_source(
         "gaudi_source/include/k4SiWEcalReco/PadMapGeometry.h",
         r"kDefaultSlabWThicknessMm\s*=\s*\{([^}]*)\}")

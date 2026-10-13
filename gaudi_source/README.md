@@ -11,8 +11,9 @@ run/*_raw.bin_NNNN  (READ-ONLY DAQ data)
 siwecaldecoded.root  { TTree "siwecaldecoded" }, 1 row/acquisition cycle
         │
         ├──▼  PedestalMipCalibrator, Mode=Pedestal  ──►  Pedestal_<label>_<gain>gain.txt
-        └──▼  PedestalMipCalibrator, Mode=Mip        ──►  MIP_pedestalsubmode1_<label>_<gain>gain.txt
-               (both modes read the SAME data-taking run(s) -- see below)
+        ├──▼  PedestalMipCalibrator, Mode=Mip        ──►  MIP_pedestalsubmode1_<label>_<gain>gain.txt
+        │      (both modes read the SAME muon run(s) -- see below)
+        └──▼  GainAnchorCalibrator (electron run)   ──►  anchor/th<N>/gain_anchor_th<N>.txt  (LG->HG k, c)
         │
         ▼  EcalEventBuilder          (BCID clustering + calibration + geometry)
 ecal_<run>.root  { TTree "ecal" }, 1 row/physics event
@@ -20,7 +21,7 @@ ecal_<run>.root  { TTree "ecal" }, 1 row/physics event
         ▼  EcalToEDM4hep             (hit-MIP cut)
 CalorimeterHitCollection (+ EventHeader)
         │
-        ▼  EcalPidTransformer        (shower variables)
+        ▼  EcalShowerVariables       (shower variables)
 ClusterCollection (1 Cluster/event)
         │
         ▼  run_pid_batch.py: event cuts (CutSet) + format select
@@ -55,7 +56,7 @@ tree; it only reads these outputs and makes plots.
 
 Two MIP knobs drive this stage, and they are **different things**:
 `EcalToEDM4hep.HitMipCut` (env `ECAL_HIT_MIP_CUT`) is the **per-hit energy
-cut** that decides which hits survive; `EcalPidTransformer.MipThresholds`
+cut** that decides which hits survive; `EcalShowerVariables.MipThresholds`
 (env `ECAL_MIP_THRESHOLDS`) is a **list of extra thresholds** at which the
 whole shower-variable block is recomputed and stored again as
 `mip05_`/`mip1_`. **Physics mode** = a single `HitMipCut=0.5` and
@@ -65,7 +66,7 @@ slider reads. The batch drivers default to physics mode; a bare
 `k4run … run_pid.py` defaults to the validation thresholds. See the main
 README's "Two different MIP cut knobs" note for the per-driver default table.
 
-The `EcalToEDM4hep`/`EcalPidTransformer` chain itself is a strict **1→1**
+The `EcalToEDM4hep`/`EcalShowerVariables` chain itself is a strict **1→1**
 transform (the `ecal` tree is already one row per physics event — no BCID
 fan-out): it writes a *full* EDM4hep file to a temporary path.
 `run_pid_batch.py` then applies the event cuts and writes the requested
@@ -103,6 +104,28 @@ final, cut-passing output(s), deleting the temporary file.
   `acqWindowMs`/`delayBetweenCycleMs` are read once (they appear once per
   file). Verified on real TB2026CERN data (see git history for the
   parity/segfault-fix notes).
+
+- **`GainAnchorCalibrator`** (`src/components/GainAnchorCalibrator.cpp`,
+  `include/k4SiWEcalReco/GainAnchorFit.h`) — measures the LG→HG anchor line
+  `adc_low - ped_lg = k * (adc_high - ped_hg) + c` that `EcalEventBuilder`
+  inverts for every hit past the high-gain switch (`GainRatio`,
+  `GainIntercept`), and writes `gain_anchor_th<N>.txt` (`k`, `c`, `switch`,
+  `source_run`, plus the statistics), the file
+  `generate_reco_dag.py --calib-dir` reads. Input: the `siwecaldecoded` chunks
+  of an **electron** run (the fiducial band, 150–1200 pedestal-subtracted
+  high-gain ADC, needs showers) and the high- and low-gain pedestal tables the
+  reconstruction subtracts. Every fired channel of a live SCA fills a 2D
+  histogram; the line goes through the median `adc_low` of each 12.5-ADC
+  `adc_high` slice in the band (≥ 50 entries). Port of
+  `diagnostics/plot_gain_anchor_fit.py`, with which the anchors were fitted by
+  hand before. Optional occupancy window (`MinHitBits`/`MaxHitBits`, hit bits
+  per chip-SCA): the anchor slope falls with the chip's occupancy, so an anchor
+  for the saturated hits can be traced on their own occupancy. Plain
+  `Gaudi::Algorithm` doing its work in `initialize()`, like
+  `PedestalMipCalibrator`: the input is not an EDM4hep collection, so a
+  k4FWCore Consumer does not apply. Unit test of the fit core:
+  `tests/test_gain_anchor_fit.cpp` (`ctest --test-dir build`). Driver:
+  `gaudi_jobs/calibration/run_anchor_calibration.py` (below).
 
 - **`PedestalMipCalibrator`** (`src/components/PedestalMipCalibrator.cpp`,
   `include/k4SiWEcalReco/PedestalMipCalib.h`) — computes pedestal (Gaussian
@@ -290,7 +313,7 @@ not reach farm jobs until it is added there too.
 
   Channels flagged `hit_ismasked` in the `ecal` tree (no MIP calibration) are
   dropped from `ECalHits` and every parallel collection at once, so the output
-  carries only calibrated hits and `EcalPidTransformer` recomputes the shower
+  carries only calibrated hits and `EcalShowerVariables` recomputes the shower
   variables on the filtered set. The branch is optional: pre-mask `ecal` files
   keep all hits.
 
@@ -299,7 +322,7 @@ not reach farm jobs until it is added there too.
   on the cleaned hit set. Disabled by a negative value (the default when run
   directly); `run_pid_batch.py` sets it to `0.5` in physics mode and disables it
   in `--validation` mode.
-- **`EcalPidTransformer`** (`src/components/EcalPidTransformer.cpp`) — one input
+- **`EcalShowerVariables`** (`src/components/EcalShowerVariables.cpp`) — one input
   `CalorimeterHitCollection` → one `Cluster`. The physics lives in
   `include/k4SiWEcalReco/EcalShowerVars.h` (a C++ port of
   `siwecal_validation/metrics.py`, the parity oracle). All derived variables go
@@ -426,7 +449,7 @@ python gaudi_jobs/calibration/run_calibration_batch.py \
 ```
 
 Output layout mirrors `MuonCalib_it2/{pedestals,mips}/th<N>/` under the
-output base (default `settings.yml calib_dir()/MuonCalib_gaudi`). A single
+output base (default `calibration/MuonCalib_new` in the repo; the official tables are `calib_dir()/MuonCalib` on EOS). A single
 run produces `Pedestal_<run>_<gain>gain.txt`/`MIP_pedestalsubmode1_<run>_
 <gain>gain.txt` (matching the individual per-run files already deployed);
 pooling more than one run produces
@@ -458,6 +481,25 @@ an `_assert_not_under()` guard that refuses to write inside a run's raw
 folder. `list_run_thresholds.py` is read-only (only opens `Run_Settings.txt`
 files, never touches raw binaries or calls `k4run`).
 
+### Anchor calibration driver: `gaudi_jobs/calibration/run_anchor_calibration.py`
+
+One `k4run` of `options/run_gain_anchor.py` per data-taking period, on the
+electron run the deployed anchors were fitted on (th210 eudaq 166, th220
+run 72, th230 run 12), with the th210 pedestals every run is reconstructed with
+(`--ped-th`). Writes `<calib-dir>/anchor/th<N>/gain_anchor_th<N>.txt` and, by
+default, `gain_anchor_fit_<run>_th<N>.root/.png` next to it. Never overwrites
+an existing anchor file without `--force`.
+
+```bash
+# the three periods, into a scratch folder to compare with the deployed ones
+python gaudi_jobs/calibration/run_anchor_calibration.py --all-periods \
+    --calib-dir /tmp/anchor_check --ped-dir /eos/experiment/drdcalo/siw-ecal/TB2026-06/Calib/MuonCalib
+
+# one period, traced on the occupancy of the saturated hits, into the folder the reco DAG reads
+python gaudi_jobs/calibration/run_anchor_calibration.py --th 210 --min-hitbits 12 --max-hitbits 24 \
+    --calib-dir /eos/experiment/drdcalo/siw-ecal/TB2026-06/Calib/MuonCalib --force
+```
+
 ### Full pipeline: raw2root → event building → PID
 
 `gaudi_jobs/run_full_pipeline_batch.py` (generic) and
@@ -474,7 +516,7 @@ binary to EDM4hep. Both are plain Python scripts (run with `python`, not
    file is gone and `run_raw2root.py` warns if handed more than one chunk.
 2. `options/run_event_builder.py` (`EcalEventBuilder`), chaining those chunks via
    `EVBLD_INPUT_FILES`.
-3. `options/run_pid.py` (`TopAlg=[EcalToEDM4hep, EcalPidTransformer]`) — a
+3. `options/run_pid.py` (`TopAlg=[EcalToEDM4hep, EcalShowerVariables]`) — a
    **separate** process, because these are `k4FWCore::Producer`/
    `Transformer` components that need `EvtMax` (the `ecal` tree's entry
    count) fixed *before* the process starts, and that count is only known
@@ -550,6 +592,7 @@ application or output-file naming):
 |---|---|---|
 | raw2root (ONE chunk per process) | `run_raw2root.py` | `RAW_FILES`, `RAW2ROOT_OUT`, `RAW2ROOT_RUN_SETTINGS_FILE`, `RAW2ROOT_DATA_LATEST_FIRST` (default 1) |
 | pedestal/MIP calibration | `run_pedestal_mip.py` | `CALIB_INPUT_FILES`, `CALIB_MODE`, `CALIB_GAIN`, `CALIB_OUTPUT_PEDESTAL_FILE`/`CALIB_OUTPUT_MIP_FILE` |
+| LG→HG anchor calibration | `run_gain_anchor.py` | `ANCHOR_INPUT_FILES`, `ANCHOR_PEDESTAL_FILE`, `ANCHOR_PEDESTAL_FILE_LOWGAIN`, `ANCHOR_OUTPUT_FILE`, `ANCHOR_DIAGNOSTICS_FILE`, `ANCHOR_MIN_HITBITS`/`ANCHOR_MAX_HITBITS` |
 | event building | `run_event_builder.py` | `EVBLD_INPUT`, `EVBLD_OUTPUT`, `EVBLD_PEDESTAL_FILE`, `EVBLD_MIP_FILE`, `EVBLD_PADMAP_DEFAULT`, `EVBLD_SLAB_Z_FILE` |
 | PID/EDM4hep | `run_pid.py` | `ECAL_FILE`, `ECAL_PID_OUT`, `ECAL_HIT_MIP_CUT` (`<0` disables), `ECAL_MIP_THRESHOLDS` (`""` = no variant blocks) |
 

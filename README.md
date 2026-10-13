@@ -68,7 +68,7 @@ runs for one run (and what the Condor DAG runs per run on the farm):
 |---|---|---|---|---|---|
 | **1** | **decode** | **one `k4run` per raw chunk**, in parallel, + a health check | `EcalRawDecoder` | `<run>_raw.bin_NNNN` (read-only) | `<converted-dir>/<run>/chunks/chunk_NNNN.root` (`siwecaldecoded` tree) |
 | **2** | **event building** | one `k4run` **chaining** all the chunks | `EcalEventBuilder` | the chunks from stage 1 | `Reconstruction/<run>/ecal_<run>.root` (`ecal` tree) |
-| **3** | **PID / EDM4hep** | a **second** `k4run` | `EcalToEDM4hep` (hit-MIP cut) + `EcalPidTransformer` (shower vars) | `ecal_<run>.root` | `ecal_<run>.edm4hep.root` |
+| **3** | **PID / EDM4hep** | a **second** `k4run` | `EcalToEDM4hep` (hit-MIP cut) + `EcalShowerVariables` (shower vars) | `ecal_<run>.root` | `ecal_<run>.edm4hep.root` |
 | **4** | **tracking** *(optional)* | a **third** `k4run`, run separately, per run, output swapped in place | `ACTSGeoSvc` + `ShowerTagger` + `SiPadMeasConverter` + `ACTSProtoTracker` (see `docs/acts_integration.md`) | `ecal_<run>.edm4hep.root` (its `ECalHits`) | the SAME `ecal_<run>.edm4hep.root`, now also carrying `ACTSTracks`/`EMShowers`/`SiPadMeasurements`/`SiPadShowerFlags` — no separate file |
 
 Two design points that are easy to miss:
@@ -154,7 +154,7 @@ default except total per-event energy > 0 (always enforced).
 >   disables it).
 > - **(B) `MipThresholds`** — env `ECAL_MIP_THRESHOLDS`, constant
 >   `siwecal_validation.vars_cache.MIP_CUT_THRESHOLDS`, Gaudi property
->   `EcalPidTransformer.MipThresholds`. A **list of extra thresholds** at
+>   `EcalShowerVariables.MipThresholds`. A **list of extra thresholds** at
 >   which the whole shower-variable block is **recomputed** and stored again
 >   under the prefixes `mip05_` / `mip1_`. This is what feeds the viewer's
 >   threshold slider; it does not change which hits survive.
@@ -662,7 +662,7 @@ off by default, and behaviour-changing. See
 for the algorithm and the full property table.
 
 That is also why PID runs as a **second** `k4run` process: `EcalToEDM4hep` /
-`EcalPidTransformer` *are* k4FWCore components that follow the event loop, so
+`EcalShowerVariables` *are* k4FWCore components that follow the event loop, so
 `run_pid.py` opens the `ecal` file, reads `GetEntries()`, and only then sets
 `EvtMax`.
 
