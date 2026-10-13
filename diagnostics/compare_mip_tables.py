@@ -4,7 +4,7 @@ Compare two sets of calibration tables (e.g. before and after the SCA column-ord
 MIP MPV and Landau width per channel, pedestal mean and width (RMS) per (channel, SCA), both gains.
 
     python diagnostics/compare_mip_tables.py --old calibration/MuonCalib_gaudi \
-        --new calibration/MuonCalib_gaudi_fixed --out calibration/MuonCalib_gaudi_fixed/compare [--th 210,220,230]
+        --new /eos/experiment/drdcalo/siw-ecal/TB2026-06/Calib/MuonCalib --out /eos/experiment/drdcalo/siw-ecal/TB2026-06/Calib/MuonCalib/compare [--th 210,220,230]
 
 MIP table: '#layer chip channel mpv empv widthmpv chi2ndf nentries' (empv <= 0 or mpv <= 0: no fit).
 Writes, per threshold and gain, mip_compare_th<N>_<gain>gain.png, and for all thresholds together

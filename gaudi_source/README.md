@@ -449,7 +449,7 @@ python gaudi_jobs/calibration/run_calibration_batch.py \
 ```
 
 Output layout mirrors `MuonCalib_it2/{pedestals,mips}/th<N>/` under the
-output base (default `settings.yml calib_dir()/MuonCalib_gaudi`). A single
+output base (default `calibration/MuonCalib_new` in the repo; the official tables are `calib_dir()/MuonCalib` on EOS). A single
 run produces `Pedestal_<run>_<gain>gain.txt`/`MIP_pedestalsubmode1_<run>_
 <gain>gain.txt` (matching the individual per-run files already deployed);
 pooling more than one run produces
@@ -493,11 +493,11 @@ an existing anchor file without `--force`.
 ```bash
 # the three periods, into a scratch folder to compare with the deployed ones
 python gaudi_jobs/calibration/run_anchor_calibration.py --all-periods \
-    --calib-dir /tmp/anchor_check --ped-dir calibration/MuonCalib_gaudi_fixed
+    --calib-dir /tmp/anchor_check --ped-dir /eos/experiment/drdcalo/siw-ecal/TB2026-06/Calib/MuonCalib
 
 # one period, traced on the occupancy of the saturated hits, into the folder the reco DAG reads
 python gaudi_jobs/calibration/run_anchor_calibration.py --th 210 --min-hitbits 12 --max-hitbits 24 \
-    --calib-dir calibration/MuonCalib_gaudi_fixed --force
+    --calib-dir /eos/experiment/drdcalo/siw-ecal/TB2026-06/Calib/MuonCalib --force
 ```
 
 ### Full pipeline: raw2root → event building → PID

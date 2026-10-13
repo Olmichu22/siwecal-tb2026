@@ -83,7 +83,7 @@ naming convention, fit-robustness tuning, `--diagnostics`).
 
 ```bash
 python gaudi_jobs/calibration/run_anchor_calibration.py --all-periods \
-    --calib-dir /tmp/anchor_check --ped-dir calibration/MuonCalib_gaudi_fixed
+    --calib-dir /tmp/anchor_check --ped-dir /eos/experiment/drdcalo/siw-ecal/TB2026-06/Calib/MuonCalib
 ```
 
 Measures the LG→HG anchor line (`k`, `c`) the event builder uses past the
@@ -92,7 +92,7 @@ high-gain switch, with `GainAnchorCalibrator`, and writes
 `generate_reco_dag.py --calib-dir` reads. Unlike pedestals and MIPs it needs
 an **electron** run per data-taking period (defaults: th210 eudaq 166, th220
 run 72, th230 run 12), read from the already-decoded chunks
-(`--converted-dir`, default `rundata_converted_fixed`). Pedestals come from
+(`--converted-dir`, default `rundata_converted_gaudi`). Pedestals come from
 `<ped-dir>/pedestals/th<ped-th>/` (default th210, the tables every run is
 reconstructed with). `--min-hitbits`/`--max-hitbits` restrict the fit to an
 occupancy window. An existing anchor file is only overwritten with `--force`.

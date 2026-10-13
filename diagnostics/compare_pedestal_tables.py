@@ -4,7 +4,7 @@ Compare two pedestal tables channel by channel and SCA by SCA (e.g. th210 before
 fix): mean, width (RMS of the Gaussian fit), per slab and per SCA, both gains.
 
     python diagnostics/compare_pedestal_tables.py --old calibration/MuonCalib_gaudi \
-        --new calibration/MuonCalib_gaudi_fixed --th 210 --out calibration/MuonCalib_gaudi_fixed/compare
+        --new /eos/experiment/drdcalo/siw-ecal/TB2026-06/Calib/MuonCalib --th 210 --out /eos/experiment/drdcalo/siw-ecal/TB2026-06/Calib/MuonCalib/compare
 
 Table format: '#layer chip channel' then (ped_mean, ped_error, ped_width) per SCA; ped_error <= 0 marks an
 unfitted SCA. Only (channel, SCA) cells valid in BOTH tables are compared.

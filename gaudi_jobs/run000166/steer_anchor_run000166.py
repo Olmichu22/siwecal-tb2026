@@ -1,7 +1,7 @@
 #
 # LG->HG anchor of the th210 period, measured on TB2026CERN_eudaq_run_000166 (99 GeV electrons) with
 # GainAnchorCalibrator -- the run and settings the deployed th210 anchor
-# (calibration/MuonCalib_gaudi_fixed/anchor/th210/gain_anchor_th210.txt) is produced with.
+# (/eos/experiment/drdcalo/siw-ecal/TB2026-06/Calib/MuonCalib/anchor/th210/gain_anchor_th210.txt) is produced with.
 #
 # Run it (from the repo root):
 #   source setup.sh
@@ -27,10 +27,10 @@ _RUN = "TB2026CERN_eudaq_run_000166"
 _HERE = os.path.dirname(os.path.abspath(__file__))
 REPO_ROOT = os.path.dirname(os.path.dirname(_HERE))
 CHUNKS = sorted(glob.glob(
-    f"/eos/experiment/drdcalo/siw-ecal/TB2026-06/Data/rundata_converted_fixed/{_RUN}/chunks/chunk_*.root"))[:60]
+    f"/eos/experiment/drdcalo/siw-ecal/TB2026-06/Data/rundata_converted_gaudi/{_RUN}/chunks/chunk_*.root"))[:60]
 if not CHUNKS:
     raise SystemExit(f"No decoded chunks for {_RUN}: python gaudi_jobs/decode_lcio_runs.py --runs 166")
-PED = os.path.join(REPO_ROOT, "calibration", "MuonCalib_gaudi_fixed", "pedestals", "th210")
+PED = os.path.join("/eos/experiment/drdcalo/siw-ecal/TB2026-06/Calib/MuonCalib", "pedestals", "th210")
 
 anchor = GainAnchorCalibrator(
     "GainAnchorCalibrator",

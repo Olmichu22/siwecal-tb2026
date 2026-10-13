@@ -34,7 +34,8 @@ REPO_ROOT = os.path.dirname(PACKAGE_DIR)
 # the repo root; mirror the keys documented in settings.example.yml.
 _DEFAULTS = {
     "data_dir": ["."],
-    "calib_dir": "./calibration",
+    # The deployed calibration lives on EOS: <calib_dir>/MuonCalib is the official table tree.
+    "calib_dir": "/eos/experiment/drdcalo/siw-ecal/TB2026-06/Calib",
     "geometry_dir": "./mappings",
     "configs_dir": "./configs/data",
     "output_dir": "./validation_output",

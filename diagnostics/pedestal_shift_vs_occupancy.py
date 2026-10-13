@@ -1,7 +1,7 @@
 """Does a SKIROC chip's baseline move when many of its channels fire?
 
 For every (acquisition, slab, chip, SCA) of the decoded chunks: the number of channels with a hit bit, and the
-high-gain ADC of the channels WITHOUT one minus their pedestal (th210 table of MuonCalib_gaudi_fixed, same SCA).
+high-gain ADC of the channels WITHOUT one minus their pedestal (th210 table of MuonCalib (EOS Calib/), same SCA).
 With no common-mode effect the residual is ~0 at every occupancy. A residual that goes negative with the number
 of fired channels is a baseline drop: in a busy chip every amplitude reads low, so hits lose energy and the
 smallest fall below the trigger threshold -- which the simulation (no such effect) does not have.
@@ -18,9 +18,9 @@ import numpy as np
 import uproot
 
 B = "/eos/experiment/drdcalo/siw-ecal/TB2026-06"
-CONV = f"{B}/Data/rundata_converted_fixed"
+CONV = f"{B}/Data/rundata_converted_gaudi"
 PED = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
-                   "calibration/MuonCalib_gaudi_fixed/pedestals/th210/Pedestal_TB2026CERN_run_000th210_highgain.txt")
+                   "/eos/experiment/drdcalo/siw-ecal/TB2026-06/Calib/MuonCalib/pedestals/th210/Pedestal_TB2026CERN_run_000th210_highgain.txt")
 OCC_BINS = [0, 1, 3, 6, 10, 15, 20, 30, 40, 65]
 
 

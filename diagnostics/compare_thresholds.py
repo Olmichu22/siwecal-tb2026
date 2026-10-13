@@ -1,10 +1,10 @@
 #!/usr/bin/env python
 """
 Compare the calibration tables of the three threshold sets (th210, th220, th230) with each other, from ONE table
-tree (e.g. the fixed-pairing MuonCalib_gaudi_fixed): are the pedestals and the MIPs the same across thresholds?
+tree (e.g. the fixed-pairing MuonCalib (EOS Calib/)): are the pedestals and the MIPs the same across thresholds?
 
-    python diagnostics/compare_thresholds.py --calib calibration/MuonCalib_gaudi_fixed \
-        --out calibration/MuonCalib_gaudi_fixed/compare [--tag fixed]
+    python diagnostics/compare_thresholds.py --calib /eos/experiment/drdcalo/siw-ecal/TB2026-06/Calib/MuonCalib \
+        --out /eos/experiment/drdcalo/siw-ecal/TB2026-06/Calib/MuonCalib/compare [--tag fixed]
 
 The preamplifier and the ADC do not know the trigger DAC, so the pedestal of a (channel, SCA) should only differ
 between sets by drift between the runs; the MIP MPV, fitted on hits that fired, is cut from the left by the

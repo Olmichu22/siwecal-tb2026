@@ -30,7 +30,7 @@ Examples::
 
     # one period, traced on the occupancy of the saturated hits only
     python gaudi_jobs/calibration/run_anchor_calibration.py --th 210 --min-hitbits 12 --max-hitbits 24 \\
-        --calib-dir calibration/MuonCalib_gaudi_fixed --force
+        --calib-dir /eos/experiment/drdcalo/siw-ecal/TB2026-06/Calib/MuonCalib --force
 
 An existing anchor file is never overwritten without --force.
 """
@@ -42,8 +42,11 @@ import sys
 
 _REPO = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
 _STEERING = os.path.join(_REPO, "gaudi_source", "options", "run_gain_anchor.py")
-_DEFAULT_CONVERTED_DIR = "/eos/experiment/drdcalo/siw-ecal/TB2026-06/Data/rundata_converted_fixed"
-_DEFAULT_CALIB_DIR = os.path.join(_REPO, "calibration", "MuonCalib_gaudi_fixed")
+_DEFAULT_CONVERTED_DIR = "/eos/experiment/drdcalo/siw-ecal/TB2026-06/Data/rundata_converted_gaudi"
+# The official tables on EOS (settings.yml calib_dir()/MuonCalib).
+sys.path.insert(0, _REPO)
+from siwecal_common import paths  # noqa: E402
+_DEFAULT_CALIB_DIR = os.path.join(paths.calib_dir(), "MuonCalib")
 
 # Electron run each data-taking period's anchor is measured on (the ones the deployed anchors used).
 PERIOD_RUNS = {

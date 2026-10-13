@@ -3,8 +3,8 @@
 # GainAnchorCalibrator component.
 #
 #   ANCHOR_INPUT_FILES=/path/chunks/chunk_0000.root,/path/chunks/chunk_0001.root \
-#   ANCHOR_PEDESTAL_FILE=calibration/MuonCalib_gaudi_fixed/pedestals/th210/Pedestal_TB2026CERN_run_000th210_highgain.txt \
-#   ANCHOR_PEDESTAL_FILE_LOWGAIN=calibration/MuonCalib_gaudi_fixed/pedestals/th210/Pedestal_TB2026CERN_run_000th210_lowgain.txt \
+#   ANCHOR_PEDESTAL_FILE=/eos/experiment/drdcalo/siw-ecal/TB2026-06/Calib/MuonCalib/pedestals/th210/Pedestal_TB2026CERN_run_000th210_highgain.txt \
+#   ANCHOR_PEDESTAL_FILE_LOWGAIN=/eos/experiment/drdcalo/siw-ecal/TB2026-06/Calib/MuonCalib/pedestals/th210/Pedestal_TB2026CERN_run_000th210_lowgain.txt \
 #   ANCHOR_OUTPUT_FILE=/path/anchor/th210/gain_anchor_th210.txt \
 #       k4run gaudi_source/options/run_gain_anchor.py
 #

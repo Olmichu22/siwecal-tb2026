@@ -2,7 +2,7 @@
 
 The digitised simulation (final_v5) has 1.03x the data's hits at 20 GeV and 1.10x at 74 GeV (th210 scan,
 shower-like events). If that is a readout problem -- SCAs, the BCID window, the chip-noise veto -- it should leave
-fingerprints the simulation cannot have. This collects, per run of the th210 scan, data (Reconstructed_final) and
+fingerprints the simulation cannot have. This collects, per run of the th210 scan, data (Reconstruction) and
 digitised simulation side by side:
 
   1. hits per event per layer and per ring around the shower axis (sim / data): a deficit in the dense core
@@ -24,7 +24,7 @@ import uproot
 import awkward as ak
 
 B = "/eos/experiment/drdcalo/siw-ecal/TB2026-06"
-RECO = f"{B}/Reconstructed_final"
+RECO = f"{B}/Reconstruction"
 SIM = f"{B}/Simulation/Processed/adc_vs_tb/final_v5/trees"
 SCAN = [("7.5", "e293", "17_-50"), ("10", "e292", "19_-51"), ("20", "e291", "26_-52"), ("34", "e288", "27_-53"),
         ("52", "e287", "24_-51"), ("74", "e286", "22_-49")]

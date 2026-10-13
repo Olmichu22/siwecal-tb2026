@@ -30,14 +30,17 @@
  * per-event EDM4hep collection. All work happens in initialize(), same
  * self-contained-I/O pattern as EcalToEDM4hep/EcalRawDecoder.
  */
+#include "k4SiWEcalReco/CalibrationTables.h"
 #include "k4SiWEcalReco/PadMapGeometry.h"
 #include "k4SiWEcalReco/PedestalMipCalib.h"
 #include "k4SiWEcalReco/SlbFrameDecoder.h"  // kSlbDepth, kSkirocsPerAsu, kScasInSkiroc, kChannelsInSkiroc
+#include "k4SiWEcalReco/TriggerTurnOn.h"
 
 #include "Gaudi/Algorithm.h"
 #include "Gaudi/Property.h"
 
 #include "TFile.h"
+#include "TH1D.h"
 #include "TH1F.h"
 #include "TH2F.h"
 #include "TString.h"
@@ -100,6 +103,19 @@ struct PedestalMipCalibrator final : Gaudi::Algorithm {
       }
       return fitPedestalFromHistograms(highGain);
     }
+    if (m_mode.value() == "FitTrigger") {
+      if (m_inputHistogramFile.value().empty() || m_inputPedestalFile.value().empty() ||
+          m_inputMipFile.value().empty()) {
+        return error() << "FitTrigger mode requires InputHistogramFile, InputPedestalFile and InputMipFile"
+                       << endmsg,
+               StatusCode::FAILURE;
+      }
+      if (m_outputTriggerChipFile.value().empty() || m_outputTriggerChannelFile.value().empty()) {
+        return error() << "FitTrigger mode requires OutputTriggerChipFile and OutputTriggerChannelFile" << endmsg,
+               StatusCode::FAILURE;
+      }
+      return fitTriggerFromHistograms();
+    }
     if (m_mode.value() == "FitMip") {
       if (m_inputHistogramFile.value().empty()) {
         return error() << "FitMip mode requires InputHistogramFile" << endmsg, StatusCode::FAILURE;
@@ -116,7 +132,7 @@ struct PedestalMipCalibrator final : Gaudi::Algorithm {
     if (m_mode.value() == "Mip") {
       return runMip(highGain);
     }
-    return error() << "Unknown Mode '" << m_mode.value() << "' (expected Pedestal|Mip|Fill|FitPedestal|FitMip)"
+    return error() << "Unknown Mode '" << m_mode.value() << "' (expected Pedestal|Mip|Fill|FitPedestal|FitMip|FitTrigger)"
                     << endmsg,
            StatusCode::FAILURE;
   }
@@ -253,8 +269,39 @@ struct PedestalMipCalibrator final : Gaudi::Algorithm {
       "only non-empty histograms are written), no fit"};
   Gaudi::Property<std::string> m_inputHistogramFile{
       this, "InputHistogramFile", "",
-      "Mode=FitPedestal|FitMip: input ROOT file with a (possibly hadd-merged) histogram grid written by "
+      "Mode=FitPedestal|FitMip|FitTrigger: input ROOT file with a (possibly hadd-merged) histogram grid written by "
       "Mode=Fill, read instead of building histograms from InputFiles trees"};
+
+  // Mode=FitTrigger: the trigger turn-on per channel, chip and slab from the Fill grids (see TriggerTurnOn.h).
+  Gaudi::Property<std::string> m_inputPedestalFile{
+      this, "InputPedestalFile", "",
+      "Mode=FitTrigger: high-gain pedestal table of the same threshold set (per-SCA pedestal subtraction)"};
+  Gaudi::Property<std::string> m_inputMipFile{
+      this, "InputMipFile", "",
+      "Mode=FitTrigger: high-gain MIP table of the same set; its masked channels (mpv <= 0, or masked in the "
+      "pedestal table) stay out of every sum and get their chip's turn-on"};
+  Gaudi::Property<std::string> m_outputTriggerChipFile{
+      this, "OutputTriggerChipFile", "",
+      "Mode=FitTrigger: '#layer chip mu_adc sigma_adc plateau npass ntotal status' (status 0 = own fit, "
+      "1 = slab's values, 2 = all-slab values)"};
+  Gaudi::Property<std::string> m_outputTriggerChannelFile{
+      this, "OutputTriggerChannelFile", "",
+      "Mode=FitTrigger: '#layer chip channel mu_adc sigma_adc plateau npass ntotal status' (status 0 = own mu "
+      "with the chip's sigma and plateau, 1 = chip's values, 3 = masked: chip's values)"};
+  Gaudi::Property<std::string> m_outputTriggerSlabFile{
+      this, "OutputTriggerSlabFile", "",
+      "Mode=FitTrigger (optional): '#layer mu_adc sigma_adc plateau npass ntotal status' (status 0 = own fit, "
+      "2 = all-slab values)"};
+  Gaudi::Property<double> m_triggerMinPassChip{
+      this, "TriggerMinPassChip", 300.,
+      "Mode=FitTrigger: hit-bit readouts a chip (or slab) needs in the fit range for a fit of its own"};
+  Gaudi::Property<double> m_triggerMinPassChannel{
+      this, "TriggerMinPassChannel", 30.,
+      "Mode=FitTrigger: hit-bit readouts a channel needs in the fit range for a threshold of its own"};
+  Gaudi::Property<double> m_triggerMinTurnOnChannel{
+      this, "TriggerMinTurnOnChannel", 30.,
+      "Mode=FitTrigger: readouts a channel needs inside its chip's turn-on (mu +- 2 sigma), where mu is "
+      "actually measured, for a threshold of its own"};
 
  private:
   // Bound branch buffers for one siwecaldecoded tree, matching the layout
@@ -1145,6 +1192,226 @@ struct PedestalMipCalibrator final : Gaudi::Algorithm {
     auto mipHist = readHistogramGrid(*fin, highGain ? "mip_high" : "mip_low", kMipNBins, kMipLo, kMipHi);
     fin->Close();
     return writeMipTable(pedHist, mipHist, highGain);
+  }
+
+  // Mode=FitTrigger: the trigger turn-on from a merged Fill file. Per channel,
+  // ped_high (hit bit 0) and mip_high (hit bit 1) of every SCA are moved onto
+  // one axis, ADC above that SCA's pedestal; the efficiency is mip/(ped+mip).
+  // Fits: all slabs, each slab, each chip (mu, sigma, plateau free) and each
+  // channel (mu free, sigma and plateau its chip's). A cell without the
+  // statistics for its own fit takes the level above (channel -> chip -> slab
+  // -> all slabs), recorded in the status column. Masked channels stay out of
+  // the sums. Only the high gain: the trigger is the fast shaper's
+  // hitbit_high.
+  StatusCode fitTriggerFromHistograms() {
+    using k4siwecal::kTurnOnHi;
+    using k4siwecal::kTurnOnLo;
+    using k4siwecal::kTurnOnNBins;
+    using k4siwecal::TurnOnFit;
+
+    bool ok = true;
+    std::string err;
+    const auto tables = k4siwecal::CalibrationTables::fromFiles(m_inputPedestalFile.value(),
+                                                                m_inputMipFile.value(), 250., 1., ok, err);
+    if (!ok) return error() << "FitTrigger: " << err << endmsg, StatusCode::FAILURE;
+
+    std::unique_ptr<TFile> fin(TFile::Open(m_inputHistogramFile.value().c_str(), "READ"));
+    if (!fin || fin->IsZombie()) {
+      return error() << "Cannot open input histogram file: " << m_inputHistogramFile.value() << endmsg,
+             StatusCode::FAILURE;
+    }
+    auto pedHist = readHistogramGrid(*fin, "ped_high", kPedNBins, kPedLo, kPedHi);
+    auto mipHist = readHistogramGrid(*fin, "mip_high", kMipNBins, kMipLo, kMipHi);
+    fin->Close();
+
+    auto newHist = [](const std::string& name) {
+      auto h = std::make_unique<TH1D>(name.c_str(), "", kTurnOnNBins, kTurnOnLo, kTurnOnHi);
+      h->SetDirectory(nullptr);
+      return h;
+    };
+    const int nChip = kSlbDepth * kSkirocsPerAsu;
+    const int nChan = nChip * kChannelsInSkiroc;
+    std::vector<std::unique_ptr<TH1D>> chPass(nChan), chTot(nChan), cPass(nChip), cTot(nChip),
+        sPass(kSlbDepth), sTot(kSlbDepth);
+    std::vector<char> masked(nChan, 0);
+    auto allPass = newHist("all_pass"), allTot = newHist("all_tot");
+    for (int s = 0; s < kSlbDepth; ++s) {
+      sPass[s] = newHist(Form("s%d_pass", s));
+      sTot[s] = newHist(Form("s%d_tot", s));
+    }
+    for (int s = 0; s < kSlbDepth; ++s) {
+      for (int c = 0; c < kSkirocsPerAsu; ++c) {
+        const int ic = s * kSkirocsPerAsu + c;
+        cPass[ic] = newHist(Form("s%d_c%d_pass", s, c));
+        cTot[ic] = newHist(Form("s%d_c%d_tot", s, c));
+        for (int ch = 0; ch < kChannelsInSkiroc; ++ch) {
+          const int ich = ic * kChannelsInSkiroc + ch;
+          chPass[ich] = newHist(Form("s%d_c%d_ch%d_pass", s, c, ch));
+          chTot[ich] = newHist(Form("s%d_c%d_ch%d_tot", s, c, ch));
+          if (tables.isMasked(s, c, ch)) {
+            masked[ich] = 1;
+            continue;
+          }
+          for (int sca = 0; sca < kScasInSkiroc; ++sca) {
+            const double ped = tables.pedestal(s, c, ch, sca);
+            const auto idx = histIndex(s, c, ch, sca);
+            const TH1F& hp = *pedHist[idx];
+            const TH1F& hm = *mipHist[idx];
+            for (int b = 1; b <= hp.GetNbinsX(); ++b) {
+              const double w = hp.GetBinContent(b);
+              if (w > 0.) chTot[ich]->Fill(hp.GetBinCenter(b) - ped, w);
+            }
+            for (int b = 1; b <= hm.GetNbinsX(); ++b) {
+              const double w = hm.GetBinContent(b);
+              if (w <= 0.) continue;
+              chPass[ich]->Fill(hm.GetBinCenter(b) - ped, w);
+              chTot[ich]->Fill(hm.GetBinCenter(b) - ped, w);
+            }
+          }
+          cPass[ic]->Add(chPass[ich].get());
+          cTot[ic]->Add(chTot[ich].get());
+        }
+        sPass[s]->Add(cPass[ic].get());
+        sTot[s]->Add(cTot[ic].get());
+      }
+      allPass->Add(sPass[s].get());
+      allTot->Add(sTot[s].get());
+    }
+    pedHist.clear();
+    mipHist.clear();
+
+    // DiagnosticsFile: the summed turn-on histograms (all slabs, per slab, per chip), written before any fit so
+    // a fit that misbehaves can be looked at offline.
+    if (!m_diagnosticsFile.value().empty()) {
+      std::unique_ptr<TFile> fd(TFile::Open(m_diagnosticsFile.value().c_str(), "RECREATE"));
+      if (fd && !fd->IsZombie()) {
+        fd->cd();
+        allPass->Write();
+        allTot->Write();
+        for (int s = 0; s < kSlbDepth; ++s) {
+          sPass[s]->Write();
+          sTot[s]->Write();
+        }
+        for (int ic = 0; ic < nChip; ++ic) {
+          if (cTot[ic]->GetEntries() > 0) {
+            cPass[ic]->Write();
+            cTot[ic]->Write();
+          }
+        }
+        fd->Close();
+      } else {
+        warning() << "FitTrigger: cannot write diagnostics file " << m_diagnosticsFile.value() << endmsg;
+      }
+    }
+
+    const double minChip = m_triggerMinPassChip.value();
+    const TurnOnFit all = k4siwecal::fitTurnOn(*allPass, *allTot, minChip, minChip);
+    if (all.status != 0) {
+      return error() << "FitTrigger: the all-slab turn-on cannot be fitted (" << all.nPass << " hit-bit readouts)"
+                     << endmsg,
+             StatusCode::FAILURE;
+    }
+    info() << "FitTrigger: all slabs mu = " << all.mu << " ADC, sigma = " << all.sigma
+           << ", plateau = " << all.plateau << endmsg;
+
+    std::vector<TurnOnFit> slabFit(kSlbDepth), chipFit(nChip), chanFit(nChan);
+    std::vector<int> slabStatus(kSlbDepth), chipStatus(nChip), chanStatus(nChan);
+    auto take = [](TurnOnFit& dst, const TurnOnFit& src) {
+      dst.mu = src.mu;
+      dst.sigma = src.sigma;
+      dst.plateau = src.plateau;
+    };
+    for (int s = 0; s < kSlbDepth; ++s) {
+      slabFit[s] = k4siwecal::fitTurnOn(*sPass[s], *sTot[s], minChip, minChip);
+      slabStatus[s] = slabFit[s].status == 0 ? 0 : 2;
+      if (slabStatus[s] != 0) take(slabFit[s], all);
+    }
+    int nChipOwn = 0, nChanOwn = 0, nChanMasked = 0;
+    for (int ic = 0; ic < nChip; ++ic) {
+      const int s = ic / kSkirocsPerAsu;
+      chipFit[ic] = k4siwecal::fitTurnOn(*cPass[ic], *cTot[ic], minChip, minChip);
+      if (chipFit[ic].status == 0) {
+        chipStatus[ic] = 0;
+        ++nChipOwn;
+      } else {
+        chipStatus[ic] = slabStatus[s] == 0 ? 1 : 2;
+        take(chipFit[ic], slabFit[s]);
+      }
+      const TurnOnFit& chip = chipFit[ic];
+      for (int ch = 0; ch < kChannelsInSkiroc; ++ch) {
+        const int ich = ic * kChannelsInSkiroc + ch;
+        TurnOnFit own;
+        if (!masked[ich]) {
+          // Enough readouts where mu is actually measured: inside the chip's turn-on.
+          const double inside = chTot[ich]->Integral(chTot[ich]->FindBin(chip.mu - 2. * chip.sigma),
+                                                     chTot[ich]->FindBin(chip.mu + 2. * chip.sigma));
+          if (inside >= m_triggerMinTurnOnChannel.value()) {
+            own = k4siwecal::fitTurnOn(*chPass[ich], *chTot[ich], m_triggerMinPassChannel.value(), 0.,
+                                       chip.sigma, chip.plateau);
+          } else {
+            own.nPass = chPass[ich]->Integral();
+            own.nTotal = chTot[ich]->Integral();
+          }
+        }
+        chanFit[ich] = own;
+        if (masked[ich]) {
+          chanStatus[ich] = 3;
+          ++nChanMasked;
+          take(chanFit[ich], chip);
+        } else if (own.status == 0) {
+          chanStatus[ich] = 0;
+          ++nChanOwn;
+          chanFit[ich].sigma = chip.sigma;
+          chanFit[ich].plateau = chip.plateau;
+        } else {
+          chanStatus[ich] = 1;
+          take(chanFit[ich], chip);
+        }
+      }
+    }
+
+    auto open = [this](const std::string& path, std::ofstream& out) {
+      out.open(path);
+      if (!out) error() << "FitTrigger: cannot write " << path << endmsg;
+      return static_cast<bool>(out);
+    };
+    auto row = [](std::ofstream& out, const TurnOnFit& f, int status) {
+      out << Form(" %.3f %.3f %.4f %.0f %.0f %d\n", f.mu, f.sigma, f.plateau, f.nPass, f.nTotal, status);
+    };
+    const std::string src = " (PedestalMipCalibrator Mode=FitTrigger, " + m_inputHistogramFile.value() + ")";
+    std::ofstream fc, fch;
+    if (!open(m_outputTriggerChipFile.value(), fc) || !open(m_outputTriggerChannelFile.value(), fch)) {
+      return StatusCode::FAILURE;
+    }
+    fc << "#trigger turn-on per chip, ADC above the pedestal" << src << "\n"
+       << "#P(x) = plateau * 0.5 * (1 + erf((x - mu) / (sqrt(2) * sigma))); status 0 own fit, 1 slab's, "
+          "2 all slabs'\n#layer chip mu_adc sigma_adc plateau npass ntotal status\n";
+    fch << "#trigger turn-on per channel, ADC above the pedestal" << src << "\n"
+        << "#status 0 own mu (sigma, plateau of the chip), 1 chip's values, 3 masked (chip's values)\n"
+        << "#layer chip channel mu_adc sigma_adc plateau npass ntotal status\n";
+    for (int ic = 0; ic < nChip; ++ic) {
+      fc << ic / kSkirocsPerAsu << " " << ic % kSkirocsPerAsu;
+      row(fc, chipFit[ic], chipStatus[ic]);
+      for (int ch = 0; ch < kChannelsInSkiroc; ++ch) {
+        const int ich = ic * kChannelsInSkiroc + ch;
+        fch << ic / kSkirocsPerAsu << " " << ic % kSkirocsPerAsu << " " << ch;
+        row(fch, chanFit[ich], chanStatus[ich]);
+      }
+    }
+    if (!m_outputTriggerSlabFile.value().empty()) {
+      std::ofstream fs;
+      if (!open(m_outputTriggerSlabFile.value(), fs)) return StatusCode::FAILURE;
+      fs << "#trigger turn-on per slab, ADC above the pedestal" << src << "\n"
+         << "#status 0 own fit, 2 all slabs'\n#layer mu_adc sigma_adc plateau npass ntotal status\n";
+      for (int s = 0; s < kSlbDepth; ++s) {
+        fs << s;
+        row(fs, slabFit[s], slabStatus[s]);
+      }
+    }
+    info() << "FitTrigger: " << nChipOwn << "/" << nChip << " chips with a fit of their own, " << nChanOwn << "/"
+           << nChan - nChanMasked << " unmasked channels with their own threshold (" << nChanMasked
+           << " masked)" << endmsg;
+    return StatusCode::SUCCESS;
   }
 };
 

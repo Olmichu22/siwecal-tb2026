@@ -37,7 +37,7 @@ python gaudi_jobs/decode_lcio_runs.py --runs 166      # EUDAQ/LCIO run
 
 Run 166 is also the electron run the th210 anchor line (`k`, `c`) is measured on.
 `steer_anchor_run000166.py` runs `GainAnchorCalibrator` on its chunks with the
-`MuonCalib_gaudi_fixed` th210 pedestals:
+`MuonCalib (EOS Calib/)` th210 pedestals:
 
 ```bash
 k4run gaudi_jobs/run000166/steer_anchor_run000166.py

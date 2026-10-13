@@ -1,6 +1,6 @@
 """Collect the chip baseline (ADC - pedestal of the channels without a hit bit) per chip-SCA, for the common-mode study.
 
-For every (acquisition, slab, chip, SCA) of the decoded chunks (Data/rundata_converted_fixed, fixed SCA pairing):
+For every (acquisition, slab, chip, SCA) of the decoded chunks (Data/rundata_converted_gaudi, fixed SCA pairing):
 
   nbits   channels with hitbit_high
   q       charge of the fired channels, from the LOW gain (does not saturate), in high-gain ADC:
@@ -12,7 +12,7 @@ For every (acquisition, slab, chip, SCA) of the decoded chunks (Data/rundata_con
 and per-channel residual histograms (high gain, 0.25 ADC bins) by nbits bin and near/far, so that the baseline can be
 read from the MODE (the medians are pulled up by real signal below the trigger threshold).
 
-Pedestals: MuonCalib_gaudi_fixed th210, both gains. Slab 12 (COB) uses its own pad map.
+Pedestals: MuonCalib (EOS Calib/) th210, both gains. Slab 12 (COB) uses its own pad map.
 
     python diagnostics/cm_baseline_collect.py <outdir> --run e286 [--chunks 10-12] [--max-acq N]
 """
@@ -23,9 +23,9 @@ import numpy as np
 import uproot
 
 B = "/eos/experiment/drdcalo/siw-ecal/TB2026-06"
-CONV = f"{B}/Data/rundata_converted_fixed"
+CONV = f"{B}/Data/rundata_converted_gaudi"
 REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-CAL = f"{REPO}/calibration/MuonCalib_gaudi_fixed/pedestals/th210"
+CAL = f"/eos/experiment/drdcalo/siw-ecal/TB2026-06/Calib/MuonCalib/pedestals/th210"
 MAP = f"{REPO}/mappings/fev10_rotate_chip_channel_x_y_mapping.txt"
 MAP_COB = f"{REPO}/mappings/fev11_cob_good_rotate_chip_channel_x_y_mapping.txt"
 K_ANCHOR = 0.0924

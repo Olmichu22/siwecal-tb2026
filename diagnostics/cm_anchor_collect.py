@@ -6,7 +6,7 @@ baseline drops differently in the two gains when the chip is busy, c moves with 
 saturated hits of busy chips -- most of the saturated hits -- is biased by delta_c / k (x10.8).
 
 Collects every fired channel (hitbit_high) with an unsaturated high gain: (adc_high - ped_hg, adc_low - ped_lg,
-hit bits in the chip-SCA), th210 pedestals of MuonCalib_gaudi_fixed. Also the per-chip-SCA far baselines of both
+hit bits in the chip-SCA), th210 pedestals of MuonCalib (EOS Calib/). Also the per-chip-SCA far baselines of both
 gains are in cm_baseline_collect.py.
 
     python diagnostics/cm_anchor_collect.py <outdir> --run e286 [--chunks 10-15] [--max-acq 1500]

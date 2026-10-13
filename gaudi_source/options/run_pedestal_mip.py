@@ -28,6 +28,17 @@
 #   CALIB_MODE=FitPedestal|FitMip: reads CALIB_INPUT_HISTOGRAM_FILE (a
 #     hadd-merged Fill output) instead of CALIB_INPUT_FILES, and runs the
 #     same fit/robustness/diagnostics code as Mode=Pedestal|Mip.
+#   CALIB_MODE=FitTrigger: the trigger turn-on per channel/chip/slab from the
+#     same merged Fill output, with the set's high-gain pedestal and MIP tables
+#     (CALIB_INPUT_PEDESTAL_FILE, CALIB_INPUT_MIP_FILE), written to
+#     CALIB_OUTPUT_TRIGGER_{CHIP,CHANNEL,SLAB}_FILE (see TriggerTurnOn.h):
+#
+#   CALIB_MODE=FitTrigger CALIB_INPUT_HISTOGRAM_FILE=merged_th210.root \
+#   CALIB_INPUT_PEDESTAL_FILE=.../pedestals/th210/Pedestal_..._highgain.txt \
+#   CALIB_INPUT_MIP_FILE=.../mips/th210/MIP_..._highgain.txt \
+#   CALIB_OUTPUT_TRIGGER_CHIP_FILE=.../trigger/th210/Trigger_chip_highgain.txt \
+#   CALIB_OUTPUT_TRIGGER_CHANNEL_FILE=.../trigger/th210/Trigger_channel_highgain.txt \
+#       k4run gaudi_source/options/run_pedestal_mip.py
 #
 # All work happens in PedestalMipCalibrator::initialize(); EvtMax=1 is enough
 # since execute() is a no-op (this is a global reduction over an entire run,
@@ -45,8 +56,8 @@ from k4FWCore import ApplicationMgr
 _output_level = getattr(_gaudi_cfg, os.environ.get("CALIB_OUTPUT_LEVEL", "WARNING"), _gaudi_cfg.WARNING)
 
 mode = os.environ.get("CALIB_MODE", "Pedestal")
-if mode not in ("Pedestal", "Mip", "Fill", "FitPedestal", "FitMip"):
-    raise SystemExit(f"CALIB_MODE must be one of Pedestal|Mip|Fill|FitPedestal|FitMip, got: {mode}")
+if mode not in ("Pedestal", "Mip", "Fill", "FitPedestal", "FitMip", "FitTrigger"):
+    raise SystemExit(f"CALIB_MODE must be one of Pedestal|Mip|Fill|FitPedestal|FitMip|FitTrigger, got: {mode}")
 
 input_files_raw = os.environ.get("CALIB_INPUT_FILES", "")
 if mode in ("Pedestal", "Mip", "Fill") and not input_files_raw:
@@ -97,6 +108,14 @@ calib = PedestalMipCalibrator(
     DiagnosticsFile=os.environ.get("CALIB_DIAGNOSTICS_FILE", ""),
     OutputHistogramFile=os.environ.get("CALIB_OUTPUT_HISTOGRAM_FILE", ""),
     InputHistogramFile=os.environ.get("CALIB_INPUT_HISTOGRAM_FILE", ""),
+    InputPedestalFile=os.environ.get("CALIB_INPUT_PEDESTAL_FILE", ""),
+    InputMipFile=os.environ.get("CALIB_INPUT_MIP_FILE", ""),
+    OutputTriggerChipFile=os.environ.get("CALIB_OUTPUT_TRIGGER_CHIP_FILE", ""),
+    OutputTriggerChannelFile=os.environ.get("CALIB_OUTPUT_TRIGGER_CHANNEL_FILE", ""),
+    OutputTriggerSlabFile=os.environ.get("CALIB_OUTPUT_TRIGGER_SLAB_FILE", ""),
+    TriggerMinPassChip=float(os.environ.get("CALIB_TRIGGER_MIN_PASS_CHIP", "300")),
+    TriggerMinPassChannel=float(os.environ.get("CALIB_TRIGGER_MIN_PASS_CHANNEL", "30")),
+    TriggerMinTurnOnChannel=float(os.environ.get("CALIB_TRIGGER_MIN_TURNON_CHANNEL", "30")),
 )
 
 ApplicationMgr(TopAlg=[calib],
