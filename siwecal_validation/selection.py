@@ -37,6 +37,8 @@ _CUT_SPEC = (
     ("moliere_min",        "moliere_max",        "mol",    "moliere"),
     ("transverse_rms_min", "transverse_rms_max", "trms",   "transverse_rms"),
     ("bar_r_min",          "bar_r_max",          "barR",   "bar_r"),
+    # Lateral containment: distance of (bar_x, bar_y) to the nearest active edge.
+    ("border_min",         "border_max",         "border", "barxy_min_border_distance"),
     ("shower_start_min",   "shower_start_max",   "shStart", "shower_start"),
     ("shower_max_min",     "shower_max_max",     "shMax",  "shower_max"),
     ("shower_end_min",     "shower_end_max",     "shEnd",  "shower_end"),
@@ -72,6 +74,8 @@ class CutSet:
     transverse_rms_max: Optional[float] = None
     bar_r_min: Optional[float] = None
     bar_r_max: Optional[float] = None
+    border_min: Optional[float] = None
+    border_max: Optional[float] = None
     shower_start_min: Optional[float] = None
     shower_start_max: Optional[float] = None
     shower_max_min: Optional[float] = None

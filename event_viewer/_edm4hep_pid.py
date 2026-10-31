@@ -42,7 +42,8 @@ SCALAR_NAMES = (
     # pre-existing scalar has to stay put. Mirrors scalarNames() in
     # k4SiWEcalReco/EcalShowerVars.h, which is the source of truth.
     "shower_onset", "n_layers_before_onset",
-    "fractal_dimension")
+    "fractal_dimension",
+    "barxy_min_border_distance")
 PER_LAYER_NAMES = ("hits_per_layer", "energy_per_layer", "weighte_per_layer")
 _MIP_PREFIX = {0.5: "mip05", 1.0: "mip1"}
 

@@ -60,6 +60,7 @@ def _append_scalar_metrics(ecols, slab, energy, x, y,
         ecols["shower_onset"].append(NAN)
         ecols["n_layers_before_onset"].append(NAN)
         ecols["fractal_dimension"].append(NAN)
+        ecols["barxy_min_border_distance"].append(NAN)
         return
 
     hits_layer = metrics.hits_per_layer(s, n_layers)
@@ -108,6 +109,8 @@ def _append_scalar_metrics(ecols, slab, energy, x, y,
     ecols["shower_onset"].append(sh.onset)
     ecols["n_layers_before_onset"].append(sh.n_layers_before_onset)
     ecols["fractal_dimension"].append(metrics.fractal_dimension(s[pos], fx[pos], fy[pos]))
+    ecols["barxy_min_border_distance"].append(
+        metrics.min_border_distance(bx, by) if pw.sum() > 0 else NAN)
 
 
 @dataclass
@@ -148,6 +151,8 @@ class EventData:
                                        # track. ~0-1 for an electron, several for
                                        # a pion that traverses before interacting
     fractal_dimension: np.ndarray   # shower fractal dimension (CALICE, Ruan et al.)
+    barxy_min_border_distance: np.ndarray  # min distance (bar_x, bar_y) -> active
+                                           # edge [mm]; the lateral-containment handle
 
     # --- provenance (EDM4hep path only) ------------------------------------
     #: Original podio frame index of each event (set by :meth:`from_edm4hep`;
@@ -301,6 +306,8 @@ class EventData:
             cols["n_layers_before_onset"].append(sh.n_layers_before_onset)
             cols["fractal_dimension"].append(
                 metrics.fractal_dimension(slab[pos], px, py))
+            cols["barxy_min_border_distance"].append(
+                metrics.min_border_distance(bx, by) if pw.sum() > 0 else NAN)
 
             # --- extra MIP-threshold metrics (same pass, filtered hits) ---
             for mip_thr, ecols in extra_cols.items():
@@ -369,7 +376,7 @@ class EventData:
                          and f.name not in cls._PER_LAYER_FIELDS]
         arrays = {}
         for name in scalar_fields:
-            if name == "fractal_dimension" and name not in cols:
+            if name in ("fractal_dimension", "barxy_min_border_distance") and name not in cols:
                 # PID files written before the variable existed.
                 arrays[name] = np.full(int(valid.sum()), np.nan)
                 continue

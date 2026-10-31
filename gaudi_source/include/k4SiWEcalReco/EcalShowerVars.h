@@ -43,6 +43,10 @@ struct ShowerThresholds {
   float core_radius_mm = 30.0f;   ///< radius around (bar_x,bar_y) hits must fall within
   int onset_min_nhit = 4;         ///< core hits in a layer for that layer to be "dense"
   int onset_min_consecutive = 2;  ///< consecutive dense layers that declare the onset
+  // barxy_min_border_distance: half-size of the active area, outer pad centre
+  // (86.325 mm) + half a 5.53 mm pad.
+  float active_half_x_mm = 89.09f;
+  float active_half_y_mm = 89.09f;
 };
 
 /// One event's worth of derived variables (mirrors EventData fields).
@@ -72,6 +76,7 @@ struct EventVars {
   float shower_onset = NANF;           // conversion layer: first of the dense run
   float n_layers_before_onset = NANF;  // hit layers ahead of it (the pre-shower track)
   float fractal_dimension = NANF;      // shower fractal dimension (see fractalDimension())
+  float barxy_min_border_distance = NANF;  // min distance (bar_x, bar_y) -> active edge [mm]
   // per-layer profiles (length n_layers)
   std::vector<float> hits_per_layer;
   std::vector<float> energy_per_layer;
@@ -90,7 +95,9 @@ inline const std::vector<std::string>& scalarNames() {
       // older layout would silently read the wrong column.
       "shower_onset", "n_layers_before_onset",
       // Appended after the onset pair for the same reason.
-      "fractal_dimension"};
+      "fractal_dimension",
+      // Appended after fractal_dimension for the same reason.
+      "barxy_min_border_distance"};
   return names;
 }
 
@@ -349,6 +356,11 @@ inline EventVars computeEventVars(const std::vector<int>& slab,
   v.bar_x = static_cast<float>(bdx);
   v.bar_y = static_cast<float>(bdy);
   v.bar_r = static_cast<float>(std::hypot(bdx, bdy));
+  // Lateral containment: distance from the barycentre to the nearest active
+  // edge (negative outside). NaN without a barycentre, not the 0 of bar_*.
+  if (ptot > 0.)
+    v.barxy_min_border_distance = static_cast<float>(
+        std::min(thr.active_half_x_mm - std::abs(bdx), thr.active_half_y_mm - std::abs(bdy)));
 
   // Fractal dimension on the same positive-energy hits as the transverse moments.
   v.fractal_dimension = fractalDimension(pslab, px, py);

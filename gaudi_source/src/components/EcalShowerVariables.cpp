@@ -48,7 +48,7 @@ void appendScalars(std::vector<float>& flat, const EventVars& v) {
                v.moliere, v.transverse_rms, v.is_shower, v.shower_start, v.shower_max, v.shower_end,
                v.shower_start_10, v.shower_end_10, v.shower_length, v.first_layer, v.last_layer,
                v.n_layers_hit, v.e_over_nhit, v.shower_onset, v.n_layers_before_onset,
-               v.fractal_dimension});
+               v.fractal_dimension, v.barxy_min_border_distance});
 }
 }  // namespace
 
@@ -121,7 +121,9 @@ struct EcalShowerVariables final
                                static_cast<float>(m_showerStartFrac.value()),
                                static_cast<float>(m_showerCoreRadiusMm.value()),
                                m_showerOnsetMinNhit.value(),
-                               m_showerOnsetMinConsecutive.value()};
+                               m_showerOnsetMinConsecutive.value(),
+                               static_cast<float>(m_activeHalfSizeX.value()),
+                               static_cast<float>(m_activeHalfSizeY.value())};
     const EventVars base = computeEventVars(slab, energy, x, y, m_wOverX0, m_nLayers.value(),
                                             m_showerProfile.value(), thr,
                                             m_moliereContainment.value());
@@ -194,6 +196,11 @@ struct EcalShowerVariables final
       this, "ShowerOnsetMinConsecutive", 2,
       "is_shower: consecutive dense layers that declare the shower onset. 2 rejects a single-layer "
       "delta-ray fluctuation"};
+  Gaudi::Property<float> m_activeHalfSizeX{
+      this, "ActiveHalfSizeX", 89.09f,
+      "barxy_min_border_distance: half-size of the active area in x [mm] (outer pad centre + half pad)"};
+  Gaudi::Property<float> m_activeHalfSizeY{
+      this, "ActiveHalfSizeY", 89.09f, "barxy_min_border_distance: same in y [mm]"};
   Gaudi::Property<double> m_moliereContainment{this, "MoliereContainment", 0.90, ""};
   Gaudi::Property<std::vector<float>> m_mipThresholds{this, "MipThresholds", {0.5f, 1.0f}, ""};
   Gaudi::Property<std::string> m_cellIDEncoding{
