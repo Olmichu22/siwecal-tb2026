@@ -335,11 +335,12 @@ the `metadata` frame parameter `ECalPid_shapeParameterNames`):
 | shower_onset        | conversion layer: first of the dense run (NaN if not a shower)   |
 | n_layers_before_onset | hit layers ahead of the onset: the pre-shower track length     |
 | fractal_dimension   | shower fractal dimension, CALICE definition (see below)          |
+| barxy_min_border_distance | min(L − \|bar_x\|, L − \|bar_y\|): barycenter → active edge (mm, see below) |
 | hits_per_layer_0..14    | per-layer hit count (one float per layer)                   |
 | energy_per_layer_0..14  | per-layer Σ E (one float per layer)                         |
 | weighte_per_layer_0..14 | per-layer tungsten-weighted energy (one float per layer)    |
 
-In `--validation` mode the same 24 scalars are appended twice more, recomputed
+In `--validation` mode the same 25 scalars are appended twice more, recomputed
 after a per-hit cut, under the prefixes `mip05_` (`hit_energy ≥ 0.5`) and `mip1_`
 (`hit_energy ≥ 1.0`) — e.g. `mip05_moliere`, `mip1_is_shower`. These are the
 extra blocks knob **(B) `MipThresholds`** adds (see *"Two different 'MIP cut'
@@ -359,6 +360,17 @@ freedom: a MIP track (one pad per layer) gives exactly 1, electromagnetic
 showers well above. Same positive-energy hit set as the transverse moments.
 Python mirror: `siwecal_validation.metrics.fractal_dimension`. PID files
 written before it existed read back as NaN.
+
+#### `barxy_min_border_distance`
+
+Distance from the transverse barycenter `(bar_x, bar_y)` to the nearest edge of
+the active area, `min(L_x − |bar_x|, L_y − |bar_y|)` in mm, with
+`L = 89.09 mm` (outer pad centre 86.325 mm + half a 5.53 mm pad; properties
+`ActiveHalfSizeX/Y`). Negative outside the active area, NaN when the event has
+no positive-energy hit (where `bar_*` read 0). It is the lateral-containment
+handle: a cut such as `border_min: 40` keeps showers whose core is well inside
+the detector. Python mirror: `siwecal_validation.metrics.min_border_distance`;
+PID files written before it existed read back as NaN.
 
 #### How `is_shower` is decided
 

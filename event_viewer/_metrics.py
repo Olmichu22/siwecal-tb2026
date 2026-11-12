@@ -121,6 +121,25 @@ def barycenter_xy(x: np.ndarray, y: np.ndarray, weights: np.ndarray):
     return bx, by, float(np.hypot(bx, by))
 
 
+#: Half-size of the active area [mm]: outer pad centre (86.325) + half a
+#: 5.53 mm pad. Mirrors ShowerThresholds::active_half_{x,y}_mm in C++.
+ACTIVE_HALF_SIZE_MM = 89.09
+
+
+def min_border_distance(bar_x: float, bar_y: float,
+                        half_x: float = ACTIVE_HALF_SIZE_MM,
+                        half_y: float = ACTIVE_HALF_SIZE_MM) -> float:
+    """Distance from the barycenter to the nearest edge of the active area [mm].
+
+    ``min(half_x - |bar_x|, half_y - |bar_y|)``: negative outside the active area,
+    NaN when the barycenter is not finite (the caller passes NaN when the total
+    weight is not positive -- :func:`barycenter_xy` returns 0 there).
+    """
+    if not (np.isfinite(bar_x) and np.isfinite(bar_y)):
+        return float("nan")
+    return float(min(half_x - abs(bar_x), half_y - abs(bar_y)))
+
+
 def transverse_rms(x: np.ndarray, y: np.ndarray, weights: np.ndarray,
                    bar_x: float, bar_y: float) -> float:
     """Energy-weighted RMS hit radius about the shower axis (``bar_x, bar_y``):

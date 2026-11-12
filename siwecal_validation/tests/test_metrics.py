@@ -181,6 +181,18 @@ def test_fractal_dimension_filled_square():
     assert math.isnan(m.fractal_dimension(np.array([], int), np.array([]), np.array([])))
 
 
+
+def test_min_border_distance():
+    L = m.ACTIVE_HALF_SIZE_MM
+    assert m.min_border_distance(0.0, 0.0) == L                       # centre
+    assert abs(m.min_border_distance(-50.0, 52.0) - (L - 52.0)) < 1e-12  # nearest edge is y
+    assert abs(m.min_border_distance(80.0, -80.0) - (L - 80.0)) < 1e-12  # corner
+    assert m.min_border_distance(L, 0.0) == 0.0                         # on the edge
+    assert m.min_border_distance(L + 1.0, 0.0) < 0                      # outside
+    assert m.min_border_distance(10.0, 0.0, half_x=20.0, half_y=50.0) == 10.0
+    assert math.isnan(m.min_border_distance(float("nan"), float("nan")))  # no barycenter
+
+
 def _run_standalone():
     fns = [v for k, v in sorted(globals().items()) if k.startswith("test_")]
     for fn in fns:
